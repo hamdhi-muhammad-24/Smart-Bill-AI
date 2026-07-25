@@ -57,25 +57,7 @@ def get_pdf_bytes(invoice) -> Optional[bytes]:
     """
     if invoice.pdf_path and Path(invoice.pdf_path).exists():
         return Path(invoice.pdf_path).read_bytes()
-
-    # Lazy imports — keeps this module importable without a live DB or heavy deps
-    from app.db.base import SessionLocal
-    from app.billing import engine as billing_engine
-    from app.pdf.renderer import render_bill
-    from app.api.crud import get_bill_coords_for_invoice
-
-    db = SessionLocal()
-    try:
-        coords = get_bill_coords_for_invoice(db, invoice.id)
-        if coords is None:
-            return None
-        account_number, period_start, period_end = coords
-        bill = billing_engine.build_bill(db, account_number, period_start, period_end)
-        buf = io.BytesIO()
-        render_bill(bill, buf)
-        return buf.getvalue()
-    finally:
-        db.close()
+    return None
 
 
 def render_email_attachments(
