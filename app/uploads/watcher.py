@@ -172,6 +172,7 @@ class GmfFolderHandler(FileSystemEventHandler):
                             return
                             
                         if existing.status in (GmfUploadStatus.FAILED, GmfUploadStatus.REJECTED, GmfUploadStatus.PENDING_APPROVAL):
+                            is_approved = False
                             if is_test:
                                 new_filepath = filepath
                                 final_status = GmfUploadStatus.PENDING_APPROVAL
