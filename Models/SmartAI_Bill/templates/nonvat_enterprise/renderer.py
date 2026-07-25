@@ -40,17 +40,18 @@ class NonVATEnterpriseRenderer(BaseRenderer):
 
     def _draw_header(self, data):
         f = FONTS["header"]
-        self.text(*COORDS["telephone_number"], data["telephone_number"],
-                  size=f["size"])
-        self.text(*COORDS["account_number"],   data["account_number"],
-                  size=f["size"])
-        self.text(*COORDS["invoice_number"],   data["invoice_number"],
-                  size=f["size"])
-        self.text(*COORDS["billing_date"],     data["billing_date"],
-                  size=f["size"])
+        x, y = COORDS["telephone_number"]
+        self.text(x, y, data["telephone_number"], size=f["size"])
+        x, y = COORDS["account_number"]
+        self.text(x, y, data["account_number"], size=f["size"])
+        x, y = COORDS["invoice_number"]
+        self.text(x, y, data["invoice_number"], size=f["size"])
+        x, y = COORDS["billing_date"]
+        self.text(x, y, data["billing_date"], size=f["size"])
         period = (f"{data['billing_period_start']} - "
                   f"{data['billing_period_end']}")
-        self.text(*COORDS["billing_period"], period, size=f["size"])
+        x, y = COORDS["billing_period"]
+        self.text(x, y, period, size=f["size"])
 
     def _draw_customer(self, data):
         f = FONTS["customer_name"]
@@ -58,22 +59,22 @@ class NonVATEnterpriseRenderer(BaseRenderer):
             top = data.get("business_name") or data.get("customer_name", "")
         else:
             top = data.get("business_name") or data.get("customer_name", "")
-        self.text(*COORDS["customer_business"], top,
-                  size=f["size"], bold=f["bold"])
+        x, y = COORDS["customer_business"]
+        self.text(x, y, top, size=f["size"], bold=f["bold"])
 
         fa   = FONTS["customer_addr"]
         addr = data["address_lines"] + (
             [data["zip_code"]] if data["zip_code"] else [])
         self.multiline_block(
-            COORDS["customer_addr_x"], COORDS["customer_addr_start"],
-            addr, line_height=COORDS["customer_addr_line_h"],
+            float(COORDS["customer_addr_x"]), float(COORDS["customer_addr_start"]),
+            addr, line_height=float(COORDS["customer_addr_line_h"]),
             size=fa["size"], bold=fa["bold"],
         )
 
     def _draw_badge(self):
         f = FONTS["badge"]
-        self.text(*COORDS["badge_text"], "ENTERPRISE",
-                  size=f["size"], bold=f["bold"])
+        x, y = COORDS["badge_text"]
+        self.text(x, y, "ENTERPRISE", size=f["size"], bold=f["bold"])
 
     def _draw_generation_id(self, data):
         f   = FONTS["gen_id"]
@@ -85,58 +86,63 @@ class NonVATEnterpriseRenderer(BaseRenderer):
             due_mmddyy = ""
         ts   = datetime.now().strftime("%H:%M:%S")
         line = f'{data["source_filename"]}_{ts}{due_mmddyy}'
-        self.text(*COORDS["gen_id_line"], line, size=f["size"])
+        x, y = COORDS["gen_id_line"]
+        self.text(x, y, line, size=f["size"])
         if data.get("customer_segment"):
-            self.text(*COORDS["gen_id_line2"], data["customer_segment"],
-                      size=f["size"])
+            x2, y2 = COORDS["gen_id_line2"]
+            self.text(x2, y2, data["customer_segment"], size=f["size"])
 
     def _draw_summary_boxes(self, data):
         f = FONTS["summary_box"]
-        self.number(*COORDS["balance_bf"], data["balance_bf"],
-                    size=f["size"], align="center")
-        self.number(*COORDS["payments_received"], data["payments_received"],
-                    size=f["size"], align="center")
-        self.number(*COORDS["charges_period"], data["charges_period"],
-                    size=f["size"], align="center")
+        x, y = COORDS["balance_bf"]
+        self.number(x, y, data["balance_bf"], size=f["size"], align="center")
+        x, y = COORDS["payments_received"]
+        self.number(x, y, data["payments_received"], size=f["size"], align="center")
+        x, y = COORDS["charges_period"]
+        self.number(x, y, data["charges_period"], size=f["size"], align="center")
         f = FONTS["summary_total"]
-        self.number(*COORDS["total_payable"], data["total_payable"],
-                    size=f["size"], bold=True, align="center")
-        self.text(*COORDS["payment_due_date"], data["payment_due_date"],
-                  size=f["size"], bold=True, align="center")
+        x, y = COORDS["total_payable"]
+        self.number(x, y, data["total_payable"], size=f["size"], bold=True, align="center")
+        x, y = COORDS["payment_due_date"]
+        self.text(x, y, data["payment_due_date"], size=f["size"], bold=True, align="center")
 
     def _draw_page1_footer(self, data):
-        self.draw_static_payonline_qr(
-            *COORDS["payonline_qr"], size=COORDS["payonline_qr_size"])
+        px, py = COORDS["payonline_qr"]
+        self.draw_static_payonline_qr(px, py, size=float(COORDS["payonline_qr_size"]))
+        qx, qy = COORDS["qr_code"]
         self.draw_qr(
-            *COORDS["qr_code"],
+            qx, qy,
             account_number=data["account_number"],
             total_charges=data["total_charges"],
-            size=COORDS["qr_size"],
+            size=float(COORDS["qr_size"]),
         )
+        bx, by = COORDS["barcode"]
         self.draw_barcode(
-            *COORDS["barcode"], data["account_number"],
-            width=COORDS["barcode_width"], height=COORDS["barcode_height"],
+            bx, by, data["account_number"],
+            width=float(COORDS["barcode_width"]), height=float(COORDS["barcode_height"]),
         )
+        sx, sy = COORDS["slip_barcode"]
         self.draw_slip_barcode(
-            *COORDS["slip_barcode"],
+            sx, sy,
             bill_ref=data["invoice_number"],
             total_charges=data["total_charges"],
-            width=COORDS["slip_barcode_width"],
-            height=COORDS["slip_barcode_height"],
+            width=float(COORDS["slip_barcode_width"]),
+            height=float(COORDS["slip_barcode_height"]),
         )
         f = FONTS["slip"]
-        self.text(*COORDS["slip_telephone"], data["telephone_number"],
-                  size=f["size"])
-        self.text(*COORDS["slip_invoice"],   data["invoice_number"],
-                  size=f["size"])
+        x, y = COORDS["slip_telephone"]
+        self.text(x, y, data["telephone_number"], size=f["size"])
+        x, y = COORDS["slip_invoice"]
+        self.text(x, y, data["invoice_number"], size=f["size"])
         slip_name = (
             data.get("business_name")
             if data.get("address_name_not_required")
             else (data.get("business_name") or data.get("customer_name", ""))
         )
-        self.text(*COORDS["slip_customer"], slip_name or "", size=f["size"])
-        self.text(*COORDS["slip_account"],  data["account_number"],
-                  size=f["size"])
+        x, y = COORDS["slip_customer"]
+        self.text(x, y, slip_name or "", size=f["size"])
+        x, y = COORDS["slip_account"]
+        self.text(x, y, data["account_number"], size=f["size"])
 
     def _draw_charges(self, product_labels):
         y      = CHARGES_TABLE["page1_y_start"]
@@ -237,12 +243,12 @@ class NonVATEnterpriseRenderer(BaseRenderer):
             return
         c      = self.canvases[0][1]
         f      = FONTS["payments"]
-        hx     = COORDS["payments_header_x"]
-        hy     = COORDS["payments_header_y"]
-        rx     = COORDS["payments_row_x"]
-        y      = COORDS["payments_row_start_y"]
-        ax     = COORDS["payments_amount_x"]
-        line_h = COORDS["payments_line_h"]
+        hx     = float(COORDS["payments_header_x"])
+        hy     = float(COORDS["payments_header_y"])
+        rx     = float(COORDS["payments_row_x"])
+        y      = float(COORDS["payments_row_start_y"])
+        ax     = float(COORDS["payments_amount_x"])
+        line_h = float(COORDS["payments_line_h"])
 
         c.setFont("Helvetica-Bold", f["size"])
         c.drawString(hx, hy, "Details of Payments Received")
@@ -255,7 +261,7 @@ class NonVATEnterpriseRenderer(BaseRenderer):
             c.drawRightString(ax, y, f"{p['amount']:,.2f}")
             y -= line_h
         c.setFont("Helvetica-Bold", f["size"])
-        c.drawString(rx, y, COORDS["payments_total_label"])
+        c.drawString(rx, y, str(COORDS["payments_total_label"]))
         c.drawRightString(ax, y, f"{data['total_payments']:,.2f}")
         self._payments_end_y = y - line_h
 
@@ -265,11 +271,11 @@ class NonVATEnterpriseRenderer(BaseRenderer):
             return
         c      = self.canvases[0][1]
         f      = FONTS["payments"]
-        rx     = COORDS["payments_row_x"]
-        ax     = COORDS["payments_amount_x"]
-        line_h = COORDS["payments_line_h"]
-        y      = getattr(self, '_payments_end_y',
-                         COORDS["payments_row_start_y"] - line_h * 2)
+        rx     = float(COORDS["payments_row_x"])
+        ax     = float(COORDS["payments_amount_x"])
+        line_h = float(COORDS["payments_line_h"])
+        start_y = float(COORDS["payments_row_start_y"])
+        y      = float(getattr(self, '_payments_end_y', start_y - line_h * 2))
 
         c.setFont("Helvetica-Bold", f["size"])
         c.drawString(rx, y, "Cancel Payment")
