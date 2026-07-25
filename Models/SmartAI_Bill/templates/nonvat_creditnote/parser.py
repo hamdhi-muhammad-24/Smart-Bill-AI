@@ -2,6 +2,7 @@
 import re
 import os
 import datetime
+from typing import Any
 
 
 def parse_nonvat_creditnote(file_path):
@@ -20,8 +21,17 @@ def parse_nonvat_creditnote(file_path):
 
 
 
-    data = {
+    summary: dict[str, str] = {
+        "balance_bf": "0.00",
+        "payments_received": "0.00",
+        "arrears": "0.00",
+        "adjustment_value": "0.00",
+        "total_payable": "0.00"
+    }
 
+    adjustments: list[dict] = []
+
+    data: dict[str, Any] = {
         # Header
         "account_number": "",
         "invoice_number": "",
@@ -29,11 +39,8 @@ def parse_nonvat_creditnote(file_path):
         "bill_period": "",
         "acc_currency_code": "",
 
-
         # Barcode
         "barcode": "",
-
-
 
         # Address
         "address_line1": "",
@@ -47,38 +54,20 @@ def parse_nonvat_creditnote(file_path):
         "address_line9": "",
         "address_line10": "",
 
-
-
         # VAT lines
         "below_address_line1": "",
         "below_address_line2": "",
-
-
 
         # Extra lines
         "header_extra_line1": "",
         "header_extra_line2": "",
 
-
-
         # Summary
-        "summary": {
-
-            "balance_bf": "0.00",
-            "payments_received": "0.00",
-            "arrears": "0.00",
-            "adjustment_value": "0.00",
-            "total_payable": "0.00"
-
-        },
-
-
+        "summary": summary,
         "charge_for_period": "0.00",
 
-
         # Adjustment rows
-        "adjustments": []
-
+        "adjustments": adjustments
     }
 
 
