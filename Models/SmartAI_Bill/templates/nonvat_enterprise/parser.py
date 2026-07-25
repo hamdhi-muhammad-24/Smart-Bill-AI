@@ -1,6 +1,7 @@
 """NonVAT Enterprise parser (Sheet 19)."""
 import os
 import re
+from typing import Any
 
 from core.bill_common import (
     to_float, strip_before_underscore, apply_label_override,
@@ -18,7 +19,7 @@ _GROUPSUBTOTAL_RE = re.compile(r'^ITEMGROUPSUBTOTAL_(\d+)_(\d+)$')
 
 
 def parse_nonvat_enterprise(file_path: str) -> dict:
-    data = {
+    data: dict[str, Any] = {
         "telephone_number":      "",
         "account_number":        "",
         "invoice_number":        "",
@@ -64,14 +65,14 @@ def parse_nonvat_enterprise(file_path: str) -> dict:
     phone_finder  = PhoneNumberFromNoSubRefBlock()
 
     with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
-        current_product          = None
-        usage_sections           = {}
-        current_item_id          = None
-        current_subsection       = None
-        pending_subsection_label = None
-        last_closed_subsection   = None
-        in_promo_group           = False
-        current_promo_product    = None
+        current_product: dict[str, Any] | None = None
+        usage_sections: dict[str, Any]         = {}
+        current_item_id                        = None
+        current_subsection: dict[str, Any] | None = None
+        pending_subsection_label               = None
+        last_closed_subsection: dict[str, Any] | None = None
+        in_promo_group                         = False
+        current_promo_product: dict[str, Any] | None  = None
 
         for line in f:
             line = line.strip()
