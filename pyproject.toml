@@ -42,6 +42,9 @@ dependencies = [
     "watchdog>=6.0.0",
     "apscheduler>=3.11.3",
     "pymupdf>=1.24.0",
+    "pandas>=3.0.5",
+    "xlrd>=2.0.2",
+    "openpyxl>=3.1.5",
 ]
 
 [project.optional-dependencies]
@@ -59,4 +62,8 @@ include = ["app*"]
 testpaths = ["tests"]
 
 [tool.pyright]
-extraPaths = ["Models/SmartAI_Bill"]
+venvPath = "."
+venv = ".venv"
+extraPaths = [".", "Models/SmartAI_Bill"]
+
+
