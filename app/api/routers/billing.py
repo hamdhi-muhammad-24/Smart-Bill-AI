@@ -290,32 +290,23 @@ def get_pending_batches(
     _: UserOut = Depends(require_admin),
 ):
     """Group approved GMF files into one batch per cycle (excluding Test GMFs) for manual runs."""
-    # Check if we are in auto mode
-    setting = db.query(SystemSetting).filter(SystemSetting.key == "billing_mode").first()
-    billing_mode = setting.value if setting else "auto"
-    if billing_mode == "auto":
-        return []
-        
-    pending_uploads = db.query(GmfUpload).join(
-        InvoiceTemplate,
-        GmfUpload.template_detected == InvoiceTemplate.template_code
-    ).filter(
+    pending_uploads = db.query(GmfUpload).filter(
         GmfUpload.status == GmfUploadStatus.APPROVED,
         GmfUpload.folder_type != "Test_GMFs",
-        InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED
+        GmfUpload.billing_run_id.is_(None)
     ).order_by(GmfUpload.detected_at.asc()).all()
 
     cycles = {}
     dates = {}
     for upload in pending_uploads:
-        c = upload.cycle_number or 0
+        c = upload.cycle_number or 1
         if c not in cycles:
             cycles[c] = []
             dates[c] = upload.detected_at.strftime("%Y-%m-%d")
         cycles[c].append(upload.id)
         
     batches = []
-    for c, upload_ids in cycles.items():
+    for c, upload_ids in sorted(cycles.items()):
         batches.append({
             "cycle_number": c,
             "date": dates[c],

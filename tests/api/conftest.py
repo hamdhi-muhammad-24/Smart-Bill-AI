@@ -17,10 +17,13 @@ def _test_admin() -> UserOut:
     )
 
 
+from unittest.mock import patch
+
 @pytest.fixture(scope="session")
 def client() -> TestClient:
     app.dependency_overrides[get_current_user] = _test_admin
     app.dependency_overrides[require_admin] = _test_admin
-    with TestClient(app, headers={"Authorization": "Bearer test-admin-token"}) as c:
-        yield c
+    with patch("app.auth.dependencies.azure_scheme.openid_config.load_config"):
+        with TestClient(app, headers={"Authorization": "Bearer test-admin-token"}) as c:
+            yield c
     app.dependency_overrides.clear()

@@ -3,9 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.errors import register_exception_handlers
-from app.api.routers import billing, health
+from app.api.routers import billing, health, users
 from app.auth.router import router as auth_router
 from app.billing_scheduler import start_scheduler
+
+from app.auth.dependencies import azure_scheme
 
 def create_app() -> FastAPI:
     application = FastAPI(
@@ -25,11 +27,13 @@ def create_app() -> FastAPI:
     application.include_router(auth_router)
     application.include_router(billing.router)
     application.include_router(health.router)
+    application.include_router(users.router)
 
     register_exception_handlers(application)
     
     @application.on_event("startup")
     async def startup_event():
+        await azure_scheme.openid_config.load_config()
         start_scheduler()
         
     return application
