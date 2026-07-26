@@ -10,7 +10,6 @@ import sys
 from sqlalchemy.orm import Session
 
 from app.auth.models import User
-from app.auth.security import hash_password
 from app.core.logging import configure_logging, get_logger
 from app.db.base import SessionLocal
 from app.db.models import UserRole
@@ -25,7 +24,6 @@ def seed_admin(session: Session) -> None:
         log.info(f"Creating default admin user: {admin_email}")
         admin = User(
             email=admin_email,
-            password_hash=hash_password("admin123"),
             role=UserRole.ADMIN,
             is_active=True,
         )
@@ -33,19 +31,31 @@ def seed_admin(session: Session) -> None:
     else:
         log.info(f"Admin user {admin_email} already exists.")
 
-    admin1_email = "admin1@slt.lk"
-    admin1 = session.query(User).filter(User.email == admin1_email).first()
-    if not admin1:
-        log.info(f"Creating default admin1 user: {admin1_email}")
-        admin1 = User(
-            email=admin1_email,
-            password_hash=hash_password("admin1123"),
-            role=UserRole.ADMIN1,
+    gmf_email = "gmf@slt.lk"
+    gmf = session.query(User).filter(User.email == gmf_email).first()
+    if not gmf:
+        log.info(f"Creating default GMF Handler user: {gmf_email}")
+        gmf = User(
+            email=gmf_email,
+            role=UserRole.GMF_HANDLER,
             is_active=True,
         )
-        session.add(admin1)
+        session.add(gmf)
     else:
-        log.info(f"Admin1 user {admin1_email} already exists.")
+        log.info(f"GMF Handler user {gmf_email} already exists.")
+
+    manager_email = "manager@slt.lk"
+    manager = session.query(User).filter(User.email == manager_email).first()
+    if not manager:
+        log.info(f"Creating default Manager user: {manager_email}")
+        manager = User(
+            email=manager_email,
+            role=UserRole.MANAGER,
+            is_active=True,
+        )
+        session.add(manager)
+    else:
+        log.info(f"Manager user {manager_email} already exists.")
         
     session.commit()
 

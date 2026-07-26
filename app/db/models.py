@@ -21,7 +21,8 @@ from sqlalchemy.orm import relationship
 
 class UserRole(enum.Enum):
     ADMIN = "ADMIN"
-    ADMIN1 = "ADMIN1"
+    GMF_HANDLER = "GMF_HANDLER"
+    MANAGER = "MANAGER"
     CUSTOMER = "CUSTOMER"
 
 class TemplateCategory(enum.Enum):
@@ -90,7 +91,6 @@ class User(Base):
 
     id            = Column(BigInteger, Identity(always=True), primary_key=True)
     email         = Column(Text, nullable=False, unique=True)
-    password_hash = Column(Text, nullable=False)
     role          = Column(Enum(UserRole, name="user_role"), nullable=False, default=UserRole.CUSTOMER)
     is_active     = Column(Boolean, nullable=False, default=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
