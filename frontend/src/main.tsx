@@ -34,18 +34,23 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   }
 }
 
+import { MsalProvider } from '@azure/msal-react'
+import { msalInstance } from './auth/msalConfig'
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <BrowserRouter>
-          <AuthProvider>
-            <ErrorBoundary>
-              <App />
-            </ErrorBoundary>
-          </AuthProvider>
-        </BrowserRouter>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <MsalProvider instance={msalInstance}>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <BrowserRouter>
+            <AuthProvider>
+              <ErrorBoundary>
+                <App />
+              </ErrorBoundary>
+            </AuthProvider>
+          </BrowserRouter>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </MsalProvider>
   </StrictMode>,
 )

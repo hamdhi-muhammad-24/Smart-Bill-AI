@@ -73,32 +73,40 @@ export interface LoginResponse {
 export interface MeResponse {
   id: number
   email: string
-  role: 'ADMIN' | 'ADMIN1' | 'CUSTOMER'
+  role: 'ADMIN' | 'GMF_HANDLER' | 'MANAGER' | 'CUSTOMER' | 'ADMIN1'
   customer_id: number | null
 }
 
-export async function authLogin(email: string, password: string): Promise<LoginResponse> {
-  const body = new URLSearchParams({ username: email, password })
-  const res = await fetch(`${BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  })
-  if (!res.ok) {
-    let detail = res.statusText
-    try {
-      const json = (await res.json()) as { detail: string }
-      if (json.detail) detail = json.detail
-    } catch {
-      // ignore
-    }
-    throw new ApiError(res.status, detail)
-  }
-  return res.json() as Promise<LoginResponse>
-}
 
 export function authMe(): Promise<MeResponse> {
   return request('/auth/me')
+}
+
+// --- User Management Endpoints ---
+
+export interface UserOut {
+  id: number
+  email: string
+  role: 'ADMIN' | 'GMF_HANDLER' | 'MANAGER' | 'CUSTOMER'
+  is_active: boolean
+  created_at?: string
+}
+
+export function getUsers(): Promise<UserOut[]> {
+  return request('/users')
+}
+
+export function createUser(data: { email: string; role: string; is_active?: boolean }): Promise<UserOut> {
+  return request('/users', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteUser(id: number): Promise<void> {
+  return request(`/users/${id}`, {
+    method: 'DELETE',
+  })
 }
 
 // --- Billing / GMF Endpoints ---
