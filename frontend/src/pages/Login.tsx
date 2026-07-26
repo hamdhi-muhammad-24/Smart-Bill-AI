@@ -1,97 +1,92 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
   ArrowRight,
-  Eye,
-  EyeOff,
   ShieldCheck,
   Zap,
-  Mail,
-  Lock,
   Moon,
   Sun
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useAuth } from '../auth/AuthProvider'
-import { authLogin, authMe, setToken, clearToken } from '../lib/api'
+import { authMe, setToken, clearToken } from '../lib/api'
 import Brand from '../components/Brand'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import { useMsal } from '@azure/msal-react'
+import { loginRequest } from '../auth/msalConfig'
 
-const ROLE_HOME = { admin: '/admin', admin1: '/admin1', customer: '/app' } as const
+const ROLE_HOME = { admin: '/admin', gmf_handler: '/gmf-handler', manager: '/manager', customer: '/app' } as const
 
 export default function Login() {
   const { session, isChecking, login } = useAuth()
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [showPassword, setShowPassword] = useState(false)
+  const { instance } = useMsal()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   if (isChecking) return null
   if (session) return <Navigate to={ROLE_HOME[session.role]} replace />
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
+  async function handleMicrosoftLogin() {
     setError(null)
     setLoading(true)
     try {
-      const { access_token } = await authLogin(email, password)
-      setToken(access_token)
-      const me = await authMe()
-      const role = me.role === 'ADMIN' ? 'admin' : me.role === 'ADMIN1' ? 'admin1' : 'customer'
+      const response = await instance.loginPopup(loginRequest)
+      if (response && response.accessToken) {
+        setToken(response.accessToken)
+        const me = await authMe()
+        const r = me.role.toUpperCase()
 
-      if (role !== 'admin' && role !== 'admin1') {
-        clearToken()
-        setError('These credentials are not authorised for staff access.')
-        return
+        let role: 'admin' | 'gmf_handler' | 'manager' | 'customer' = 'customer'
+        if (r === 'ADMIN') role = 'admin'
+        else if (r === 'MANAGER') role = 'manager'
+        else if (r === 'GMF_HANDLER' || r === 'ADMIN1') role = 'gmf_handler'
+
+        if (role === 'customer') {
+          clearToken()
+          setError('These credentials are not authorised for staff access.')
+          return
+        }
+
+        const nextSession = { role }
+        login(nextSession)
+        navigate(ROLE_HOME[role], { replace: true })
       }
-
-      const nextSession =
-        role === 'admin1'
-          ? { role: 'admin1' as const }
-          : { role: 'admin' as const }
-      login(nextSession)
-      navigate(role === 'admin1' ? '/admin1' : '/admin', { replace: true })
     } catch (err: any) {
-      console.error("Login error:", err)
-      setError(err?.detail || err?.message || 'Login failed. Please verify your credentials and try again.')
+      console.error("MSAL Login error:", err)
+      setError(err?.message || 'Authentication failed or was cancelled.')
     } finally {
       setLoading(false)
     }
   }
 
+  function handleDevLogin(targetRole: 'admin' | 'gmf_handler' | 'manager') {
+    const devToken = `dev-${targetRole}-token`
+    setToken(devToken)
+    login({ role: targetRole })
+    navigate(ROLE_HOME[targetRole], { replace: true })
+  }
+
   return (
     <main className="min-h-svh w-full flex bg-background selection:bg-[#0066b3]/20 selection:text-[#0066b3]">
-
-      {/* Left Panel: SLT-MOBITEL Premium Branding */}
       <div className="relative hidden lg:flex flex-1 flex-col overflow-hidden bg-slate-950">
-        {/* Elegant Animated Gradient Orbs */}
         <div className="absolute inset-0 z-0">
           <div className="absolute -left-[10%] top-[10%] h-[700px] w-[700px] rounded-full bg-[#0066b3]/30 blur-[140px] animate-pulse [animation-duration:15s]" />
           <div className="absolute right-[0%] top-[30%] h-[600px] w-[600px] rounded-full bg-[#00a651]/20 blur-[130px] animate-pulse [animation-duration:12s] [animation-delay:2s]" />
           <div className="absolute -bottom-[20%] left-[30%] h-[800px] w-[800px] rounded-full bg-[#00b2e3]/20 blur-[150px] animate-pulse [animation-duration:18s] [animation-delay:4s]" />
         </div>
-
-        {/* Fixed Brand Logo exactly matching Admin Sidebar Top-Left alignment */}
         <div className="absolute top-0 left-0 w-full h-16 flex items-center px-8 z-20">
           <Brand size="md" tone="dark" className="text-white drop-shadow-md" />
         </div>
-
-        {/* Value Proposition Content (Perfectly Centered) */}
         <div className="relative z-10 flex h-full w-full flex-col justify-center px-10 xl:px-16 pt-10">
           <div className="max-w-xl xl:max-w-2xl">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[13px] font-bold tracking-wide text-white shadow-sm backdrop-blur-md mb-8">
               <ShieldCheck size={16} className="text-[#00b2e3]" />
               SLT-MOBITEL SECURE GATEWAY
             </div>
-
             <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl xl:text-6xl leading-[1.15]">
               AI-Powered <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00b2e3] to-[#00a651]">
@@ -101,7 +96,6 @@ export default function Login() {
             <p className="mt-8 text-lg font-medium leading-relaxed text-slate-300">
               Access the centralized SLT-MOBITEL billing environment. Manage massive GMF batch cycles securely, verify generated statements, and monitor the automated pipeline in real-time.
             </p>
-
             <div className="mt-12 flex items-center gap-8">
               <div className="flex items-center gap-4">
                 <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white backdrop-blur-sm border border-white/10 shadow-lg">
@@ -112,25 +106,20 @@ export default function Login() {
                   <p className="text-[13px] font-medium text-slate-400">Process millions of records</p>
                 </div>
               </div>
-
               <div className="flex items-center gap-4">
                 <div className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-white/10 text-white backdrop-blur-sm border border-white/10 shadow-lg">
                   <ShieldCheck size={26} className="text-[#00a651]" />
                 </div>
                 <div>
                   <p className="text-[15px] font-bold text-white">Bank-Grade Security</p>
-                  <p className="text-[13px] font-medium text-slate-400">AES-256 Encrypted Storage</p>
+                  <p className="text-[13px] font-medium text-slate-400">Microsoft Entra ID SSO</p>
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
-
-      {/* Right Panel: Clean, High-Contrast Form */}
       <div className="relative flex w-full flex-col bg-background lg:w-[500px] xl:w-[650px] lg:shrink-0">
-
-        {/* Navigation Header - Matches Admin Top Nav Bar Height & Padding */}
         <div className="absolute top-0 left-0 w-full h-16 px-6 sm:px-8 flex justify-between items-center z-20">
           <div className="lg:hidden">
             <Brand size="md" />
@@ -155,82 +144,19 @@ export default function Login() {
             </Button>
           </div>
         </div>
-
-        {/* Subtle background glow for mobile */}
         <div className="absolute inset-0 z-0 lg:hidden overflow-hidden">
           <div className="absolute -top-[10%] right-[0%] h-[500px] w-[500px] rounded-full bg-[#0066b3]/5 blur-[100px]" />
           <div className="absolute bottom-[0%] left-[0%] h-[500px] w-[500px] rounded-full bg-[#00a651]/5 blur-[100px]" />
         </div>
-
-        {/* Form Container */}
         <div className="relative z-10 flex h-full w-full flex-col justify-center px-6 sm:px-12 xl:px-20 pt-28 lg:pt-0">
-
           <div className="flex flex-col space-y-2 mb-10">
-            <h2 className="text-3xl font-extrabold tracking-tight text-foreground">Staff Login</h2>
+            <h2 className="text-3xl font-extrabold tracking-tight text-foreground">Staff SSO Login</h2>
             <p className="text-[15px] font-medium text-muted-foreground">
-              Sign in to access the SLT-MOBITEL billing environment.
+              Sign in with your SLT-MOBITEL Microsoft Entra ID account to access the billing environment.
             </p>
           </div>
-
-          <form onSubmit={handleSubmit} className="grid gap-7">
-            <div className="grid gap-2.5">
-              <Label htmlFor="email" className="text-[14px] font-bold text-foreground">
-                Email address
-              </Label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-muted-foreground pointer-events-none">
-                  <Mail size={18} />
-                </div>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="username"
-                  required
-                  placeholder="admin@slt.lk"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="h-14 pl-12 pr-4 text-[15px] bg-background border-border shadow-sm focus-visible:ring-2 focus-visible:border-[#0066b3] focus-visible:ring-[#0066b3]/20 rounded-xl transition-all placeholder:text-muted-foreground/60 font-medium"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-2.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="text-[14px] font-bold text-foreground">
-                  Password
-                </Label>
-                <a
-                  href="mailto:support@slt.lk?subject=Billing%20portal%20password%20help"
-                  className="text-[13px] font-bold text-[#0066b3] dark:text-[#66c2ff] hover:underline"
-                >
-                  Forgot password?
-                </a>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-4 text-muted-foreground pointer-events-none">
-                  <Lock size={18} />
-                </div>
-                <Input
-                  id="password"
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  required
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="h-14 pl-12 pr-12 text-[15px] bg-background border-border shadow-sm focus-visible:ring-2 focus-visible:border-[#0066b3] focus-visible:ring-[#0066b3]/20 rounded-xl transition-all placeholder:text-muted-foreground/60 font-medium"
-                />
-                <button
-                  type="button"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  onClick={() => setShowPassword((value) => !value)}
-                  className="absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-xl text-muted-foreground transition-all hover:bg-muted hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
+          
+          <div className="grid gap-7">
             {error && (
               <div className="flex gap-3 rounded-xl border border-destructive/20 bg-destructive/10 px-4 py-4 mt-2">
                 <AlertCircle size={20} className="mt-0.5 shrink-0 text-destructive" />
@@ -239,26 +165,59 @@ export default function Login() {
                 </p>
               </div>
             )}
-
             <Button
-              type="submit"
-              className="mt-4 h-14 w-full bg-gradient-to-r from-[#0066b3] to-[#00b2e3] hover:opacity-90 font-extrabold text-[16px] text-white shadow-lg shadow-[#0066b3]/25 active:scale-[0.98] border-none transition-all duration-300 rounded-xl group"
+              onClick={handleMicrosoftLogin}
+              className="h-16 w-full bg-gradient-to-r from-[#0066b3] to-[#00b2e3] hover:opacity-90 font-extrabold text-[16px] text-white shadow-lg shadow-[#0066b3]/25 active:scale-[0.98] border-none transition-all duration-300 rounded-xl group"
               disabled={loading}
             >
               {loading ? (
                 <span className="flex items-center gap-3">
                   <span className="size-5 animate-spin rounded-full border-[3px] border-white/30 border-t-white" />
-                  Authenticating...
+                  Connecting to Microsoft...
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-3 w-full px-2 tracking-wide">
-                  Secure Login
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21" className="size-6 fill-white"><path d="M10 0H0v10h10V0zM21 0H11v10h10V0zM10 11H0v10h10V11zM21 11H11v10h10V11z"/></svg>
+                  Login with Microsoft
                   <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" />
                 </span>
               )}
             </Button>
-          </form>
+          </div>
 
+          {/* 1-Click Dev Test Switch */}
+          <div className="mt-8 rounded-2xl border border-dashed border-border/80 bg-muted/30 p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                <Zap size={14} className="text-[#00a651]" /> 1-Click Dev Test Switch
+              </span>
+              <span className="text-[10px] font-bold bg-[#00a651]/15 text-[#00a651] px-2 py-0.5 rounded-full">DEV MODE</span>
+            </div>
+            <p className="text-xs text-muted-foreground font-medium">Test any portal instantly without needing a Microsoft account:</p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => handleDevLogin('admin')}
+                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+              >
+                Admin Portal
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDevLogin('gmf_handler')}
+                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+              >
+                GMF Portal
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDevLogin('manager')}
+                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+              >
+                Manager Portal
+              </button>
+            </div>
+          </div>
           <p className="mt-12 text-center text-[13px] font-medium text-muted-foreground leading-relaxed">
             Secured by SLT-MOBITEL Enterprise Gateway. <br className="hidden sm:block" /> By signing in, you agree to our <a href="#" className="text-foreground font-bold hover:text-[#0066b3] transition-colors">Terms of Service</a> & <a href="#" className="text-foreground font-bold hover:text-[#0066b3] transition-colors">Privacy Policy</a>.
           </p>

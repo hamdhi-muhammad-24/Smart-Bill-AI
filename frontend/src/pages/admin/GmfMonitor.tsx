@@ -55,7 +55,7 @@ export default function GmfMonitor() {
   const queryClient = useQueryClient()
   const { session } = useAuth()
   const [showCompleted, setShowCompleted] = useState(false)
-  const canManageUploads = session?.role === 'admin1'
+  const canManageUploads = session?.role === 'gmf_handler' || (session?.role as string) === 'admin1'
 
   const { data: uploads, isLoading } = useQuery({
     queryKey: ['billing-uploads'],

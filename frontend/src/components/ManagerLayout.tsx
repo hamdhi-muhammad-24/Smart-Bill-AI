@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, LogOut, Moon, Sun, FileSearch, Upload } from 'lucide-react'
+import { Menu, LogOut, Moon, Sun, Users } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/AuthProvider'
@@ -20,9 +20,7 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/gmf-handler',                   label: 'Overview',          icon: LayoutDashboard, end: true,  pill: 'bg-indigo-400/15 text-indigo-200' },
-  { to: '/gmf-handler/gmf-monitor',       label: 'GMF Monitor',       icon: FileSearch,      end: false, pill: 'bg-cyan-400/15 text-cyan-200' },
-  { to: '/gmf-handler/upload-center',     label: 'Upload Center',     icon: Upload,          end: false, pill: 'bg-emerald-400/15 text-emerald-200' },
+  { to: '/manager', label: 'User Directory', icon: Users, end: true, pill: 'bg-emerald-400/15 text-emerald-200' },
 ]
 
 function SidebarNav({ onNav }: { onNav?: () => void }) {
@@ -58,7 +56,7 @@ function SidebarNav({ onNav }: { onNav?: () => void }) {
 }
 
 function SidebarFrame({ email, onNav }: { email?: string; onNav?: () => void }) {
-  const initials = email ? email.slice(0, 2).toUpperCase() : 'A1'
+  const initials = email ? email.slice(0, 2).toUpperCase() : 'MGR'
 
   return (
     <div className="flex flex-col h-full bg-sidebar text-sidebar-foreground">
@@ -68,18 +66,17 @@ function SidebarFrame({ email, onNav }: { email?: string; onNav?: () => void }) 
 
       <SidebarNav onNav={onNav} />
 
-      {/* Avatar badge at bottom */}
       <div className="shrink-0 border-t border-sidebar-border p-3">
         <div className="flex items-center gap-2.5 px-1 py-1">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-white/10 text-xs font-semibold text-white ring-1 ring-white/10">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-emerald-500/20 text-xs font-semibold text-emerald-300 ring-1 ring-emerald-500/30">
             {initials}
           </div>
           <div className="flex flex-col min-w-0">
             <span className="text-xs font-medium text-sidebar-foreground truncate">
-              {email ?? 'Billing Operator'}
+              {email ?? 'User Manager'}
             </span>
-            <span className="mt-1 inline-flex w-fit items-center rounded-full bg-indigo-400/15 px-2 py-px text-[10px] font-medium text-indigo-200">
-              Billing Operator
+            <span className="mt-1 inline-flex w-fit items-center rounded-full bg-emerald-400/15 px-2 py-px text-[10px] font-medium text-emerald-300">
+              User Manager Portal
             </span>
           </div>
         </div>
@@ -88,7 +85,7 @@ function SidebarFrame({ email, onNav }: { email?: string; onNav?: () => void }) 
   )
 }
 
-export default function Admin1Layout() {
+export default function ManagerLayout() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { logout } = useAuth()
   const navigate = useNavigate()
@@ -107,16 +104,13 @@ export default function Admin1Layout() {
 
   return (
     <div className="flex h-svh bg-background relative overflow-hidden">
-      {/* Decorative gradient blobs for a premium modern feel */}
-      <div className="absolute top-0 right-1/4 w-[500px] h-[500px] rounded-full bg-blue-500/5 dark:bg-blue-500/10 blur-3xl pointer-events-none -z-10" />
-      <div className="absolute bottom-10 left-1/3 w-[600px] h-[600px] rounded-full bg-cyan-500/5 dark:bg-cyan-500/10 blur-3xl pointer-events-none -z-10" />
+      <div className="absolute top-0 right-1/4 w-[500px] h-[500px] rounded-full bg-emerald-500/5 dark:bg-emerald-500/10 blur-3xl pointer-events-none -z-10" />
+      <div className="absolute bottom-10 left-1/3 w-[600px] h-[600px] rounded-full bg-teal-500/5 dark:bg-teal-500/10 blur-3xl pointer-events-none -z-10" />
 
-      {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 flex-col border-r border-sidebar-border md:flex relative z-10">
         <SidebarFrame email={me?.email} />
       </aside>
 
-      {/* Mobile sidebar sheet */}
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent side="left" className="w-64 p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
@@ -124,9 +118,7 @@ export default function Admin1Layout() {
         </SheetContent>
       </Sheet>
 
-      {/* Main column */}
       <div className="flex flex-col flex-1 min-w-0">
-        {/* Top bar */}
         <header className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-card px-5 shadow-sm">
           <Button
             variant="ghost"
@@ -139,8 +131,8 @@ export default function Admin1Layout() {
           </Button>
 
           <div className="hidden flex-col leading-tight sm:flex">
-            <span className="text-sm font-semibold">SLT-MOBITEL Billing Upload Console</span>
-            <span className="text-xs text-muted-foreground">This portal for file uploads and monitoring</span>
+            <span className="text-sm font-semibold">User Management Portal</span>
+            <span className="text-xs text-muted-foreground">Provision staff accounts and manage system role permissions</span>
           </div>
 
           <span className="flex-1" />
@@ -168,7 +160,6 @@ export default function Admin1Layout() {
           </Button>
         </header>
 
-        {/* Content container */}
         <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-background">
           <Outlet />
         </main>

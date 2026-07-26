@@ -15,6 +15,8 @@ import ActivityLog from './pages/admin/ActivityLog'
 import InvoiceTemplates from './pages/admin/InvoiceTemplates'
 import Admin1Dashboard from './pages/admin/Admin1Dashboard'
 import UploadCenter from './pages/admin/UploadCenter'
+import ManagerLayout from './components/ManagerLayout'
+import ManagerDashboard from './pages/admin/ManagerDashboard'
 import { ThemeProvider } from './components/ThemeProvider'
 
 export default function App() {
@@ -24,6 +26,7 @@ export default function App() {
         <Route index element={<PublicPortal />} />
         <Route path="/login" element={<Login />} />
 
+        {/* System Administration Console */}
         <Route element={<RequireRole role="admin" />}>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<Dashboard />} />
@@ -36,11 +39,19 @@ export default function App() {
           </Route>
         </Route>
 
-        <Route element={<RequireRole role="admin1" />}>
-          <Route path="/admin1" element={<Admin1Layout />}>
+        {/* GMF Handler Operations Portal */}
+        <Route element={<RequireRole role="gmf_handler" />}>
+          <Route path="/gmf-handler" element={<Admin1Layout />}>
             <Route index element={<Admin1Dashboard />} />
             <Route path="gmf-monitor" element={<GmfMonitor />} />
             <Route path="upload-center" element={<UploadCenter />} />
+          </Route>
+        </Route>
+
+        {/* User Management Portal */}
+        <Route element={<RequireRole role="manager" />}>
+          <Route path="/manager" element={<ManagerLayout />}>
+            <Route index element={<ManagerDashboard />} />
           </Route>
         </Route>
 

@@ -31,10 +31,10 @@ const navLinks = [
 const actionCards = [
   {
     icon: Zap,
-    title: 'Billing Operations Console',
-    description: 'For billing operators and staff to upload GMF files, manage processing queues, and monitor cycle batches in real-time.',
-    cta: 'Enter Operations Portal',
-    helper: 'Operations Staff',
+    title: 'GMF Operations Portal',
+    description: 'For GMF handlers to securely upload files, monitor detection queues, and manage processing batches.',
+    cta: 'Enter GMF Portal',
+    helper: 'gmf@slt.com.lk',
     path: 'signin' as const,
     accentClass: 'from-blue-600 to-cyan-500',
     iconClass: 'bg-gradient-to-br from-[#0066b3] to-[#00b2e3] text-white shadow-[0_12px_30px_rgba(0,102,179,0.35)]',
@@ -42,14 +42,25 @@ const actionCards = [
   },
   {
     icon: LockKeyhole,
-    title: 'System Administration Console',
-    description: 'For administrators to manage billing templates, configure processing schedules, monitor logs, and manage system parameters.',
+    title: 'System Administration',
+    description: 'For system administrators to generate billing cycles, design templates, and configure engine parameters.',
     cta: 'Enter Admin Console',
-    helper: 'System Admin',
+    helper: 'admin@slt.com.lk',
     path: 'signin' as const,
     accentClass: 'from-slate-800 to-slate-900 dark:from-slate-200 dark:to-slate-400',
     iconClass: 'bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-200 dark:to-slate-400 text-white dark:text-slate-900 shadow-[0_12px_30px_rgba(51,65,85,0.35)] dark:shadow-[0_12px_30px_rgba(255,255,255,0.15)]',
     buttonClass: 'bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-200 dark:to-slate-300 text-white dark:text-slate-900 shadow-lg hover:shadow-slate-500/25 dark:hover:shadow-white/20 hover:-translate-y-0.5',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'User Management Portal',
+    description: 'For user managers to provision new staff access, manage user roles, and monitor system activity logs.',
+    cta: 'Enter Manager Portal',
+    helper: 'manager@slt.com.lk',
+    path: 'signin' as const,
+    accentClass: 'from-emerald-600 to-teal-500',
+    iconClass: 'bg-gradient-to-br from-[#00a651] to-teal-500 text-white shadow-[0_12px_30px_rgba(0,166,81,0.35)]',
+    buttonClass: 'bg-gradient-to-r from-[#00a651] to-teal-500 text-white shadow-lg hover:shadow-[#00a651]/25 hover:-translate-y-0.5',
   },
 ]
 
@@ -113,7 +124,15 @@ const supportLinks = [
 export default function PublicPortal() {
   const { session } = useAuth()
   const { theme, setTheme } = useTheme()
-  const signInPath = !session ? '/login' : session.role === 'admin' ? '/admin' : session.role === 'admin1' ? '/admin1' : '/app'
+  const signInPath = !session
+    ? '/login'
+    : session.role === 'admin'
+    ? '/admin'
+    : session.role === 'manager'
+    ? '/manager'
+    : session.role === 'gmf_handler'
+    ? '/gmf-handler'
+    : '/app'
 
   function resolveActionPath(action: (typeof actionCards)[number]): string {
     if (action.path === 'signin') return signInPath
@@ -280,7 +299,7 @@ export default function PublicPortal() {
           <p className="mt-4 text-lg text-muted-foreground font-medium max-w-2xl mx-auto">Choose the appropriate portal below to securely access your dedicated SLT-MOBITEL billing environment.</p>
         </div>
 
-        <div className="grid gap-8 md:grid-cols-2 max-w-4xl mx-auto">
+        <div className="grid gap-8 lg:grid-cols-3 max-w-7xl mx-auto">
           {actionCards.map((action) => {
             const Icon = action.icon
             return (
