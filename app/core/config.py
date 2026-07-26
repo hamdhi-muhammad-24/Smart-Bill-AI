@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # JWT / Auth
+    azure_client_id: str = ""
+    azure_tenant_id: str = ""
     jwt_secret: str = "change-me-to-a-long-random-secret"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440

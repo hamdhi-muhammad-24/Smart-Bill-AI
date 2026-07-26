@@ -25,9 +25,7 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
     # Auth
-    "PyJWT>=2.8",
-    "passlib[bcrypt]>=1.7.4",
-    "bcrypt>=4.0,<4.1",
+    "fastapi-azure-auth>=5.0.0",
     "python-multipart>=0.0.9",
     "itsdangerous>=2.1",
     # Scheduler
