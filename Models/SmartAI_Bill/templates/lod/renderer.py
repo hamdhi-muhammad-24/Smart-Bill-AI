@@ -112,17 +112,6 @@ def build_html(data):
 class LODRenderer:
     def __init__(self, template_dir=None):
         self.template_dir = template_dir or BASE_DIR
-        self.data = None
-
-    def render(self, data):
-        self.data = data
-        return self
-
-    def save(self, output_path):
-        if self.data is None:
-            raise ValueError("No data passed to LODRenderer.render() before calling save()")
-        record = self.data[0] if isinstance(self.data, list) and self.data else self.data
-        return self.generate_pdf(record, output_path)
 
     def generate_pdf(self, record, output_path):
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
