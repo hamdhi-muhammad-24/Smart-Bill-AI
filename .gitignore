@@ -62,4 +62,5 @@ rclone_bin/
 # Temporary GMF billing queues
 queue/
 
-
+# Local Testing Uploads
+local_gmf_uploads/
