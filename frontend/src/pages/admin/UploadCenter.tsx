@@ -64,7 +64,7 @@ export default function UploadCenter() {
     const ext = name.substring(lastDot).toLowerCase()
     const extClean = ext.startsWith('.') ? ext.substring(1) : ext
     const isNumeric = /^\d+$/.test(extClean)
-    return ext === '.zip' || ext === '.gmf' || isNumeric
+    return ext === '.zip' || ext === '.gmf' || ext === '.xlsx' || ext === '.csv' || isNumeric
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -155,6 +155,8 @@ export default function UploadCenter() {
               <option value="Cycle_3" className="bg-background text-foreground font-bold">Cycle 3</option>
               <option value="Cycle_4" className="bg-background text-foreground font-bold">Cycle 4</option>
               <option value="Test_GMFs" className="bg-background text-foreground font-bold">Test GMFs</option>
+              <option value="LOD" className="bg-background text-foreground font-bold">LOD</option>
+              <option value="VAT_Confirmation" className="bg-background text-foreground font-bold">VAT Confirmation</option>
             </select>
           </div>
 

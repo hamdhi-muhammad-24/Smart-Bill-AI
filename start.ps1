@@ -8,6 +8,7 @@ param(
 )
 
 $ProjectRoot = $PSScriptRoot
+$VenvPython = "$ProjectRoot\.venv\Scripts\python.exe"
 
 Write-Host ""
 Write-Host "=== SLT Billing System — Starting Up ===" -ForegroundColor Cyan
@@ -18,11 +19,19 @@ if ($setup) {
     Write-Host "[--setup] Running DB migrations and seed..." -ForegroundColor Yellow
     Set-Location $ProjectRoot
 
-    uv run alembic upgrade head
-    if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: alembic upgrade failed." -ForegroundColor Red; exit 1 }
+    if (Test-Path $VenvPython) {
+        & $VenvPython -m alembic upgrade head
+        if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: alembic upgrade failed." -ForegroundColor Red; exit 1 }
 
-    uv run python -m app.db.seed
-    if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: app.db.seed failed." -ForegroundColor Red; exit 1 }
+        & $VenvPython -m app.db.seed
+        if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: app.db.seed failed." -ForegroundColor Red; exit 1 }
+    } else {
+        uv run alembic upgrade head
+        if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: alembic upgrade failed." -ForegroundColor Red; exit 1 }
+
+        uv run python -m app.db.seed
+        if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: app.db.seed failed." -ForegroundColor Red; exit 1 }
+    }
 
     Write-Host "      DB ready." -ForegroundColor Green
     Write-Host ""
@@ -30,10 +39,11 @@ if ($setup) {
 
 # ── Step 2: FastAPI backend (new window) ──────────────────────────────────────
 Write-Host "[1/3] Starting FastAPI backend on http://localhost:8090 ..." -ForegroundColor Yellow
+$BackendCmd = if (Test-Path $VenvPython) { "& '$VenvPython' -m uvicorn app.api.main:app --reload --port 8090" } else { "uv run uvicorn app.api.main:app --reload --port 8090" }
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "Set-Location '$ProjectRoot'; uv run uvicorn app.api.main:app --reload --port 8090"
+    "Set-Location '$ProjectRoot'; $BackendCmd"
 ) -WindowStyle Normal
 Write-Host "      FastAPI window opened." -ForegroundColor Green
 Write-Host ""
@@ -54,22 +64,13 @@ Start-Process powershell -ArgumentList @(
 Write-Host "      React window opened." -ForegroundColor Green
 Write-Host ""
 
-# # ── Step 4: GMF Watcher (new window) ──────────────────────────────────────────
-# Write-Host "[3/4] Starting Google Drive Watcher ..." -ForegroundColor Yellow
-# Start-Process powershell -ArgumentList @(
-#     "-NoExit",
-#     "-Command",
-#     "Set-Location '$ProjectRoot'; uv run python -m app.uploads.watcher"
-# ) -WindowStyle Normal
-# Write-Host "      Watcher window opened." -ForegroundColor Green
-# Write-Host ""
-
-# ── Step 5: Background Worker Queue (new window) ──────────────────────────────
+# ── Step 4: Background Worker Queue (new window) ──────────────────────────────
 Write-Host "[4/4] Starting Async Background Worker Queue ..." -ForegroundColor Yellow
+$WorkerCmd = if (Test-Path $VenvPython) { "& '$VenvPython' -m app.billing.worker_queue" } else { "uv run python -m app.billing.worker_queue" }
 Start-Process powershell -ArgumentList @(
     "-NoExit",
     "-Command",
-    "Set-Location '$ProjectRoot'; uv run python -m app.billing.worker_queue"
+    "Set-Location '$ProjectRoot'; $WorkerCmd"
 ) -WindowStyle Normal
 Write-Host "      Worker queue window opened." -ForegroundColor Green
 Write-Host ""

@@ -33,7 +33,11 @@ def create_app() -> FastAPI:
     
     @application.on_event("startup")
     async def startup_event():
-        await azure_scheme.openid_config.load_config()
+        try:
+            await azure_scheme.openid_config.load_config()
+        except Exception as e:
+            import logging
+            logging.getLogger("uvicorn").warning(f"Azure AD OpenID config load skipped: {e}")
         start_scheduler()
         
     return application

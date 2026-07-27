@@ -191,7 +191,14 @@ def _worker_process(worker_id):
                 raise Exception(f"PDF layout render error: {render_err}")
             
             # Save PDF
-            account_number = str(data.get("account_number", "unknown")).replace(" ", "")
+            if isinstance(data, list):
+                first_rec = data[0] if data else {}
+            elif isinstance(data, dict):
+                first_rec = data
+            else:
+                first_rec = {}
+
+            account_number = str(first_rec.get("account_number") or first_rec.get("reference") or first_rec.get("recipient_name") or "unknown").replace(" ", "")
             name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
             output_name = name_pattern.format(account_number=account_number, template_id=template_id)
             

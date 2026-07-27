@@ -41,7 +41,9 @@ CYCLE_FOLDERS = {
     "Cycle_4": 4,
 }
 TEST_FOLDER = "Test_GMFs"
-VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {TEST_FOLDER}
+LOD_FOLDER = "LOD"
+VAT_CONF_FOLDER = "VAT_Confirmation"
+VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {TEST_FOLDER, LOD_FOLDER, VAT_CONF_FOLDER}
 
 # Files to skip (system/temp files)
 SKIP_PREFIXES = (".", "~", "__")

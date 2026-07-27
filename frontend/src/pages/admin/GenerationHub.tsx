@@ -175,7 +175,8 @@ export default function GenerationHub() {
   })
 
   const batchMutation = useMutation({
-    mutationFn: (uploadIds: number[]) => generateGroupBatch(uploadIds),
+    mutationFn: ({ uploadIds, recordLimit }: { uploadIds: number[]; recordLimit?: number | null }) => 
+      generateGroupBatch(uploadIds, recordLimit),
     onSuccess: (data) => {
       toast.success(data.message)
       queryClient.invalidateQueries({ queryKey: ['billing-pending-batches'] })
@@ -216,12 +217,12 @@ export default function GenerationHub() {
     if (!pendingBatches || pendingBatches.length === 0) return
     let i = 0;
     for (const batch of pendingBatches) {
-      toast.success(`Queueing Cycle ${batch.cycle_number}...`)
-      await batchMutation.mutateAsync(batch.upload_ids)
+      toast.success(`Queueing batch...`)
+      await batchMutation.mutateAsync({ uploadIds: batch.upload_ids, recordLimit: null })
       i++
       await new Promise(r => setTimeout(r, 1000))
     }
-    toast.success(`Queued ${i} cycles successfully!`)
+    toast.success(`Queued ${i} batches successfully!`)
   }
 
   const activeRuns = runs?.filter(r => r.status === 'RUNNING' || r.status === 'QUEUED' || r.status === 'PENDING') || []
@@ -357,18 +358,38 @@ export default function GenerationHub() {
                         <span className="font-medium">{batch.date}</span>
                       </div>
                     </div>
-                    <Button 
-                      onClick={() => batchMutation.mutate(batch.upload_ids)}
-                      disabled={batchMutation.isPending}
-                      className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 font-extrabold shadow-[0_4px_12px_rgba(59,130,246,0.2)] text-white hover:scale-[1.01] border-transparent transition-all px-3 py-1 h-9 text-xs"
-                    >
-                      {batchMutation.isPending && batchMutation.variables === batch.upload_ids ? (
-                        <Loader2 size={12} className="mr-1.5 animate-spin" />
-                      ) : (
-                        <Play size={12} className="mr-1.5" />
-                      )}
-                      Generate
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      <Button 
+                        variant="outline"
+                        size="sm"
+                        onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 10 })}
+                        disabled={batchMutation.isPending}
+                        className="h-8 text-xs font-bold px-2.5"
+                      >
+                        Sample 10
+                      </Button>
+                      <Button 
+                        variant="outline"
+                        size="sm"
+                        onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 50 })}
+                        disabled={batchMutation.isPending}
+                        className="h-8 text-xs font-bold px-2.5"
+                      >
+                        Sample 50
+                      </Button>
+                      <Button 
+                        onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: null })}
+                        disabled={batchMutation.isPending}
+                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 font-extrabold shadow-[0_4px_12px_rgba(59,130,246,0.2)] text-white hover:scale-[1.01] border-transparent transition-all px-3 py-1 h-8 text-xs"
+                      >
+                        {batchMutation.isPending ? (
+                          <Loader2 size={12} className="mr-1.5 animate-spin" />
+                        ) : (
+                          <Play size={12} className="mr-1.5" />
+                        )}
+                        Generate All
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>

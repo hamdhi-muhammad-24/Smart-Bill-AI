@@ -249,10 +249,10 @@ export function getPendingBatches(): Promise<PendingBatchOut[]> {
   return request('/billing/pending-batches')
 }
 
-export function generateGroupBatch(uploadIds: number[]): Promise<{ message: string; run_id: number }> {
+export function generateGroupBatch(uploadIds: number[], recordLimit?: number | null): Promise<{ message: string; run_id: number }> {
   return request(`/billing/generate-batch`, {
     method: 'POST',
-    body: JSON.stringify({ upload_ids: uploadIds }),
+    body: JSON.stringify({ upload_ids: uploadIds, record_limit: recordLimit }),
   })
 }
 

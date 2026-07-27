@@ -1304,7 +1304,7 @@ def delete_schedule(
 def _is_valid_gmf_upload_name(filename: str) -> bool:
     ext = os.path.splitext(filename)[1].lower()
     ext_clean = ext[1:] if ext.startswith(".") else ext
-    return ext_clean in ("", "gmf", "zip") or ext_clean.isdigit()
+    return ext_clean in ("", "gmf", "zip", "xlsx", "csv") or ext_clean.isdigit()
 
 
 def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder_type: str, cleanup_dir: str):
@@ -1319,7 +1319,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
     logger.setLevel(logging.INFO)
 
     cycle_number = _get_cycle(folder_type)
-    is_test = folder_type == "Test_GMFs"
+    is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
     registered_count = 0
     failed_count = 0
 
@@ -1353,12 +1353,6 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                         db.add(t_obj)
                     t_obj.approval_status = TemplateApprovalStatus.PENDING
                     templates_cache[template_detected] = TemplateApprovalStatus.PENDING
-                    # Reset any REJECTED real GMFs for this template back to PENDING_APPROVAL
-                    db.query(GmfUpload).filter(
-                        GmfUpload.template_detected == template_detected,
-                        GmfUpload.folder_type != "Test_GMFs",
-                        GmfUpload.status == GmfUploadStatus.REJECTED
-                    ).update({"status": GmfUploadStatus.PENDING_APPROVAL, "rejection_reason": None}, synchronize_session=False)
 
             elif is_approved:
                 final_path = settings.queue_incoming_dir / filename
@@ -1455,7 +1449,7 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
     logger.setLevel(logging.INFO)
     
     cycle_number = _get_cycle(folder_type)
-    is_test = folder_type == "Test_GMFs"
+    is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
     
     temp_extract_dir = tempfile.mkdtemp(prefix="slt_zip_extract_")
     try:
@@ -1554,7 +1548,7 @@ def upload_gmf(
     _: UserOut = Depends(require_admin1_or_admin)
 ):
     """Accept direct GMF file or ZIP uploads."""
-    if folder_type not in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs"):
+    if folder_type not in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs", "LOD", "VAT_Confirmation"):
         raise HTTPException(status_code=400, detail="Invalid folder_type.")
 
     staged_files: list[tuple[str, str]] = []

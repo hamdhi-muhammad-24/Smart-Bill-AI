@@ -49,15 +49,24 @@ def process_single_file(args):
         data = parser_func(file_path)
 
         if is_preview:
-            for list_key in ["product_labels", "lines", "charges", "adjustments", "payments", "taxes", "equipment", "rentals"]:
-                if list_key in data and isinstance(data[list_key], list) and len(data[list_key]) > 10:
-                    data[list_key] = data[list_key][:10]
+            if isinstance(data, dict):
+                for list_key in ["product_labels", "lines", "charges", "adjustments", "payments", "taxes", "equipment", "rentals"]:
+                    if list_key in data and isinstance(data[list_key], list) and len(data[list_key]) > 10:
+                        data[list_key] = data[list_key][:10]
+            elif isinstance(data, list) and len(data) > 10:
+                data = data[:10]
 
         renderer = RendererClass()
         renderer.render(data)
 
+        if isinstance(data, list):
+            first_rec = data[0] if data else {}
+        elif isinstance(data, dict):
+            first_rec = data
+        else:
+            first_rec = {}
 
-        account_number = str(data.get("account_number", "unknown"))
+        account_number = str(first_rec.get("account_number") or first_rec.get("reference") or first_rec.get("recipient_name") or "unknown")
         account_number = account_number.replace(" ", "")
 
         # Get template-specific pattern or fallback

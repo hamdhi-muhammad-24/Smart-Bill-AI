@@ -117,11 +117,17 @@ export default function GmfMonitor() {
     },
     {
       header: 'Cycle',
-      cell: (upload) => (
-        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200/50 dark:border-slate-700/30">
-          {upload.cycle_number ? `Cycle ${upload.cycle_number}` : 'Test GMF'}
-        </span>
-      ),
+      cell: (upload) => {
+        let label = 'Test GMF'
+        if (upload.folder_type === 'LOD') label = 'LOD'
+        else if (upload.folder_type === 'VAT_Confirmation') label = 'VAT Confirmation'
+        else if (upload.cycle_number) label = `Cycle ${upload.cycle_number}`
+        return (
+          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200/50 dark:border-slate-700/30">
+            {label}
+          </span>
+        )
+      },
     },
     {
       header: 'Detected Template',

@@ -33,7 +33,29 @@ from templates.vat_enterprise.parser import parse_vat_enterprise
 from templates.vat_home.renderer import VATHomeRenderer
 from templates.vat_home.parser import parse_vat_home
 
+# New imports for LOD
+from .lod.renderer import LODRenderer
+from .lod.parser import parse_lod
+
+# New imports for VAT Confirmation
+from .vat_confirmation.renderer import VATConfirmationRenderer
+from .vat_confirmation.parser import parse_vat_confirmation
+
 TEMPLATE_REGISTRY = {
+    "lod": {
+        "name": "Letter of Demand & Termination",
+        "description": "LOD Template with Certified Sinhala/Tamil Translation Notice",
+        "renderer": LODRenderer,
+        "parser": parse_lod,
+        "ready": True,
+    },
+    "vat_confirmation": {
+        "name": "VAT Number Confirmation",
+        "description": "VAT Registration Verification Letter",
+        "renderer": VATConfirmationRenderer,
+        "parser": parse_vat_confirmation,
+        "ready": True,
+    },
     "nonvat_home": {
         "name": "NonVAT Home Invoice",
         "description": "Sheet 19 - Non-VAT, Home customer",
