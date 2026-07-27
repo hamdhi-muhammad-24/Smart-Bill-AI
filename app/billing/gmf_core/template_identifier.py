@@ -36,6 +36,21 @@ class IdentificationResult:
 def identify_template(gmf_file_path: str) -> IdentificationResult:
     """Identify which template a GMF file needs."""
     result = IdentificationResult()
+    path_str = str(gmf_file_path).lower()
+    if path_str.endswith('.processing'):
+        path_str = path_str[:-11]
+
+    if "lod" in path_str or "demand" in path_str:
+        result.template_id = "lod"
+        result.is_supported = True
+        result.reasons.append("Filename/path matches LOD template")
+        return result
+    if "vat" in path_str and ("confirm" in path_str or "customer" in path_str or "recipients" in path_str or "list" in path_str or "002" in path_str):
+        result.template_id = "vat_confirmation"
+        result.is_supported = True
+        result.reasons.append("Filename/path matches VAT Confirmation template")
+        return result
+
     header = read_gmf_header(gmf_file_path)
     result.header = header
     result.filename_info = parse_filename(header.filename)

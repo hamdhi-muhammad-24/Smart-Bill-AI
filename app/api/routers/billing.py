@@ -72,6 +72,8 @@ class GmfUploadOut(BaseModel):
     rejection_reason: Optional[str]
     billing_run_id: Optional[int]
     template_status: Optional[str] = None
+    processed_records_count: Optional[int] = 0
+    total_records_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -289,7 +291,7 @@ def get_pending_batches(
     db: Session = Depends(get_db),
     _: UserOut = Depends(require_admin),
 ):
-    """Group approved GMF files into one batch per cycle (excluding Test GMFs) for manual runs."""
+    """Group approved GMF files into one batch per cycle or folder (excluding Test GMFs) for manual runs."""
     pending_uploads = db.query(GmfUpload).filter(
         GmfUpload.status == GmfUploadStatus.APPROVED,
         GmfUpload.folder_type != "Test_GMFs",
@@ -299,20 +301,26 @@ def get_pending_batches(
     cycles = {}
     dates = {}
     for upload in pending_uploads:
-        c = upload.cycle_number or 1
+        c = upload.cycle_number or upload.folder_type
         if c not in cycles:
             cycles[c] = []
             dates[c] = upload.detected_at.strftime("%Y-%m-%d")
-        cycles[c].append(upload.id)
+        cycles[c].append(upload)
         
     batches = []
-    for c, upload_ids in sorted(cycles.items()):
+    for c, uploads_list in sorted(cycles.items(), key=lambda x: str(x[0])):
+        upload_ids = [u.id for u in uploads_list]
+        proc = sum(u.processed_records_count or 0 for u in uploads_list)
+        tot = sum(u.total_records_count or 0 for u in uploads_list)
         batches.append({
             "cycle_number": c,
             "date": dates[c],
             "batch_index": 1,
             "file_count": len(upload_ids),
-            "upload_ids": upload_ids
+            "upload_ids": upload_ids,
+            "processed_records": proc,
+            "total_records": tot,
+            "remaining_records": max(0, tot - proc) if tot > 0 else 0
         })
             
     return batches
@@ -354,7 +362,9 @@ def get_uploads(
             "error_message": u.error_message,
             "rejection_reason": u.rejection_reason,
             "billing_run_id": u.billing_run_id,
-            "template_status": template_status_map.get(u.template_detected) if u.template_detected else None
+            "template_status": template_status_map.get(u.template_detected) if u.template_detected else None,
+            "processed_records_count": u.processed_records_count or 0,
+            "total_records_count": u.total_records_count or 0,
         }
         res.append(d)
     return res
@@ -554,6 +564,7 @@ def generate_batch(
 
 class GenerateBatchRequest(BaseModel):
     upload_ids: List[int]
+    limit: Optional[int] = None
 
 @router.post("/generate-batch")
 def generate_batch_endpoint(

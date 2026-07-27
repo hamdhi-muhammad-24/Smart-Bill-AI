@@ -344,54 +344,71 @@ export default function GenerationHub() {
               </div>
             ) : (
               <div className="flex flex-col p-2 gap-2 max-h-[600px] overflow-y-auto">
-                {batchesList.map(batch => (
-                  <div key={`${batch.cycle_number}-${batch.date}`} className="flex items-center justify-between p-4 rounded-lg border bg-background hover:border-border/80 transition-colors">
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <FileText size={16} className="text-blue-500" />
-                        <span className="font-semibold text-[15px]">Cycle {batch.cycle_number}</span>
+                {batchesList.map(batch => {
+                  const cycleTitle = typeof batch.cycle_number === 'number' || String(batch.cycle_number).startsWith('Cycle')
+                    ? `Cycle ${String(batch.cycle_number).replace('Cycle_', '')}`
+                    : String(batch.cycle_number).replace('_', ' ')
+
+                  const hasRecordCounts = (batch.total_records || 0) > 0
+                  
+                  return (
+                    <div key={`${batch.cycle_number}-${batch.date}`} className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3 rounded-lg border bg-background hover:border-border/80 transition-colors">
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                          <FileText size={16} className="text-blue-500 shrink-0" />
+                          <span className="font-semibold text-[15px]">{cycleTitle}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-muted-foreground">
+                          {hasRecordCounts ? (
+                            <span className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300 px-2 py-0.5 rounded-full font-bold border border-emerald-200/50">
+                              {batch.remaining_records} Remaining ({batch.processed_records} / {batch.total_records} Done)
+                            </span>
+                          ) : (
+                            <span className="bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                              {batch.file_count} File(s)
+                            </span>
+                          )}
+                          <span className="font-medium">{batch.date}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                        <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-bold">
-                          {batch.file_count} Invoices
-                        </span>
-                        <span className="font-medium">{batch.date}</span>
+                      <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                        <Button 
+                          variant="outline"
+                          size="sm"
+                          onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 10 })}
+                          disabled={batchMutation.isPending}
+                          className="h-8 text-xs font-bold px-2.5 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-950/50"
+                          title="Generate next 10 customer records"
+                        >
+                          Generate 10
+                        </Button>
+                        <Button 
+                          variant="outline"
+                          size="sm"
+                          onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 50 })}
+                          disabled={batchMutation.isPending}
+                          className="h-8 text-xs font-bold px-2.5 hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-950/50"
+                          title="Generate next 50 customer records"
+                        >
+                          Generate 50
+                        </Button>
+                        <Button 
+                          onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: null })}
+                          disabled={batchMutation.isPending}
+                          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 font-extrabold shadow-[0_4px_12px_rgba(59,130,246,0.2)] text-white hover:scale-[1.01] border-transparent transition-all px-3 py-1 h-8 text-xs"
+                          title="Generate all remaining customer records"
+                        >
+                          {batchMutation.isPending ? (
+                            <Loader2 size={12} className="mr-1.5 animate-spin" />
+                          ) : (
+                            <Play size={12} className="mr-1.5" />
+                          )}
+                          Generate All
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <Button 
-                        variant="outline"
-                        size="sm"
-                        onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 10 })}
-                        disabled={batchMutation.isPending}
-                        className="h-8 text-xs font-bold px-2.5"
-                      >
-                        Sample 10
-                      </Button>
-                      <Button 
-                        variant="outline"
-                        size="sm"
-                        onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 50 })}
-                        disabled={batchMutation.isPending}
-                        className="h-8 text-xs font-bold px-2.5"
-                      >
-                        Sample 50
-                      </Button>
-                      <Button 
-                        onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: null })}
-                        disabled={batchMutation.isPending}
-                        className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 font-extrabold shadow-[0_4px_12px_rgba(59,130,246,0.2)] text-white hover:scale-[1.01] border-transparent transition-all px-3 py-1 h-8 text-xs"
-                      >
-                        {batchMutation.isPending ? (
-                          <Loader2 size={12} className="mr-1.5 animate-spin" />
-                        ) : (
-                          <Play size={12} className="mr-1.5" />
-                        )}
-                        Generate All
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>

@@ -1,6 +1,4 @@
-// removed paginated import
-
-const BASE_URL = import.meta.env.VITE_API_BASE_URL
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090').replace(/\/+$/, '')
 
 const TOKEN_KEY = 'slt-token'
 
@@ -238,11 +236,14 @@ export function generateBatch(uploadId: number): Promise<{ message: string; run_
 }
 
 export interface PendingBatchOut {
-  cycle_number: number
+  cycle_number: number | string
   date: string
   batch_index: number
   file_count: number
   upload_ids: number[]
+  processed_records?: number
+  total_records?: number
+  remaining_records?: number
 }
 
 export function getPendingBatches(): Promise<PendingBatchOut[]> {
@@ -252,7 +253,7 @@ export function getPendingBatches(): Promise<PendingBatchOut[]> {
 export function generateGroupBatch(uploadIds: number[], recordLimit?: number | null): Promise<{ message: string; run_id: number }> {
   return request(`/billing/generate-batch`, {
     method: 'POST',
-    body: JSON.stringify({ upload_ids: uploadIds, record_limit: recordLimit }),
+    body: JSON.stringify({ upload_ids: uploadIds, limit: recordLimit }),
   })
 }
 

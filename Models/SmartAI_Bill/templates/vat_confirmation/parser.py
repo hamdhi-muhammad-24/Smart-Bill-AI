@@ -1,108 +1,123 @@
-import io
+"""
+Parser for VAT Confirmation templates.
+Supports CSV (recipients.csv) and Excel (VAT Customer List (002).xlsx).
+Supports offset and limit for partial batch processing.
+"""
 import os
-import openpyxl
 import csv
+import openpyxl
+import re
+
 
 def _clean(val):
     if val is None:
         return ""
-    return str(val).strip()
+    val_str = str(val).strip()
+    return "" if val_str in ("-", ".") else val_str
 
-def parse_vat_confirmation(file_path, limit=None):
-    if hasattr(file_path, 'read'):
-        return parse_vat_confirmation_stream(file_path, limit=limit)
-        
-    path_str = str(file_path)
-    if path_str.endswith('.processing'):
-        path_str = path_str[:-11]
-        
-    if path_str.endswith('.csv'):
-        with open(file_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
-            return _parse_csv_rows(csv.DictReader(f), limit=limit)
+
+def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
+    """
+    Parses VAT Confirmation CSV or Excel file.
+    Supports offset and limit for batch slice processing.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"VAT Confirmation file not found: {file_path}")
+
+    ext = os.path.splitext(file_path)[1].lower()
+    all_records = []
+
+    if ext == ".csv":
+        with open(file_path, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                rec_name = (row.get("recipient_name") or row.get("name") or "").strip()
+                ref = (row.get("reference") or row.get("customer_ref") or "").strip()
+                vat_no = (row.get("vat_no") or row.get("vat_registration") or "").strip()
+
+                if not ref and not rec_name:
+                    continue
+
+                addr_lines = [
+                    rec_name,
+                    (row.get("address_line1") or "").strip(),
+                    (row.get("address_line2") or "").strip(),
+                    (row.get("address_line3") or "").strip(),
+                    (row.get("address_line4") or "").strip(),
+                ]
+                clean_lines = [line for line in addr_lines if line and line not in ("-", ".")]
+
+                all_records.append({
+                    "recipient_name": rec_name,
+                    "reference": ref,
+                    "account_number": ref,
+                    "vat_no": vat_no,
+                    "address_lines": clean_lines,
+                })
     else:
-        with open(file_path, 'rb') as f:
-            wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
-            return _parse_workbook_rows(wb, limit=limit)
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        ws = wb.active
+        rows = ws.iter_rows(values_only=True)
 
-def parse_vat_confirmation_stream(stream, limit=None, filename=""):
-    if filename.endswith('.csv'):
-        if isinstance(stream, bytes):
-            stream = io.StringIO(stream.decode('utf-8-sig', errors='ignore'))
-        return _parse_csv_rows(csv.DictReader(stream), limit=limit)
-    else:
-        if isinstance(stream, str):
-            stream = open(stream, 'rb')
-        wb = openpyxl.load_workbook(stream, read_only=True, data_only=True)
-        return _parse_workbook_rows(wb, limit=limit)
+        try:
+            header = next(rows)
+        except StopIteration:
+            wb.close()
+            return {"records": [], "reference": "unknown", "account_number": "unknown", "total_records": 0, "input_path": file_path}
 
-def _parse_csv_rows(reader, limit=None):
-    data = []
-    for idx, row in enumerate(reader):
-        name = _clean(row.get("VAT Name") or row.get("recipient_name") or row.get("CUSTOMER_NAME"))
-        if not name:
-            continue
-        ref = _clean(row.get("CR No") or row.get("Account No") or row.get("reference") or row.get("ACCOUNT_NO") or str(idx + 1))
-        vat_no = _clean(row.get("VAT No") or row.get("vat_no"))
-        addr1 = _clean(row.get("Registered Address 1") or row.get("address_line1"))
-        addr2 = _clean(row.get("Registered Address 2") or row.get("address_line2"))
-        addr3 = _clean(row.get("Registered Address 3") or row.get("address_line3"))
-        addr4 = _clean(row.get("Registered Address 4") or row.get("address_line4"))
-        
-        address_lines = [line for line in (name, addr1, addr2, addr3, addr4) if line]
-        data.append({
-            "recipient_name": name,
-            "reference": ref,
-            "vat_no": vat_no or "N/A",
-            "address_lines": address_lines,
-        })
-        if limit and len(data) >= limit:
-            break
-    return data
+        col_map = {str(name).strip().upper(): idx for idx, name in enumerate(header) if name is not None}
 
-def _parse_workbook_rows(wb, limit=None):
-    ws = wb.active
-    rows = ws.iter_rows(values_only=True)
-    try:
-        header = next(rows)
-    except StopIteration:
+        ref_idx = col_map.get("CUSTOMER_REF") or col_map.get("REFERENCE")
+        comp_idx = col_map.get("COMPANY_NAME")
+        name_idx = col_map.get("NAME")
+        vat_idx = col_map.get("VAT_REGISTRATION") or col_map.get("VAT_NO")
+
+        addr_cols = ["ADDR_LINE_1", "ADDR_LINE_2", "ADDR_LINE_3", "ADDR_LINE_4", "ADDR_LINE_5", "CITY"]
+
+        for row in rows:
+            ref = _clean(row[ref_idx]) if ref_idx is not None and ref_idx < len(row) else ""
+            comp_name = _clean(row[comp_idx]) if comp_idx is not None and comp_idx < len(row) else ""
+            indiv_name = _clean(row[name_idx]) if name_idx is not None and name_idx < len(row) else ""
+
+            recipient_name = comp_name or indiv_name
+            if not ref and not recipient_name:
+                continue
+
+            vat_no = _clean(row[vat_idx]) if vat_idx is not None and vat_idx < len(row) else ""
+
+            lines = [recipient_name]
+            for col in addr_cols:
+                c_idx = col_map.get(col)
+                if c_idx is not None and c_idx < len(row):
+                    v = _clean(row[c_idx])
+                    if v:
+                        lines.append(v)
+
+            all_records.append({
+                "recipient_name": recipient_name,
+                "reference": ref,
+                "account_number": ref,
+                "vat_no": vat_no,
+                "address_lines": lines,
+            })
+
         wb.close()
-        return []
 
-    header_clean = [_clean(h) for h in header]
-    columns = {name: idx for idx, name in enumerate(header_clean) if name}
-    
-    name_idx = columns.get("VAT Name") or columns.get("recipient_name") or columns.get("CUSTOMER_NAME")
-    ref_idx = columns.get("CR No") or columns.get("Account No") or columns.get("reference") or columns.get("ACCOUNT_NO")
-    vat_idx = columns.get("VAT No") or columns.get("vat_no")
-    
-    addr1_idx = columns.get("Registered Address 1") or columns.get("address_line1")
-    addr2_idx = columns.get("Registered Address 2") or columns.get("address_line2")
-    addr3_idx = columns.get("Registered Address 3") or columns.get("address_line3")
-    addr4_idx = columns.get("Registered Address 4") or columns.get("address_line4")
+    total_records = len(all_records)
+    sliced_records = all_records[offset : (offset + limit)] if limit is not None else all_records[offset :]
+    raw_ref = (sliced_records[0].get("reference") or sliced_records[0].get("account_number") or sliced_records[0].get("recipient_name") or "unknown").strip()
+    first_ref = re.sub(r'[^A-Za-z0-9_-]+', '_', raw_ref).strip('_')
+    if not first_ref:
+        first_ref = "unknown"
 
-    data = []
-    for idx, row in enumerate(rows):
-        name = _clean(row[name_idx]) if name_idx is not None and name_idx < len(row) else ""
-        if not name:
-            continue
-            
-        ref = _clean(row[ref_idx]) if ref_idx is not None and ref_idx < len(row) else str(idx + 1)
-        vat_no = _clean(row[vat_idx]) if vat_idx is not None and vat_idx < len(row) else "N/A"
-        
-        a1 = _clean(row[addr1_idx]) if addr1_idx is not None and addr1_idx < len(row) else ""
-        a2 = _clean(row[addr2_idx]) if addr2_idx is not None and addr2_idx < len(row) else ""
-        a3 = _clean(row[addr3_idx]) if addr3_idx is not None and addr3_idx < len(row) else ""
-        a4 = _clean(row[addr4_idx]) if addr4_idx is not None and addr4_idx < len(row) else ""
-        
-        address_lines = [line for line in (name, a1, a2, a3, a4) if line]
-        data.append({
-            "recipient_name": name,
-            "reference": ref,
-            "vat_no": vat_no,
-            "address_lines": address_lines,
-        })
-        if limit and len(data) >= limit:
-            break
-            
-    wb.close()
-    return data
+    return {
+        "records": sliced_records,
+        "reference": first_ref,
+        "account_number": first_ref,
+        "total_records": total_records,
+        "input_path": file_path
+    }
+
+
+def load_recipients(csv_path):
+    return parse_vat_confirmation(csv_path)["records"]

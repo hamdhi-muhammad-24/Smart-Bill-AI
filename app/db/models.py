@@ -239,6 +239,8 @@ class GmfUpload(Base):
     error_message     = Column(Text)
     rejection_reason  = Column(Text)
     billing_run_id    = Column(BigInteger, ForeignKey("billing_runs.id", ondelete="SET NULL"), nullable=True)
+    processed_records_count = Column(Integer, nullable=False, default=0)
+    total_records_count     = Column(Integer, nullable=False, default=0)
 
 
 class NotificationEvent(Base):

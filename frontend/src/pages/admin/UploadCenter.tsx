@@ -184,7 +184,7 @@ export default function UploadCenter() {
             </div>
             <span className="text-lg font-bold bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-700 dark:from-slate-100 dark:via-blue-100 dark:to-indigo-300 bg-clip-text text-transparent">Drag & Drop files here</span>
             <span className="text-sm text-muted-foreground mt-2 text-center">
-              Supports GMF format files (no extension, numeric suffixes like .1, .6, or .gmf) or ZIP archives.<br/>
+              Supports GMF files (no extension, .1, .6, .gmf), Excel spreadsheets (.xlsx), CSV files (.csv), or ZIP archives.<br/>
               Or click to browse from your device.
             </span>
           </div>
