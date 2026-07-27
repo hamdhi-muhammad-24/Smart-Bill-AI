@@ -78,6 +78,8 @@ def reset_test_data():
                 settings.gmf_drive_path / "Cycle_2",
                 settings.gmf_drive_path / "Cycle_3",
                 settings.gmf_drive_path / "Cycle_4",
+                settings.gmf_drive_path / "LOD",
+                settings.gmf_drive_path / "VAT_Confirmation",
                 settings.gmf_drive_path / "Processed",
                 settings.gmf_drive_path / "Failed",
                 settings.gmf_drive_path / "Output",
@@ -85,6 +87,8 @@ def reset_test_data():
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/Processed"),
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/Failed"),
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/Test_GMFs"),
+                Path("./Models/SmartAI_Bill/local_gmf_uploads/LOD"),
+                Path("./Models/SmartAI_Bill/local_gmf_uploads/VAT_Confirmation"),
             ]
 
             if legacy_gdrive.exists():

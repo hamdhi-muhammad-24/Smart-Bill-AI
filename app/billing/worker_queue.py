@@ -190,19 +190,26 @@ def _worker_process(worker_id):
             except Exception as render_err:
                 raise Exception(f"PDF layout render error: {render_err}")
             
-            # Save PDF
-            account_number = str(data.get("account_number", "unknown")).replace(" ", "")
-            name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
-            output_name = name_pattern.format(account_number=account_number, template_id=template_id)
-            
             cycle_temp = COMPLETED_TEMP / cycle_label
             cycle_temp.mkdir(parents=True, exist_ok=True)
-            output_pdf_path = cycle_temp / output_name
             
-            try:
-                renderer.save(str(output_pdf_path))
-            except Exception as save_err:
-                raise Exception(f"PDF save/write error: {save_err}")
+            generated_count = 0
+            if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
+                for fname, pdf_bytes, _ in renderer.generated_pdfs:
+                    output_pdf_path = cycle_temp / fname
+                    with open(output_pdf_path, "wb") as f:
+                        f.write(pdf_bytes)
+                generated_count = len(renderer.generated_pdfs)
+            else:
+                account_number = str(data.get("account_number", "unknown")).replace(" ", "")
+                name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
+                output_name = name_pattern.format(account_number=account_number, template_id=template_id)
+                output_pdf_path = cycle_temp / output_name
+                try:
+                    renderer.save(str(output_pdf_path))
+                    generated_count = 1
+                except Exception as save_err:
+                    raise Exception(f"PDF save/write error: {save_err}")
             
             # Move source GMF to Processed folder and update DB
             try:
@@ -219,18 +226,27 @@ def _worker_process(worker_id):
                 with SessionLocal() as db:
                     upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
                     if upload:
-                        upload.status = GmfUploadStatus.COMPLETED
+                        upload.processed_records_count = (upload.processed_records_count or 0) + generated_count
+                        total = data.get("total_records") or generated_count
+                        if not upload.total_records_count or upload.total_records_count == 0:
+                            upload.total_records_count = total
+                        
+                        if upload.processed_records_count >= upload.total_records_count:
+                            upload.status = GmfUploadStatus.COMPLETED
+                        else:
+                            upload.status = GmfUploadStatus.APPROVED
+                            
                         upload.processed_at = datetime.now()
                         upload.file_path = str(dest_file_path)
                         
                         if upload.billing_run_id:
                             from app.db.models import BillingRun, RunStatus
                             from sqlalchemy import update
-                            # Atomic SQL increment — no read-modify-write race possible
+                            # Atomic SQL increment — add generated_count
                             db.execute(
                                 update(BillingRun)
-                                .where(BillingRun.id == upload.billing_run_id)
-                                .values(succeeded=BillingRun.succeeded + 1)
+                               .where(BillingRun.id == upload.billing_run_id)
+                               .values(succeeded=BillingRun.succeeded + generated_count)
                             )
                             db.flush()
                             # Re-read to check completion

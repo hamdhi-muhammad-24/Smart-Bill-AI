@@ -1,154 +1,211 @@
+"""
+LOD (Letter of Demand & Termination) Pure Python Renderer.
+Uses ReportLab canvas drawing for Page 1 (matching exact coordinates of Demand_Letter_0041645897.pdf)
+and PyMuPDF (fitz) to append Page 2 (Certified Sinhala/Tamil Translation Notice).
+No Playwright / Chromium browser required!
+"""
+import io
 import os
-import tempfile
-from playwright.sync_api import sync_playwright
-try:
-    import fitz
-except ImportError:
-    fitz = None
-from pypdf import PdfReader, PdfWriter
+import fitz  # PyMuPDF
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.utils import simpleSplit
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TRANSLATION_PAGE = os.path.join(BASE_DIR, "assets", "translation_page.pdf")
+TRANSLATION_PAGE = os.path.join(BASE_DIR, 'assets', 'translation_page.pdf')
 
-# Fallback translation page location if asset is stored in upper folder
-if not os.path.exists(TRANSLATION_PAGE):
-    UPPER_ASSET = os.path.join(os.path.dirname(BASE_DIR), "LOD", "assets", "translation_page.pdf")
-    if os.path.exists(UPPER_ASSET):
-        TRANSLATION_PAGE = UPPER_ASSET
 
-ENGLISH_PARAGRAPHS = [
-    "You have defaulted the payment of the outstanding balance due to Sri Lanka Telecom PLC in respect of the above Telephone Number and the Telecommunication Services provided to you.",
-    "Sri Lanka Telecom PLC has repeatedly requested you to settle the said outstanding balance. However, you have failed and neglected to settle the same to date.",
-    "TAKE NOTICE that you are hereby required to pay the said sum of <b>Rs. {outstanding_balance}</b> to Sri Lanka Telecom PLC within Fourteen (14) days from the date hereof.",
-    "PLEASE TAKE FURTHER NOTICE that in the event of your failure to settle the said sum within the stipulated period, Sri Lanka Telecom PLC will be compelled to initiate legal proceedings against you for the recovery of the said sum together with legal interest and costs of suit without any further notice to you.",
-]
+def draw_justified_line(c, text, font, size, x, y, width):
+    words = text.split()
+    if len(words) <= 1:
+        c.drawString(x, y, text)
+        return
+    word_width_total = sum(c.stringWidth(w, font, size) for w in words)
+    gap = (width - word_width_total) / (len(words) - 1)
+    cx = x
+    for word in words:
+        c.drawString(cx, y, word)
+        cx += c.stringWidth(word, font, size) + gap
 
-ATTORNEY_BLOCK = [
-    "CHAMANTHI ATHUKORALA",
-    "Attorney-at-Law & Notary Public",
-    "Legal Division",
-    "Sri Lanka Telecom PLC",
-    "Lotus Road, Colombo 01.",
-]
 
-def build_html(data):
+def build_lod_page1_pdf(data):
+    """
+    Renders Page 1 of the LOD letter as a PDF in memory (BytesIO) using ReportLab canvas.
+    Exact positioning matching Demand_Letter_0041645897.pdf sample.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    max_w = 534.7 - 62.2  # 472.5 pt printable width
+
+    def y_top(val):
+        return 841.89 - val
+
+    # 1. Attorney Block (x=424.1)
+    c.setFont("Times-Roman", 9)
+    attorney_lines = [
+        "Damithri Palliyaguru",
+        "Attorney-at-Law- LLB",
+        "CTO Ground Floor",
+        "Sri Lanka Telecom PLC",
+        "Lotus Road",
+        "Colombo 01.",
+        "T.P No: 011 2341080",
+        "Email - damithri@slt.com.lk",
+        "(9.00 AM - 4.30PM) on",
+        str(data.get("letter_date", "23.03.2026"))
+    ]
+    att_y = 51.4
+    for i, line in enumerate(attorney_lines):
+        c.drawString(424.1, y_top(att_y + i * 11.25), line)
+
+    # 2. Recipient Block (x=62.2)
+    client_name = str(data.get("client_name", "")).strip()
     address_lines = data.get("client_address_lines", [])
-    if isinstance(address_lines, str):
-        address_lines = [address_lines]
-    address_html = "<br>".join(address_lines)
-    attorney_html = "<br>".join(ATTORNEY_BLOCK)
-    paragraphs_html = "\n".join(f"    <p>{p.format(**data)}</p>" for p in ENGLISH_PARAGRAPHS)
+    rec_lines = [client_name] + [str(a).strip() for a in address_lines if str(a).strip()]
+    rec_y = 107.6
+    for i, line in enumerate(rec_lines):
+        c.drawString(62.2, y_top(rec_y + i * 11.25), str(line))
 
-    return f"""<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-  body {{
-    font-family: 'Book Antiqua', 'Palatino Linotype', Georgia, serif;
-    font-size: 9pt;
-    color: #000;
-    line-height: 1.25;
-  }}
-  .header {{
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    margin-bottom: 20pt;
-  }}
-  .recipient {{ flex-shrink: 0; font-size: 9pt; }}
-  .attorney {{ text-align: left; white-space: nowrap; margin-left: 40pt; flex-shrink: 0; }}
-  .refno {{ text-align: center; margin: 4pt 0 14pt; }}
-  .title {{
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 10pt;
-    text-align: center;
-    font-weight: bold;
-    text-decoration: underline;
-    letter-spacing: 1px;
-    margin: 10pt 0;
-  }}
-  .fields {{ margin-bottom: 10pt; }}
-  .fields div {{ display: flex; }}
-  .fields .label {{ width: 160pt; flex-shrink: 0; }}
-  .company {{ font-weight: bold; margin-bottom: 8pt; }}
-  p {{ text-align: justify; margin: 0 0 9pt; }}
-  .closing {{ margin-top: 14pt; }}
-  .sig-gap {{ height: 36pt; }}
-</style>
-</head>
-<body>
+    # 3. Ref No (Centered at x=296.2, y=184.1)
+    ref_no = str(data.get("reference_number", "1")).strip()
+    c.drawString(296.2, y_top(184.1), ref_no)
 
-<div class="header">
-  <div class="recipient">{data.get('client_name', '')}<br>{address_html}</div>
-  <div class="attorney">{attorney_html}<br>{data.get('letter_date', '')}</div>
-</div>
+    # 4. Salutation (x=62.2, y=208.9)
+    c.drawString(62.2, y_top(208.9), "Dear Sir/Madam,")
 
-<div class="refno">{data.get('reference_number', '1')}</div>
+    # 5. Title (Centered at x=298.1, y=230.2, Courier-Bold size 10)
+    c.setFont("Courier-Bold", 10)
+    c.drawCentredString(298.1, y_top(230.2), "LETTER OF DEMAND AND TERMINATION")
 
-<p>Dear Sir/Madam,</p>
+    # 6. Fields Block (x=62.2 for labels, x=222.2 for values)
+    c.setFont("Times-Roman", 9)
+    c.drawString(62.2, y_top(253.1), "OUTSTANDING BALANCE")
+    c.drawString(222.2, y_top(253.1), ": ")
+    c.setFont("Times-Bold", 9)
+    bal_str = f"Rs. {data.get('outstanding_balance', '0.00')}"
+    c.drawString(226.7, y_top(253.1), bal_str)
 
-<div class="title">LETTER OF DEMAND AND TERMINATION</div>
+    c.setFont("Times-Roman", 9)
+    c.drawString(62.2, y_top(265.1), "ACCOUNT NUMBER")
+    acc_str = f": {data.get('account_number', '')}"
+    c.drawString(222.2, y_top(265.1), acc_str)
 
-<div class="fields">
-  <div><span class="label">OUTSTANDING BALANCE</span><span>: <b>Rs. {data.get('outstanding_balance', '0.00')}</b></span></div>
-  <div><span class="label">ACCOUNT NUMBER</span><span>: {data.get('account_number', '')}</span></div>
-  <div><span class="label">TELEPHONE NUMBER</span><span>: <b>{data.get('telephone_number', '')}</b></span></div>
-</div>
+    c.drawString(62.2, y_top(276.4), "TELEPHONE NUMBER")
+    c.drawString(222.2, y_top(276.4), ": ")
+    c.setFont("Times-Bold", 9)
+    tel_str = str(data.get('telephone_number', ''))
+    c.drawString(226.7, y_top(276.4), tel_str)
 
-<div class="company">SRI LANKA TELECOM PLC</div>
+    # 7. Company Name (x=62.2, y=297.7, Times-Bold 9)
+    c.setFont("Times-Bold", 9)
+    c.drawString(62.2, y_top(297.7), "SRI LANKA TELECOM PLC")
 
-{paragraphs_html}
+    # 8. Paragraphs
+    reg_office = str(data.get("regional_office", "MATARA")).strip()
 
-<div class="closing">
-  Yours faithfully,
-  <div class="sig-gap"></div>
-  Attorney-at-Law
-</div>
+    # Paragraph 1
+    c.setFont("Times-Roman", 9)
+    c.drawString(62.2, y_top(317.6), "I write on the instructions of my Client Sri Lanka Telecom PLC, which has a Regional Office at ")
+    w_prefix = c.stringWidth("I write on the instructions of my Client Sri Lanka Telecom PLC, which has a Regional Office at ", "Times-Roman", 9)
+    c.setFont("Times-Bold", 9)
+    c.drawString(62.2 + w_prefix, y_top(317.6), reg_office)
+    w_reg = c.stringWidth(reg_office, "Times-Bold", 9)
+    c.setFont("Times-Roman", 9)
+    c.drawString(62.2 + w_prefix + w_reg, y_top(317.6), " and its")
 
-</body>
-</html>"""
+    draw_justified_line(c, "Head Office at Lotus Road, Colombo 01 and which is the Successor to all the assets, liabilities, rights, obligations and", "Times-Roman", 9, 62.2, y_top(329.6), max_w)
+    c.drawString(62.2, y_top(340.9), "contracts of the Corporation named Sri Lanka Telecom and of the Department of Telecommunications.")
+
+    # Paragraph 2 (y=361.1)
+    draw_justified_line(c, "I am instructed that, you are a Customer of my Client and that, as such, at your request, my Client installed its", "Times-Roman", 9, 62.2, y_top(361.1), max_w)
+    draw_justified_line(c, "telephone equipment and provided a telephone service to you at your premises bearing the above stated number,", "Times-Roman", 9, 62.2, y_top(372.4), max_w)
+    draw_justified_line(c, "subject to the terms and conditions of the Agreement entered into by and between my client and you, including the", "Times-Roman", 9, 62.2, y_top(383.6), max_w)
+    c.drawString(62.2, y_top(394.9), "payment of all subscriptions, charges, fees and other monies.")
+
+    # Paragraph 3 (y=415.1)
+    draw_justified_line(c, "I am instructed that, you have benefited from and used the said facilities and services provided by my client, but you", "Times-Roman", 9, 62.2, y_top(415.1), max_w)
+    draw_justified_line(c, "have failed and neglected to pay the monies due as aforesaid, though my client has sent you Monthly Statements", "Times-Roman", 9, 62.2, y_top(426.4), max_w)
+    c.drawString(62.2, y_top(437.6), "setting out the sums, which are due, and payable.")
+
+    # Paragraph 4 (y=457.9)
+    c.setFont("Times-Roman", 9)
+    c.drawString(62.2, y_top(457.9), "I am instructed that, presently there is a sum of ")
+    w_p4_pre = c.stringWidth("I am instructed that, presently there is a sum of ", "Times-Roman", 9)
+    c.setFont("Times-Bold", 9)
+    c.drawString(62.2 + w_p4_pre, y_top(457.9), bal_str)
+    w_p4_bal = c.stringWidth(bal_str, "Times-Bold", 9)
+    c.setFont("Times-Roman", 9)
+    c.drawString(62.2 + w_p4_pre + w_p4_bal, y_top(457.9), " owing from you to my Client, on account of the")
+
+    draw_justified_line(c, "subscriptions, charges, fees and other monies due from you to my Client for the installation and provision of the said", "Times-Roman", 9, 62.2, y_top(469.9), max_w)
+    c.drawString(62.2, y_top(481.1), "telephone services. You are liable and bound and obliged to pay these monies to my Client.")
+
+    # Paragraph 5 (y=501.4)
+    draw_justified_line(c, "However, you have wrongfully and unlawfully failed and neglected to pay these monies to my Client and the said", "Times-Roman", 9, 62.2, y_top(501.4), max_w)
+    draw_justified_line(c, "monies payable by you to my Client, are in arrears and in default. Therefore, my Client has instructed me to advise", "Times-Roman", 9, 62.2, y_top(512.6), max_w)
+    c.drawString(62.2, y_top(523.9), "that the aforesaid Agreement is hereby terminated and determined.")
+
+    # Paragraph 6 (y=544.1)
+    draw_justified_line(c, "I am also instructed to demand and I do hereby demand payment from you to my Client, of the aforesaid monies,", "Times-Roman", 9, 62.2, y_top(544.1), max_w)
+    draw_justified_line(c, "within 14 days of the date of receipt of this letter and advise that if you fail to make such payment, legal action will be", "Times-Roman", 9, 62.2, y_top(555.4), max_w)
+    c.drawString(62.2, y_top(566.6), "instituted against you, for the recovery of these monies, without any further notice to you.")
+
+    # 9. Closing (y=591.4)
+    c.drawString(62.2, y_top(591.4), "Yours faithfully,")
+
+    # 10. Sign-off (y=638.6)
+    c.drawString(62.2, y_top(638.6), "Attorney-at-Law")
+
+    c.save()
+    buf.seek(0)
+    return buf.getvalue()
+
 
 class LODRenderer:
-    def __init__(self, template_dir=None):
-        self.template_dir = template_dir or BASE_DIR
+    """
+    Renderer class conforming to SmartAI_Bill BaseRenderer interface.
+    """
+    def __init__(self):
+        self.generated_pdfs = [] # list of (output_filename, pdf_bytes, record)
 
-    def generate_pdf(self, record, output_path):
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        html = build_html(record)
-        
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            english_pdf_path = tmp.name
+    def render(self, data):
+        """
+        Accepts dict containing:
+        - "records": list of client dicts (for multi-recipient spreadsheet)
+        OR single client record dict.
+        """
+        records = data.get("records", [])
+        if not records and "account_number" in data:
+            records = [data]
 
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch()
-                page = browser.new_page()
-                page.set_content(html, wait_until="load")
-                page.pdf(
-                    path=english_pdf_path,
-                    format="A4",
-                    print_background=True,
-                    margin={"top": "16mm", "bottom": "16mm", "left": "20mm", "right": "20mm"},
-                )
-                browser.close()
+        self.generated_pdfs = []
+        for record in records:
+            page1_bytes = build_lod_page1_pdf(record)
+
+            # Combine with Translation Notice (Page 2) via PyMuPDF
+            doc = fitz.open(stream=page1_bytes, filetype="pdf")
 
             if os.path.exists(TRANSLATION_PAGE):
-                writer = PdfWriter()
-                for page_item in PdfReader(english_pdf_path).pages:
-                    writer.add_page(page_item)
-                for page_item in PdfReader(TRANSLATION_PAGE).pages:
-                    writer.add_page(page_item)
-                with open(output_path, "wb") as f_out:
-                    writer.write(f_out)
-            else:
-                with open(english_pdf_path, "rb") as f_in, open(output_path, "wb") as f_out:
-                    f_out.write(f_in.read())
+                trans_doc = fitz.open(TRANSLATION_PAGE)
+                doc.insert_pdf(trans_doc)
+                trans_doc.close()
 
-        finally:
-            if os.path.exists(english_pdf_path):
-                try:
-                    os.remove(english_pdf_path)
-                except Exception:
-                    pass
-        return output_path
+            pdf_out_bytes = doc.tobytes()
+            doc.close()
+
+            acc_no = str(record.get("account_number", "unknown")).strip().replace(" ", "")
+            fname = f"{acc_no}_LOD.pdf"
+            self.generated_pdfs.append((fname, pdf_out_bytes, record))
+
+    def save(self, output_path):
+        """
+        Save the first PDF to `output_path`.
+        If there are multiple PDFs, the rest remain in `self.generated_pdfs`.
+        """
+        if not self.generated_pdfs:
+            raise RuntimeError("No PDFs generated in render()")
+
+        fname, pdf_bytes, _ = self.generated_pdfs[0]
+        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+        with open(output_path, "wb") as f:
+            f.write(pdf_bytes)

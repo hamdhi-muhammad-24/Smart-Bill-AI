@@ -43,6 +43,8 @@ OUTPUT_PDF_NAMES = {
     "usd_open_item":             "{account_number}_USD_OPEN_Item.pdf",
     "vat_creditnote":            "CreditNote_VAT.pdf",
     "nonvat_creditnote":         "CreditNote_NONVAT.pdf",
+    "lod":                       "{account_number}_LOD.pdf",
+    "vat_confirmation":          "{account_number}_Vat_confirmation.pdf",
 }
 
 OUTPUT_PDF_NAME_DEFAULT = "SLT20eBill-{account_number}.pdf"

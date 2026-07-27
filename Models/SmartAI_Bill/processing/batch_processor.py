@@ -4,6 +4,7 @@ Multi-process batch processor with retry logic.
 import os
 import time
 import shutil
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.template_identifier import identify_template
@@ -46,19 +47,29 @@ def process_single_file(args):
         parser_func = get_parser(template_id)
         RendererClass = get_renderer(template_id)
 
-        data = parser_func(file_path)
-
         if is_preview:
+            try:
+                data = parser_func(file_path, limit=1)
+            except TypeError:
+                data = parser_func(file_path)
+
+            if "records" in data and isinstance(data["records"], list) and len(data["records"]) > 1:
+                data["records"] = data["records"][:1]
+
             for list_key in ["product_labels", "lines", "charges", "adjustments", "payments", "taxes", "equipment", "rentals"]:
                 if list_key in data and isinstance(data[list_key], list) and len(data[list_key]) > 10:
                     data[list_key] = data[list_key][:10]
+        else:
+            data = parser_func(file_path)
 
         renderer = RendererClass()
         renderer.render(data)
 
 
         account_number = str(data.get("account_number", "unknown"))
-        account_number = account_number.replace(" ", "")
+        account_number = re.sub(r'[^A-Za-z0-9_-]+', '_', account_number).strip('_')
+        if not account_number:
+            account_number = "unknown"
 
         # Get template-specific pattern or fallback
         name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)

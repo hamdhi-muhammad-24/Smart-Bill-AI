@@ -1,48 +1,79 @@
-import os
+"""
+config.py
+All the stuff that does NOT change per-recipient: page geometry, fonts,
+coordinates, and the fixed paragraph text. Edit THIS file to fix layout
+issues -- render.py should never need hardcoded numbers.
+"""
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_PDF = os.path.join(BASE_DIR, "template.pdf")
+# --- Paths ---
+TEMPLATE_PDF = "template.pdf"
+SOURCE_CSV = "recipients.csv"
+OUTPUT_DIR = "output"
 
-# Fallback template PDF location if asset is stored in upper folder
-if not os.path.exists(TEMPLATE_PDF):
-    UPPER_PDF = os.path.join(os.path.dirname(BASE_DIR), "VAT-Number-Confirmation", "template.pdf")
-    if os.path.exists(UPPER_PDF):
-        TEMPLATE_PDF = UPPER_PDF
-
+# --- Page geometry (matches template.pdf's actual MediaBox, not plain A4) ---
 PAGE_WIDTH = 595.5
 PAGE_HEIGHT = 850.08
+PAGE_BOTTOM_OFFSET = 7.83  # template's MediaBox starts at y=7.83, not 0
 
-FONT_BODY = "Helvetica"
-FONT_BOLD = "Helvetica-Bold"
-SIZE_BODY = 10
-SIZE_FOOTER = 8
+# --- Fonts ---
+FONT_BODY = "Times-Roman"
+FONT_BOLD = "Times-Bold"
+FONT_ITALIC = "Times-Italic"
+SIZE_BODY = 12
+SIZE_FOOTER = 9
+FONT_PAGE_NUMBER = "Helvetica-Bold"
 
+# --- Layout coordinates ---
+# All extracted directly from the ground-truth reference PDF
+# ("VAT number confirmation Letter AmendednewADD.pdf", page 1) via
+# pdfplumber word/char bounding boxes, NOT eyeballed from a screenshot.
+# Confirmed against pages 2-3 that the indented column and Date position
+# are FIXED (do not shift with recipient name/address length).
+#
+# Two distinct x-anchors -- these are NOT the same column:
+#   - X_BODY: body margin used by To:/Our Reference:/VAT No./Subject/
+#     salutation/paragraphs/closing.
+#   - X_RECIPIENT: indented column used ONLY by the recipient name/address
+#     lines, left-aligned.
+#   - X_DATE: a separate fixed position for "Date:" -- confirmed NOT the
+#     same as X_RECIPIENT by comparing across reference pages 1-3 (Date
+#     never moves while the recipient block content does).
 X_BODY = 56.7
 X_RECIPIENT = 308.9
 X_DATE = 447.7
-RIGHT_MARGIN = 56.7
 
-Y_DATE = 104.7
-Y_RECIPIENT_START = 127.0
-RECIPIENT_LINE_HEIGHT = 14.63
-GAP_RECIPIENT_TO_TO = 42.4
+RIGHT_MARGIN = 56.7  # symmetric with X_BODY; used for paragraph wrap width
 
-TO_OUR_REF_VAT_LINE_HEIGHT = 15.9
+# All Y values are "distance from top of page" baselines, fed through
+# y_from_top() in render.py. LINE_HEIGHT values below are measured
+# baseline-to-baseline gaps from the reference, not guesses.
+Y_DATE = 104.7                      # "Date:" baseline
+Y_RECIPIENT_START = 127.0           # first recipient line baseline
+RECIPIENT_LINE_HEIGHT = 14.63       # baseline-to-baseline within recipient block
+GAP_RECIPIENT_TO_TO = 42.4          # last recipient line baseline -> "To:" baseline
+
+TO_OUR_REF_VAT_LINE_HEIGHT = 15.9   # To: / Our Reference: / VAT No. spacing
 GAP_VAT_TO_SUBJECT = 31.7
 GAP_SUBJECT_TO_SALUTATION = 30.8
 GAP_SALUTATION_TO_BODY = 23.9
 
-BODY_LINE_HEIGHT = 13.8
-PARAGRAPH_EXTRA_GAP = 10.0
-GAP_CLOSING_TO_SIGNOFF = 17.8
+BODY_LINE_HEIGHT = 13.8             # within-paragraph line spacing
+PARAGRAPH_EXTRA_GAP = 10.0          # added on top of BODY_LINE_HEIGHT between paragraphs
+GAP_CLOSING_TO_SIGNOFF = 17.8       # "Yours sincerely," baseline -> "Sri Lanka Telecom PLC" baseline
 
-Y_PAGE_NUMBER = 770.8
-X_PAGE_NUMBER_RIGHT = 537.2
-START_PAGE_NUMBER = 1
+# Footer disclaimer text + horizontal rule are already baked into
+# template.pdf -- do NOT redraw them. Only the page number is drawn here.
+Y_PAGE_NUMBER = 770.8                # page number baseline
+X_PAGE_NUMBER_RIGHT = 537.2          # page number right edge (drawRightString anchor)
 
-DATE_FORMAT = "%d.%m.%Y"
+DATE_FORMAT = "%d.%m.%Y"  # matches "16.06.2026" style in the template
 
+# --- Page numbering (running counter across the batch; not from CSV) ---
+START_PAGE_NUMBER = 65
+
+# --- Fixed text blocks (edit wording here, not in render.py) ---
 SUBJECT_LINE = "Subject: Verification of VAT Registration Number"
+
 SALUTATION = "Dear Valued Customer,"
 
 BODY_PARAGRAPHS = [
@@ -77,5 +108,9 @@ BODY_PARAGRAPHS = [
 
 CLOSING = "Yours sincerely,"
 SIGN_OFF = "Sri Lanka Telecom PLC"
+
+FOOTER_TEXT = "***This is a System Generated Letter. No signature is required. ***"
+
+# --- Values used inside BODY_PARAGRAPHS placeholders ---
 VERIFICATION_EMAIL = "shavindri@slt.com.lk"
-VERIFICATION_DEADLINE = "26th June 2026"
+VERIFICATION_DEADLINE = "26th June 2026"  # set per your actual campaign deadline

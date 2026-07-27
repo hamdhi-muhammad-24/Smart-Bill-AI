@@ -92,7 +92,7 @@ def _should_skip(filename: str) -> bool:
         return True
     ext = os.path.splitext(name)[1].lower()
     ext_clean = ext[1:] if ext.startswith(".") else ext
-    if ext_clean and ext_clean != "gmf" and not ext_clean.isdigit():
+    if ext_clean and ext_clean not in ("gmf", "xlsx", "csv", "zip") and not ext_clean.isdigit():
         return True
     return False
 
