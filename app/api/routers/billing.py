@@ -5,6 +5,7 @@ Calls SmartAI_Bill functions for PDF generation (never reimplements them).
 import os
 import sys
 import shutil
+import json
 import tempfile
 import logging
 from typing import List, Optional
@@ -13,7 +14,7 @@ from datetime import datetime, date
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -295,7 +296,13 @@ def get_pending_batches(
     pending_uploads = db.query(GmfUpload).filter(
         GmfUpload.status == GmfUploadStatus.APPROVED,
         GmfUpload.folder_type != "Test_GMFs",
-        GmfUpload.billing_run_id.is_(None)
+        or_(
+            GmfUpload.billing_run_id.is_(None),
+            and_(
+                GmfUpload.total_records_count > 0,
+                GmfUpload.processed_records_count < GmfUpload.total_records_count
+            )
+        )
     ).order_by(GmfUpload.detected_at.asc()).all()
 
     cycles = {}
@@ -619,7 +626,7 @@ def generate_batch_endpoint(
     # re-read from DB if we access its attributes, and avoid setting succeeded/failed.
     db.expire(run)
     
-    # Now, move the files to incoming queue AFTER database transaction has committed
+    # Now, copy the files to incoming queue AFTER database transaction has committed
     success_count = 0
     staging_failures = 0
     for upload in valid_uploads:
@@ -629,11 +636,23 @@ def generate_batch_endpoint(
             if os.path.exists(new_path):
                 os.remove(new_path)
             if str(Path(upload.file_path)) != str(new_path):
-                shutil.move(upload.file_path, str(new_path))
+                shutil.copy2(upload.file_path, str(new_path))
+
+            # Write sidecar JSON metadata for worker queue (offset & limit)
+            meta_path = settings.queue_incoming_dir / f"{filename}.meta.json"
+            meta_data = {
+                "upload_id": upload.id,
+                "offset": upload.processed_records_count or 0,
+                "limit": req.limit,
+                "billing_run_id": run_id,
+            }
+            with open(meta_path, "w", encoding="utf-8") as meta_f:
+                json.dump(meta_data, meta_f)
+
             upload.file_path = str(new_path)
             success_count += 1
         except Exception as e:
-            # If move fails, mark this GMF as failed immediately so the run status stays consistent
+            # If staging fails, mark this GMF as failed immediately so the run status stays consistent
             upload.status = GmfUploadStatus.FAILED
             upload.error_message = f"Failed to stage file: {e}"
             staging_failures += 1

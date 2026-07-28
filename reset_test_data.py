@@ -1,5 +1,8 @@
 import sys
 import os
+import shutil
+import time
+from pathlib import Path
 
 # Ensure the app module can be imported
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
@@ -15,6 +18,46 @@ from app.db.models import (
     InvoiceTemplate,
     TemplateApprovalStatus,
 )
+
+
+def _force_delete(path_item):
+    """Force deletes files and directories with retries for Windows file locks."""
+    if not path_item.exists():
+        return 0
+    deleted_count = 0
+    for attempt in range(5):
+        try:
+            if path_item.is_file():
+                os.chmod(path_item, 0o777)
+                path_item.unlink()
+                return 1
+            elif path_item.is_dir():
+                for root, dirs, files in os.walk(path_item, topdown=False):
+                    for name in files:
+                        p = Path(root) / name
+                        try:
+                            os.chmod(p, 0o777)
+                            p.unlink()
+                            deleted_count += 1
+                        except Exception:
+                            pass
+                    for name in dirs:
+                        p = Path(root) / name
+                        try:
+                            os.chmod(p, 0o777)
+                            p.rmdir()
+                        except Exception:
+                            pass
+                try:
+                    os.chmod(path_item, 0o777)
+                    path_item.rmdir()
+                except Exception:
+                    pass
+                return deleted_count
+        except Exception:
+            time.sleep(0.3)
+    return deleted_count
+
 
 def reset_test_data():
     print("WARNING: This script will delete all transaction history (GMF Uploads, Invoices, Billing Runs, Notifications).")
@@ -45,15 +88,12 @@ def reset_test_data():
             deleted_invoices = db.query(Invoice).delete()
             print(f"Deleted {deleted_invoices} Invoices.")
             
-            # GmfUpload has a foreign key to BillingRun, so we delete it before BillingRun
             deleted_uploads = db.query(GmfUpload).delete()
             print(f"Deleted {deleted_uploads} GmfUploads.")
             
-            # Now we can delete BillingRuns
             deleted_runs = db.query(BillingRun).delete()
             print(f"Deleted {deleted_runs} BillingRuns.")
             
-            # Reset all template approval statuses to PENDING
             updated_templates = db.query(InvoiceTemplate).update({"approval_status": TemplateApprovalStatus.PENDING})
             print(f"Reset {updated_templates} templates to PENDING status.")
             
@@ -62,8 +102,6 @@ def reset_test_data():
             
             # --- CLEAR PHYSICAL FILES ---
             from app.core.config import settings
-            import shutil
-            from pathlib import Path
 
             print("\nCleaning up physical files...")
             legacy_gdrive = Path(r"G:\My Drive\SLT_GMF_Uploads")
@@ -73,6 +111,7 @@ def reset_test_data():
                 settings.queue_pending_dir,
                 Path("./queue/completed_temp"),
                 Path("./output"),
+                Path("./output/previews"),
                 settings.gmf_drive_path / "Test_GMFs",
                 settings.gmf_drive_path / "Cycle_1",
                 settings.gmf_drive_path / "Cycle_2",
@@ -80,11 +119,13 @@ def reset_test_data():
                 settings.gmf_drive_path / "Cycle_4",
                 settings.gmf_drive_path / "LOD",
                 settings.gmf_drive_path / "VAT_Confirmation",
+                settings.gmf_drive_path / "Staged",
                 settings.gmf_drive_path / "Processed",
                 settings.gmf_drive_path / "Failed",
                 settings.gmf_drive_path / "Output",
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/Output"),
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/Processed"),
+                Path("./Models/SmartAI_Bill/local_gmf_uploads/Staged"),
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/Failed"),
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/Test_GMFs"),
                 Path("./Models/SmartAI_Bill/local_gmf_uploads/LOD"),
@@ -92,26 +133,18 @@ def reset_test_data():
             ]
 
             if legacy_gdrive.exists():
-                for sub in ["Test_GMFs", "Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Processed", "Failed", "Output"]:
+                for sub in ["Test_GMFs", "Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Staged", "Processed", "Failed", "Output"]:
                     paths_to_clean.append(legacy_gdrive / sub)
 
             files_deleted = 0
             for p in paths_to_clean:
                 if p.exists():
-                    for item in p.iterdir():
-                        try:
-                            if item.is_file():
-                                item.unlink()
-                                files_deleted += 1
-                            elif item.is_dir():
-                                shutil.rmtree(item)
-                                files_deleted += 1
-                        except Exception as file_err:
-                            print(f"Warning: could not delete {item}: {file_err}")
+                    for item in list(p.iterdir()):
+                        files_deleted += _force_delete(item)
                             
-            print(f"Cleaned up {files_deleted} files/folders from processing queues and drive.")
-            print("\nSUCCESS! The system has been wiped clean of transaction history and temporary files.")
-            print("You can now upload your GMF files back into the system and they will be treated as brand new uploads.")
+            print(f"Cleaned up {files_deleted} files/folders from processing queues, output, and drive.")
+            print("\nSUCCESS! The system has been wiped clean of transaction history, generated PDFs, and temporary files.")
+            print("You can now upload your GMF files back into the system and test fresh.")
         except Exception as e:
             db.rollback()
             print(f"An error occurred: {e}")

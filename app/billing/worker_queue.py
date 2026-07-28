@@ -4,6 +4,8 @@ import shutil
 import logging
 import multiprocessing
 import sys
+import json
+import inspect
 from pathlib import Path
 from datetime import datetime
 
@@ -22,6 +24,22 @@ logger = logging.getLogger("worker_queue")
 logger.setLevel(logging.INFO)
 
 COMPLETED_TEMP = Path("./queue/completed_temp")
+
+TEMPLATE_FOLDER_MAP = {
+    "lod": "LOD",
+    "vat_confirmation": "VAT_Confirmation",
+    "vat_home": "VAT_Home",
+    "nonvat_home": "NonVAT_Home",
+    "vat_enterprise": "VAT_Enterprise",
+    "nonvat_enterprise": "NonVAT_Enterprise",
+    "vat_gov": "VAT_Gov",
+    "nonvat_gov": "NonVAT_Gov",
+    "vat_creditnote": "VAT_CreditNote",
+    "nonvat_creditnote": "NonVAT_CreditNote",
+    "product_label_grouping": "Product_Label_Grouping",
+    "summary_statement": "Summary_Statement",
+    "usd_open_item": "USD_Open_Item"
+}
 
 def _robust_file_op(func, *args, max_retries=5, delay=0.5):
     """Retries a file operation to overcome transient Windows file locks (WinError 32)."""
@@ -59,7 +77,13 @@ def _worker_process(worker_id):
                 time.sleep(1)
                 continue
                 
-            files = [f for f in incoming_dir.iterdir() if f.is_file() and not f.name.startswith(".") and not f.name.endswith(".processing")]
+            files = [
+                f for f in incoming_dir.iterdir()
+                if f.is_file()
+                and not f.name.startswith(".")
+                and not f.name.endswith(".processing")
+                and not f.name.endswith(".meta.json")
+            ]
             
             if not files:
                 time.sleep(1)
@@ -177,9 +201,27 @@ def _worker_process(worker_id):
                         db.commit()
                 continue
             
-            # Parse GMF data
+            # Read sidecar JSON metadata if provided by generate-batch API
+            meta_file = settings.queue_incoming_dir / f"{filename}.meta.json"
+            meta_data = {}
+            if meta_file.exists():
+                try:
+                    with open(meta_file, "r", encoding="utf-8") as mf:
+                        meta_data = json.load(mf)
+                    _robust_file_op(meta_file.unlink)
+                except Exception as e:
+                    logger.warning(f"Could not read meta file {meta_file}: {e}")
+
+            offset = meta_data.get("offset", 0)
+            limit = meta_data.get("limit")
+
+            # Parse GMF data with offset and limit if supported by parser
             try:
-                data = parser_func(str(working_path))
+                sig = inspect.signature(parser_func)
+                if "offset" in sig.parameters and "limit" in sig.parameters:
+                    data = parser_func(str(working_path), offset=offset, limit=limit)
+                else:
+                    data = parser_func(str(working_path))
             except Exception as parse_err:
                 raise Exception(f"GMF structure parse error: {parse_err}")
 
@@ -190,13 +232,27 @@ def _worker_process(worker_id):
             except Exception as render_err:
                 raise Exception(f"PDF layout render error: {render_err}")
             
-            cycle_temp = COMPLETED_TEMP / cycle_label
-            cycle_temp.mkdir(parents=True, exist_ok=True)
+            # Construct output folder: output/<YYYY-MM-DD>/<Cycle_N|LOD|VAT_Confirmation>/Batch_X/
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            folder_name = cycle_label if cycle_label in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation") else TEMPLATE_FOLDER_MAP.get(str(template_id), str(template_id))
+            cycle_base_dir = settings.output_dir / today_str / folder_name
+            cycle_base_dir.mkdir(parents=True, exist_ok=True)
+            
+            def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
+                b_num = 1
+                while True:
+                    b_dir = base_dir / f"Batch_{b_num}"
+                    b_dir.mkdir(parents=True, exist_ok=True)
+                    pdf_count = len([f for f in b_dir.iterdir() if f.is_file() and f.name.lower().endswith(".pdf")])
+                    if pdf_count < max_per_batch:
+                        return b_dir
+                    b_num += 1
             
             generated_count = 0
             if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
                 for fname, pdf_bytes, _ in renderer.generated_pdfs:
-                    output_pdf_path = cycle_temp / fname
+                    target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
+                    output_pdf_path = target_dir / fname
                     with open(output_pdf_path, "wb") as f:
                         f.write(pdf_bytes)
                 generated_count = len(renderer.generated_pdfs)
@@ -204,25 +260,16 @@ def _worker_process(worker_id):
                 account_number = str(data.get("account_number", "unknown")).replace(" ", "")
                 name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
                 output_name = name_pattern.format(account_number=account_number, template_id=template_id)
-                output_pdf_path = cycle_temp / output_name
+                target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
+                output_pdf_path = target_dir / output_name
                 try:
                     renderer.save(str(output_pdf_path))
                     generated_count = 1
                 except Exception as save_err:
                     raise Exception(f"PDF save/write error: {save_err}")
             
-            # Move source GMF to Processed folder and update DB
+            # Move source GMF to Processed/Staged folder and update DB
             try:
-                processed_dest = settings.gmf_drive_path / "Processed" / (cycle_label or "unknown")
-                processed_dest.mkdir(parents=True, exist_ok=True)
-                dest_file_path = processed_dest / filename
-                if dest_file_path.exists():
-                    try:
-                        _robust_file_op(dest_file_path.unlink)
-                    except Exception as rm_err:
-                        logger.warning(f"Could not remove existing processed GMF file {dest_file_path}: {rm_err}")
-                _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
-                
                 with SessionLocal() as db:
                     upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
                     if upload:
@@ -232,12 +279,31 @@ def _worker_process(worker_id):
                             upload.total_records_count = total
                         
                         if upload.processed_records_count >= upload.total_records_count:
+                            # Fully completed: move file to Processed
+                            processed_dest = settings.gmf_drive_path / "Processed" / (cycle_label or "unknown")
+                            processed_dest.mkdir(parents=True, exist_ok=True)
+                            dest_file_path = processed_dest / filename
+                            if dest_file_path.exists():
+                                _robust_file_op(dest_file_path.unlink)
+                            _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
+                            
                             upload.status = GmfUploadStatus.COMPLETED
+                            upload.file_path = str(dest_file_path)
                         else:
+                            # Partially completed: keep file in Staged folder so next Generate 10/50 click can slice next offset
+                            staged_dest = settings.gmf_drive_path / "Staged"
+                            staged_dest.mkdir(parents=True, exist_ok=True)
+                            dest_file_path = staged_dest / filename
+                            if str(working_path) != str(dest_file_path):
+                                if dest_file_path.exists():
+                                    _robust_file_op(dest_file_path.unlink)
+                                _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
+                            
                             upload.status = GmfUploadStatus.APPROVED
+                            upload.file_path = str(dest_file_path)
+                            upload.billing_run_id = None # Reset billing_run_id so it stays visible in Generation Hub!
                             
                         upload.processed_at = datetime.now()
-                        upload.file_path = str(dest_file_path)
                         
                         if upload.billing_run_id:
                             from app.db.models import BillingRun, RunStatus
@@ -397,6 +463,21 @@ def _archiver_process():
         except Exception as e:
             logger.error(f"Archiver error: {e}", exc_info=True)
             time.sleep(5)
+
+
+import threading
+
+def start_worker_threads(num_workers=4):
+    """
+    Starts worker daemon threads directly inside the application process.
+    """
+    threads = []
+    for i in range(num_workers):
+        t = threading.Thread(target=_worker_process, args=(i,), daemon=True)
+        t.start()
+        threads.append(t)
+    logger.info(f"Started {num_workers} background worker threads.")
+    return threads
 
 
 def start_workers(num_workers=10):

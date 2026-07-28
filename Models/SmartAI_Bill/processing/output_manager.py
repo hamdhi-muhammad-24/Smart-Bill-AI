@@ -1,18 +1,34 @@
 """
 Output batch manager for SLT Bill Generator.
 
-Replaces ZIP creation with organised folder-based output:
-  G:/My Drive/SLT_GMF_Uploads/Output/<YYYY-MM-DD>/<Cycle_N>/Batch_1/
-                                                              Batch_2/
-                                                              ...
-
-Each batch folder contains up to BATCH_FOLDER_SIZE individual PDF files.
-This allows the admin UI to list and preview individual invoices without unzipping.
+Organised folder-based output browser support for both local ./output and Drive output folders:
+  ./output/<YYYY-MM-DD>/<Cycle_or_Template>/Batch_1/
+  G:/My Drive/SLT_GMF_Uploads/Output/<YYYY-MM-DD>/<Cycle_or_Template>/Batch_1/
 """
 import os
 import shutil
 from datetime import datetime
 from config import BATCH_FOLDER_SIZE, OUTPUT_BASE_DIR
+
+
+def get_output_roots():
+    """Return list of valid output root paths (checking ./output and drive Output)."""
+    roots = []
+    try:
+        from app.core.config import settings
+        out_p = str(settings.output_dir)
+        if os.path.exists(out_p):
+            roots.append(out_p)
+    except Exception:
+        pass
+
+    if os.path.exists("./output") and "./output" not in roots:
+        roots.append("./output")
+
+    if os.path.exists(OUTPUT_BASE_DIR) and OUTPUT_BASE_DIR not in roots:
+        roots.append(OUTPUT_BASE_DIR)
+
+    return roots if roots else [OUTPUT_BASE_DIR]
 
 
 def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None):
@@ -49,12 +65,11 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
 
     if log_callback:
         log_callback(
-            f"\nOrganising {len(pdfs)} PDFs → {base} "
+            f"\nOrganising {len(pdfs)} PDFs -> {base} "
             f"(batches of {BATCH_FOLDER_SIZE})"
         )
 
     batch_folders = []
-    
     current_batch_num = 1
     pdf_index = 0
     
@@ -73,7 +88,6 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             
         moved_in_this_batch = 0
         while pdf_index < len(pdfs):
-            # Strict check before moving each file to ensure batch NEVER exceeds BATCH_FOLDER_SIZE
             existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
             if existing_count >= BATCH_FOLDER_SIZE:
                 current_batch_num += 1
@@ -84,7 +98,6 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             pdf_path = pdfs[pdf_index]
             dest = os.path.join(batch_dir, os.path.basename(pdf_path))
             
-            # Copy to VM local output directory duplicate
             try:
                 local_vm_batch_dir = os.path.join("./output", today, cycle_label, f"Batch_{current_batch_num}")
                 os.makedirs(local_vm_batch_dir, exist_ok=True)
@@ -100,15 +113,13 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
         if log_callback:
             log_callback(
                 f"  Batch {current_batch_num}: "
-                f"added {moved_in_this_batch} invoices → {batch_dir}"
+                f"added {moved_in_this_batch} invoices -> {batch_dir}"
             )
             
         if batch_dir not in batch_folders:
             batch_folders.append(batch_dir)
             
         current_batch_num += 1
-
-    # Removed temp dir cleanup to allow concurrent worker writing
 
     if log_callback:
         log_callback(f"Created {len(batch_folders)} batch folder(s) in {base}")
@@ -118,7 +129,8 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
 
 def get_output_root(date_str=None, cycle_label=None):
     """Return the output root path (optionally scoped by date and cycle)."""
-    parts = [OUTPUT_BASE_DIR]
+    roots = get_output_roots()
+    parts = [roots[0]]
     if date_str:
         parts.append(date_str)
     if cycle_label:
@@ -127,49 +139,58 @@ def get_output_root(date_str=None, cycle_label=None):
 
 
 def list_output_dates():
-    """Return sorted list of dates that have output, newest first."""
-    if not os.path.exists(OUTPUT_BASE_DIR):
-        return []
-    return sorted(
-        [d for d in os.listdir(OUTPUT_BASE_DIR)
-         if os.path.isdir(os.path.join(OUTPUT_BASE_DIR, d))],
-        reverse=True,
-    )
+    """Return sorted list of dates that have output across all output root locations, newest first."""
+    dates = set()
+    for root in get_output_roots():
+        if os.path.exists(root):
+            for d in os.listdir(root):
+                if d == "previews":
+                    continue
+                if os.path.isdir(os.path.join(root, d)):
+                    dates.add(d)
+    return sorted(list(dates), reverse=True)
 
 
 def list_cycles_for_date(date_str):
-    """Return list of cycle folders for a given date."""
-    date_path = os.path.join(OUTPUT_BASE_DIR, date_str)
-    if not os.path.exists(date_path):
-        return []
-    return sorted([
-        d for d in os.listdir(date_path)
-        if os.path.isdir(os.path.join(date_path, d))
-    ])
+    """Return list of cycle/template folders for a given date across all output roots."""
+    cycles = set()
+    for root in get_output_roots():
+        date_path = os.path.join(root, date_str)
+        if os.path.exists(date_path):
+            for d in os.listdir(date_path):
+                if os.path.isdir(os.path.join(date_path, d)):
+                    cycles.add(d)
+    return sorted(list(cycles))
 
 
 def list_batches_for_cycle(date_str, cycle_label):
-    """Return list of batch folders for a given date/cycle."""
-    cycle_path = os.path.join(OUTPUT_BASE_DIR, date_str, cycle_label)
-    if not os.path.exists(cycle_path):
-        return []
-    return sorted([
-        d for d in os.listdir(cycle_path)
-        if os.path.isdir(os.path.join(cycle_path, d))
-    ])
+    """Return list of batch folders for a given date/cycle across all output roots."""
+    batches = set()
+    for root in get_output_roots():
+        cycle_path = os.path.join(root, date_str, cycle_label)
+        if os.path.exists(cycle_path):
+            for d in os.listdir(cycle_path):
+                if os.path.isdir(os.path.join(cycle_path, d)):
+                    batches.add(d)
+    return sorted(list(batches))
 
 
 def list_pdfs_in_batch(date_str, cycle_label, batch_name):
-    """Return list of PDF filenames in a specific batch folder."""
-    batch_path = os.path.join(OUTPUT_BASE_DIR, date_str, cycle_label, batch_name)
-    if not os.path.exists(batch_path):
-        return []
-    return sorted([
-        f for f in os.listdir(batch_path)
-        if f.lower().endswith(".pdf")
-    ])
+    """Return list of PDF filenames in a specific batch folder across all output roots."""
+    pdfs = set()
+    for root in get_output_roots():
+        batch_path = os.path.join(root, date_str, cycle_label, batch_name)
+        if os.path.exists(batch_path):
+            for f in os.listdir(batch_path):
+                if f.lower().endswith(".pdf"):
+                    pdfs.add(f)
+    return sorted(list(pdfs))
 
 
 def get_pdf_path(date_str, cycle_label, batch_name, filename):
-    """Return absolute path to a specific PDF file."""
-    return os.path.join(OUTPUT_BASE_DIR, date_str, cycle_label, batch_name, filename)
+    """Return absolute path to a specific PDF file across all output roots."""
+    for root in get_output_roots():
+        p = os.path.join(root, date_str, cycle_label, batch_name, filename)
+        if os.path.exists(p):
+            return p
+    return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, filename)

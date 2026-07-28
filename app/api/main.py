@@ -39,6 +39,12 @@ def create_app() -> FastAPI:
             import logging
             logging.getLogger("uvicorn").warning(f"Azure AD OpenID config load skipped: {e}")
         start_scheduler()
+        try:
+            from app.billing.worker_queue import start_worker_threads
+            start_worker_threads(4)
+        except Exception as e:
+            import logging
+            logging.getLogger("uvicorn").warning(f"Worker threads startup skipped: {e}")
         
     return application
 
