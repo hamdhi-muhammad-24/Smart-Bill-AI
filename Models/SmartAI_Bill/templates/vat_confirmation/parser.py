@@ -70,10 +70,16 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
                 return {"records": [], "reference": "unknown", "account_number": "unknown", "total_records": 0, "input_path": file_path}
 
             col_map = {str(name).strip().upper(): idx for idx, name in enumerate(header) if name is not None}
-            ref_idx = col_map.get("CUSTOMER_REF") or col_map.get("REFERENCE")
-            comp_idx = col_map.get("COMPANY_NAME")
-            name_idx = col_map.get("NAME")
-            vat_idx = col_map.get("VAT_REGISTRATION") or col_map.get("VAT_NO")
+            def _get_col_idx(*names):
+                for name in names:
+                    if name in col_map:
+                        return col_map[name]
+                return None
+
+            ref_idx = _get_col_idx("CUSTOMER_REF", "REFERENCE", "ACCOUNT_NO", "ACCOUNT_NUMBER")
+            comp_idx = _get_col_idx("COMPANY_NAME")
+            name_idx = _get_col_idx("NAME")
+            vat_idx = _get_col_idx("VAT_REGISTRATION", "VAT_NO", "VAT_REGISTRATION_NUMBER")
             addr_cols = ["ADDR_LINE_1", "ADDR_LINE_2", "ADDR_LINE_3", "ADDR_LINE_4", "ADDR_LINE_5", "CITY"]
 
             target_max = (offset + limit) if limit is not None else None

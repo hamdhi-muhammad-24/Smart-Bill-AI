@@ -339,7 +339,7 @@ def _worker_process(worker_id):
             except Exception as delete_err:
                 logger.error(f"Failed to launch rclone delete for {filename}: {delete_err}")
                 
-            logger.info(f"Worker {worker_id} successfully generated {output_name}")
+            logger.info(f"Worker {worker_id} successfully generated {generated_count} PDF(s) for {filename}")
             
             # Throttle
             elapsed = time.time() - start_time

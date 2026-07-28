@@ -135,6 +135,7 @@ class VATConfirmationRenderer:
         if not os.path.exists(template_path):
             template_path = os.path.join(BASE_DIR, "template.pdf")
 
+        used_filenames = set()
         for record in records:
             overlay_buf = build_overlay(record, page_number, today_str)
             overlay_page = PdfReader(overlay_buf).pages[0]
@@ -150,8 +151,16 @@ class VATConfirmationRenderer:
             writer.write(pdf_buf)
             pdf_bytes = pdf_buf.getvalue()
 
-            ref = safe_filename(record.get("reference") or record.get("account_number") or "unknown")
-            fname = f"{ref}_Vat_confirmation.pdf"
+            identifier = (record.get("account_number") or record.get("reference") or record.get("vat_no") or record.get("recipient_name") or "unknown").strip()
+            ref_clean = safe_filename(identifier) or "unknown"
+            
+            fname = f"{ref_clean}_Vat_confirmation.pdf"
+            counter = 1
+            while fname in used_filenames:
+                counter += 1
+                fname = f"{ref_clean}_{counter}_Vat_confirmation.pdf"
+            used_filenames.add(fname)
+
             self.generated_pdfs.append((fname, pdf_bytes, record))
             page_number += 1
 
