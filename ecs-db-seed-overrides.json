@@ -1,8 +1,0 @@
-{
-  "containerOverrides": [
-    {
-      "name": "slt-backend",
-      "command": ["python", "-m", "app.db.seed"]
-    }
-  ]
-}
