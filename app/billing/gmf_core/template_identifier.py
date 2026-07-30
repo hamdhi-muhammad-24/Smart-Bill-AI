@@ -7,14 +7,15 @@ TEMPLATE_NONVAT_HOME               = "nonvat_home"
 TEMPLATE_NONVAT_ENTERPRISE         = "nonvat_enterprise"
 TEMPLATE_VAT_ENTERPRISE            = "vat_enterprise"
 TEMPLATE_VAT_HOME                  = "vat_home"
+TEMPLATE_VAT_CREDITNOTE            = "vat_creditnote"
+TEMPLATE_NONVAT_CREDITNOTE         = "nonvat_creditnote"
 TEMPLATE_PRODUCT_LABEL_GROUPING    = "product_label_grouping"
 TEMPLATE_SUBSCRIPTION_REF_GROUPING = "subscription_ref_grouping"
 TEMPLATE_SUMMARY_STATEMENT         = "summary_statement"
 TEMPLATE_INVOICE_OF_SUMMARY        = "invoice_of_summary"
-TEMPLATE_USD_OPEN_ITEM             = "usd_open_item"
+TEMPLATE_USD_OPEN_ITEM             = "usd_open_item"  
 
 # Out-of-scope
-UNSUPPORTED_CREDIT_NOTE       = "credit_note"
 UNSUPPORTED_FOREIGN_CURRENCY  = "foreign_currency"
 
 
@@ -36,6 +37,7 @@ class IdentificationResult:
 def identify_template(gmf_file_path: str) -> IdentificationResult:
     """Identify which template a GMF file needs."""
     result = IdentificationResult()
+    
     path_str = str(gmf_file_path).lower()
     if path_str.endswith('.processing'):
         path_str = path_str[:-11]
@@ -57,11 +59,19 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
 
     # Exclusion checks
     if header.billtype == 5:
-        result.template_id = UNSUPPORTED_CREDIT_NOTE
-        result.reasons.append("BILLTYPE=5 → Credit Note (out of scope)")
+        is_vat = is_vat_registered(header.customer_vat_ref or "")
+        if is_vat:
+            result.template_id = TEMPLATE_VAT_CREDITNOTE
+            result.reasons.append("BILLTYPE=5 → VAT Credit Note")
+        else:
+            result.template_id = TEMPLATE_NONVAT_CREDITNOTE
+            result.reasons.append("BILLTYPE=5 → NonVAT Credit Note")
+
+        result.is_supported = True
         return result
 
     if header.acc_currency_code and header.acc_currency_code.strip().upper() != "RS":
+        # Allow foreign currency only for USD Open Item (BILLSTYLE 21)
         if header.billstyle != 21:
             result.template_id = UNSUPPORTED_FOREIGN_CURRENCY
             result.reasons.append(
@@ -95,15 +105,21 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
         result.reasons.append("BILLSTYLE=20 → Subscription Ref Grouping")
         result.is_supported = True
 
+    elif style == 21:
+        result.template_id = TEMPLATE_USD_OPEN_ITEM
+        result.reasons.append("BILLSTYLE=21 → USD Open Item")
+        result.is_supported = True
+
     elif style == 1:
+        # Check explicitly if the customer has a VAT registration
         if is_vat:
             badge = get_badge(header.customer_type or "")
             if badge == "HOME":
                 result.template_id = TEMPLATE_VAT_HOME
-                result.reasons.append("BILLSTYLE=1, VAT, Home → VAT Home")
+                result.reasons.append("BILLSTYLE=1, VAT Customer, Home → VAT Home")
             else:
                 result.template_id = TEMPLATE_VAT_ENTERPRISE
-                result.reasons.append("BILLSTYLE=1, VAT → VAT Enterprise")
+                result.reasons.append("BILLSTYLE=1, VAT Customer → VAT Enterprise")
         else:
             badge = get_badge(header.customer_type or "")
             if badge == "HOME":
@@ -121,11 +137,6 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
     elif style == 18:
         result.template_id = TEMPLATE_INVOICE_OF_SUMMARY
         result.reasons.append("BILLSTYLE=18 → Invoice of Summary")
-        result.is_supported = True
-
-    elif style == 21:
-        result.template_id = TEMPLATE_USD_OPEN_ITEM
-        result.reasons.append("BILLSTYLE=21 → USD Open Item")
         result.is_supported = True
 
     else:

@@ -116,3 +116,11 @@ def parse_filename(filename: str) -> dict:
     except (ValueError, IndexError):
         pass
     return result
+
+
+def is_red_notice(filename: str) -> bool:
+    """Return True if filename matches RED notice pattern (e.g. BILL-RED)."""
+    if not filename:
+        return False
+    name = str(filename).upper()
+    return "BILL-RED" in name or "-RED_" in name or "_RED." in name or name.endswith("-RED")

@@ -33,6 +33,8 @@ import fitz
 from core.bill_common import is_tax_section_printable
 from core.qr_generator import generate_slt_qr, generate_static_payonline_qr
 from core.barcode_generator import generate_barcode, generate_slip_barcode
+from core.gmf_reader import is_red_notice
+
 from templates.vat_home.config import (
     COORDS, FONTS, FLOW_COLUMNS, FULL_WIDTH, PAGE1_CONTENT_TOP,
     CONTENT_FLOOR, CONT_PAGE_INVOICE_NO, CONT_PAGE_PAGE_INDICATOR_X,
@@ -52,7 +54,9 @@ class VATHomeRenderer:
         self.doc = fitz.open()
         self.page = None
         self._invoice_number = ""
+        self.content_floor = CONTENT_FLOOR
         self._new_page()
+
 
     # ---- page / low-level draw helpers -----------------------------------
 
@@ -151,8 +155,23 @@ class VATHomeRenderer:
     # ---- top-level render --------------------------------------------------
 
     def render(self, data):
+        filename = str(data.get("source_filename") or data.get("filename") or "")
+        if is_red_notice(filename):
+            self.content_floor = 622.0
+            templates_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+            red_pdf = os.path.join(templates_dir, "Template_RED.pdf")
+            if os.path.exists(red_pdf):
+                self.template_doc = fitz.open(red_pdf)
+                if self.doc.page_count > 0:
+                    self.doc[0].show_pdf_page(self.doc[0].rect, self.template_doc, 0)
+        else:
+            self.content_floor = CONTENT_FLOOR
+
+
         self._invoice_number = data.get("invoice_number", "")
         self._draw_header(data)
+
         self._draw_vat_lines(data)
         self._draw_customer(data)
         self._draw_badge(data)
@@ -341,8 +360,9 @@ class _Flow:
         self.column = "left"
         self.y = PAGE1_CONTENT_TOP
         self.col_top = PAGE1_CONTENT_TOP
-        self.col_floor = CONTENT_FLOOR
+        self.col_floor = renderer.content_floor
         self._page_top_y = {}
+
         self._page_max_y = {}
         self.page_dividers = []  # (page_idx, start_y, end_y)
 

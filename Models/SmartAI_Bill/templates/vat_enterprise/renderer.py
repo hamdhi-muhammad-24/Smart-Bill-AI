@@ -17,8 +17,10 @@ class VATEnterpriseRenderer(BaseRenderer):
         super().__init__(TEMPLATE_PDF)
 
     def render(self, data):
+        self.check_red_notice(data)
         # 1. Apply masks to cover baked-in template text/numbers on page 1
         self._apply_page1_mask()
+
 
         # 2. Draw standard headers, VAT info, customer details, and badge
         self._draw_header(data)
@@ -166,7 +168,7 @@ class VATEnterpriseRenderer(BaseRenderer):
 
     def _draw_charges(self, product_labels):
         y = CHARGES_TABLE["page1_y_start"]
-        y_min = CHARGES_TABLE["page1_y_min"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"])
         line_h = CHARGES_TABLE["line_h"]
         lp_gap = CHARGES_TABLE["product_label_y_gap"]
         f = FONTS["product_label"]
@@ -202,7 +204,7 @@ class VATEnterpriseRenderer(BaseRenderer):
             return y
         f = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
-        y_min = CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
         
         # Space check for adjustments section header + first row
         if y - line_h * 2 < y_min:
@@ -228,7 +230,7 @@ class VATEnterpriseRenderer(BaseRenderer):
             return y
         f = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
-        y_min = CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
         
         # Space check for discounts section header + first row
         if y - line_h * 2 < y_min:
@@ -254,7 +256,7 @@ class VATEnterpriseRenderer(BaseRenderer):
             return y
         f = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
-        y_min = CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
         
         # Space check for taxes section header + first row
         if y - line_h * 2 < y_min:
@@ -277,7 +279,7 @@ class VATEnterpriseRenderer(BaseRenderer):
 
     def _draw_total_charges_dynamic(self, data, y):
         line_h = CHARGES_TABLE["line_h"]
-        y_min = CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
         
         # If there isn't enough space, push to a new page
         if y - line_h * 2 < y_min:
@@ -340,8 +342,9 @@ class VATEnterpriseRenderer(BaseRenderer):
             return left if state["col"] == "left" else right
 
         def floor_y():
-            return CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 \
+            return self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 \
                 else y_min_other
+
 
         def new_column_top():
             # The right column on the very first (Total-Charges) page starts at the

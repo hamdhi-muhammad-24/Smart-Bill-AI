@@ -7,6 +7,7 @@ def generate_barcode(value: str):
     clean_value = value.replace(" ", "")
 
     Code128 = barcode.get_barcode_class('code128')
+    assert Code128 is not None, "Barcode class code128 not found"
     bc = Code128(clean_value, writer=ImageWriter())
 
     buf = BytesIO()
@@ -27,6 +28,7 @@ def generate_slip_barcode(bill_ref: str, total_charges: float):
     barcode_value = f"{clean_ref}{total_charges:.2f}"
 
     Code128 = barcode.get_barcode_class('code128')
+    assert Code128 is not None, "Barcode class code128 not found"
     bc = Code128(barcode_value, writer=ImageWriter())
 
     buf = BytesIO()

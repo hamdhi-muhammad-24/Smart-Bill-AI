@@ -18,7 +18,9 @@ class NonVATHomeRenderer(BaseRenderer):
         super().__init__(TEMPLATE_PDF)
 
     def render(self, data):
+        self.check_red_notice(data)
         self._draw_header(data)
+
         self._draw_customer(data)
         self._draw_badge(data)
         self._draw_generation_id(data)
@@ -147,7 +149,7 @@ class NonVATHomeRenderer(BaseRenderer):
 
     def _draw_charges(self, product_labels):
         y      = CHARGES_TABLE["page1_y_start"]
-        y_min  = CHARGES_TABLE["page1_y_min"]
+        y_min  = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"])
         line_h = CHARGES_TABLE["line_h"]
         lp_gap = CHARGES_TABLE["product_label_y_gap"]
         f  = FONTS["product_label"]
@@ -183,10 +185,20 @@ class NonVATHomeRenderer(BaseRenderer):
             return y
         f      = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
+        y_min  = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        if y - line_h * 2 < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+            y_min = CHARGES_TABLE["otherpage_y_min"]
+
         self.text(CHARGES_TABLE["product_label_x"], y, "Adjustments",
                   size=f["size"], bold=True)
         y -= line_h
         for adj in data["adjustments"]:
+            if y - line_h < y_min:
+                self.new_page()
+                y = CHARGES_TABLE["otherpage_y_start"]
+                y_min = CHARGES_TABLE["otherpage_y_min"]
             self.text(CHARGES_TABLE["desc_x"], y,
                       adj["description"], size=f["size"])
             self.number(CHARGES_TABLE["amount_x"], y,
@@ -201,10 +213,20 @@ class NonVATHomeRenderer(BaseRenderer):
             return y
         f      = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
+        y_min  = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        if y - line_h * 2 < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+            y_min = CHARGES_TABLE["otherpage_y_min"]
+
         self.text(CHARGES_TABLE["product_label_x"], y, "Discounts",
                   size=f["size"], bold=True)
         y -= line_h
         for d in discounts:
+            if y - line_h < y_min:
+                self.new_page()
+                y = CHARGES_TABLE["otherpage_y_start"]
+                y_min = CHARGES_TABLE["otherpage_y_min"]
             self.text(CHARGES_TABLE["desc_x"], y,
                       d["description"], size=f["size"])
             self.number(CHARGES_TABLE["amount_x"], y,
@@ -219,11 +241,21 @@ class NonVATHomeRenderer(BaseRenderer):
             return y
         f      = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
+        y_min  = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        if y - line_h * 2 < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+            y_min = CHARGES_TABLE["otherpage_y_min"]
+
         self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies",
                   size=f["size"], bold=True)
         y -= line_h
         for t in data.get("taxes", []):
             if t["amount"]:
+                if y - line_h < y_min:
+                    self.new_page()
+                    y = CHARGES_TABLE["otherpage_y_start"]
+                    y_min = CHARGES_TABLE["otherpage_y_min"]
                 self.text(CHARGES_TABLE["desc_x"], y,
                           t["name"], size=f["size"])
                 self.number(CHARGES_TABLE["amount_x"], y,
@@ -234,7 +266,7 @@ class NonVATHomeRenderer(BaseRenderer):
 
     def _draw_total_charges_dynamic(self, data, y):
         line_h = CHARGES_TABLE["line_h"]
-        y_min = CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
         
         # If there isn't enough space, push to a new page
         if y - line_h * 2 < y_min:
@@ -286,8 +318,9 @@ class NonVATHomeRenderer(BaseRenderer):
             return left if state["col"] == "left" else right
 
         def floor_y():
-            return CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 \
+            return self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 \
                 else y_min_other
+
 
         def new_column_top():
             return first_col_top if self.page_count() - 1 == first_page_idx \

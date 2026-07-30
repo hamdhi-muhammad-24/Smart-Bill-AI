@@ -1,3 +1,4 @@
+import os
 import io
 from copy import deepcopy
 from pypdf import PdfReader, PdfWriter, PageObject
@@ -10,6 +11,7 @@ from core.text_utils import wrap_text, format_number
 from core.tables import draw_table_with_overflow
 from core.qr_generator import generate_slt_qr, generate_static_payonline_qr
 from core.barcode_generator import generate_barcode, generate_slip_barcode
+from core.gmf_reader import is_red_notice
 
 
 class BaseRenderer:
@@ -18,13 +20,49 @@ class BaseRenderer:
     HANGING_INDENT = 5
 
     def __init__(self, template_pdf_path):
+        self.default_template_pdf_path = template_pdf_path
         self.template_pdf_path = template_pdf_path
         self.reader = PdfReader(template_pdf_path)
         self.writer = PdfWriter()
         self.canvases = []
+        self.is_red = False
         self._new_canvas()
 
+    def set_template_pdf(self, template_pdf_path):
+        """Switch background template PDF (e.g. for RED notice)."""
+        if template_pdf_path and os.path.exists(template_pdf_path):
+            self.template_pdf_path = template_pdf_path
+            self.reader = PdfReader(template_pdf_path)
+
+    def get_template_red_path(self):
+        candidates = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "templates", "Template_RED.pdf")),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "Models", "SmartAI_Bill", "templates", "Template_RED.pdf")),
+            os.path.abspath("./Models/SmartAI_Bill/templates/Template_RED.pdf"),
+        ]
+        for p in candidates:
+            if os.path.exists(p):
+                return p
+        return None
+
+    def check_red_notice(self, data):
+        """Helper to switch background to Template_RED.pdf if source_filename matches RED notice pattern."""
+        filename = str(data.get("source_filename") or data.get("filename") or "")
+        if is_red_notice(filename):
+            self.is_red = True
+            red_pdf = self.get_template_red_path()
+            if red_pdf and os.path.exists(red_pdf):
+                self.set_template_pdf(red_pdf)
+
+    def get_page1_y_min(self, default=165.0):
+
+        """Return content floor for page 1 (220.0 for RED notice, default 165.0 for non-red)."""
+        return 220.0 if self.is_red else default
+
+
+
     def _new_canvas(self):
+
         buf = io.BytesIO()
         c = canvas.Canvas(buf, pagesize=A4)
         self.canvases.append((buf, c))
@@ -136,7 +174,13 @@ class BaseRenderer:
             overlay = PdfReader(buf)
 
             if page_idx < len(self.reader.pages):
-                page = deepcopy(self.reader.pages[page_idx])
+                template_page = self.reader.pages[page_idx]
+                page = deepcopy(template_page)
+                w = float(page.mediabox.width)
+                h = float(page.mediabox.height)
+                if abs(w - self.PAGE_W) > 5 or abs(h - self.PAGE_H) > 5:
+                    scale_x = self.PAGE_W / w
+                    page.scale_by(scale_x)
             else:
                 page = PageObject.create_blank_page(
                     width=self.PAGE_W, height=self.PAGE_H
@@ -147,6 +191,7 @@ class BaseRenderer:
 
         with open(output_path, "wb") as f:
             self.writer.write(f)
+
 
     def render(self, data):
         raise NotImplementedError("Subclass must implement render(data)")
