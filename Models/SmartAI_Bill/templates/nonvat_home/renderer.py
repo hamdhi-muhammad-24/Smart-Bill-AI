@@ -2,9 +2,11 @@
 import os
 from datetime import datetime
 
+from reportlab.lib.colors import black, white
+
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_tax_section_printable
-from templates.nonvat_home.config import COORDS, CHARGES_TABLE, FONTS
+from templates.nonvat_home.config import COORDS, CHARGES_TABLE, FONTS, POST_TC_COLUMNS
 
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
@@ -28,17 +30,12 @@ class NonVATHomeRenderer(BaseRenderer):
         y = self._draw_top_level_discounts(data, y)
         y = self._draw_taxes_only(data, y)
 
-        self._draw_total_charges_fixed(data)
-        self._draw_payments_fixed(data)
-        self._draw_cancel_payments_fixed(data)
-        self._draw_messages_fixed(data)
-        self._draw_usage_header_fixed(data)
-        self._draw_usage_preview_rows_fixed(data)
-
-        self._draw_usage_continuation(data)
+        y = self._draw_total_charges_dynamic(data, y)
+        self._draw_post_total_charges_flow(data, y)
 
         total_pages = self.page_count()
         self._draw_page_indicators(data, total_pages)
+
 
 
     def _draw_header(self, data):
@@ -235,165 +232,118 @@ class NonVATHomeRenderer(BaseRenderer):
         return y
 
 
-    def _draw_total_charges_fixed(self, data):
-        c  = self.canvases[0][1]
-        f  = FONTS["total"]
-        x  = COORDS["total_charges_label_x"]
-        y  = COORDS["total_charges_label_y"]
+    def _draw_total_charges_dynamic(self, data, y):
+        line_h = CHARGES_TABLE["line_h"]
+        y_min = CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        
+        # If there isn't enough space, push to a new page
+        if y - line_h * 2 < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+            
+        # Push total charges text slightly down to align between background template lines
+        y -= 6
+        if self.page_count() == 1:
+            self._payments_top_y_p1 = y
+            self._total_charges_bottom_y_p1 = y - 5
+            
+        c = self.canvas
+        f = FONTS["total"]
+        x = COORDS["total_charges_label_x"]
         ax = COORDS["total_charges_amount_x"]
+        
+        # Draw the top and bottom horizontal black lines around the total charges row
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(x, y + 11, ax, y + 11)   # Top horizontal line
+        c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
+        
         c.setFont("Helvetica-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
         c.drawRightString(ax, y, f"{data['total_charges']:,.2f}")
 
-    def _draw_payments_fixed(self, data):
-        """BPR26: suppress entirely if total_payments is zero."""
-        if not data.get("total_payments") and not data.get("payments"):
-            return
-        c      = self.canvases[0][1]
-        f      = FONTS["payments"]
-        hx     = COORDS["payments_header_x"]
-        hy     = COORDS["payments_header_y"]
-        rx     = COORDS["payments_row_x"]
-        y      = COORDS["payments_row_start_y"]
-        ax     = COORDS["payments_amount_x"]
-        line_h = COORDS["payments_line_h"]
+        self._total_charges_page_idx = self.page_count() - 1
+        self._total_charges_line_start_y = y - 5
 
-        c.setFont("Helvetica-Bold", f["size"])
-        c.drawString(hx, hy, "Details of Payments Received")
-        c.setFont("Helvetica", f["size"])
-        for p in data.get("payments", []):
-            line = (f"{p.get('date', '')} - "
-                    f"{p.get('location', '')}").rstrip(' -')
-            c.drawString(rx, y, line)
-            c.drawRightString(ax, y, f"{p['amount']:,.2f}")
-            y -= line_h
-        c.setFont("Helvetica-Bold", f["size"])
-        c.drawString(rx, y, COORDS["payments_total_label"])
-        c.drawRightString(ax, y, f"{data['total_payments']:,.2f}")
-        self._payments_end_y = y - line_h
+        return y - line_h * 2.0
 
-    def _draw_cancel_payments_fixed(self, data):
-        """BPR26: cancelled payments block."""
-        cancelled = data.get("cancelled_payments", [])
-        if not cancelled:
-            return
-        c      = self.canvases[0][1]
-        f      = FONTS["payments"]
-        rx     = COORDS["payments_row_x"]
-        ax     = COORDS["payments_amount_x"]
-        line_h = COORDS["payments_line_h"]
-        y      = getattr(self, '_payments_end_y',
-                         COORDS["payments_row_start_y"] - line_h * 2)
+    def _draw_post_total_charges_flow(self, data, y_tc):
+        left = POST_TC_COLUMNS["left"]
+        right = POST_TC_COLUMNS["right"]
+        vert_x = POST_TC_COLUMNS["vert_line_x"]
 
-        c.setFont("Helvetica-Bold", f["size"])
-        c.drawString(rx, y, "Cancel Payment")
-        y -= line_h
-        c.setFont("Helvetica", f["size"])
-        for p in cancelled:
-            line = (f"{p.get('pay_type', '')}-{p.get('date', '')}"
-                    f"-{p.get('location', '')}").rstrip('-')
-            c.drawString(rx, y, line)
-            c.drawRightString(ax, y, f"{p['amount']:,.2f}")
-            y -= line_h
-        self._cancel_end_y = y
-
-    def _draw_messages_fixed(self, data):
-        """BPR28: marketing messages + suspension notice."""
-        messages  = data.get("marketing_messages", [])
-        suspended = data.get("suspended_message", "")
-        if not messages and not suspended:
-            return
-        c      = self.canvases[0][1]
-        f      = FONTS["payments"]
-        rx     = COORDS["payments_row_x"]
-        line_h = COORDS["payments_line_h"]
-        y      = getattr(self, '_cancel_end_y',
-                         getattr(self, '_payments_end_y',
-                                 COORDS["payments_row_start_y"] - line_h * 2))
-
-        if messages:
-            c.setFont("Helvetica-Bold", f["size"])
-            c.drawString(rx, y, "Message on Bill")
-            y -= line_h
-            c.setFont("Helvetica", f["size"])
-            for m in messages:
-                c.drawString(rx, y, m)
-                y -= line_h
-        if suspended:
-            c.setFont("Helvetica-Bold", f["size"])
-            c.drawString(rx, y, suspended)
-
-
-    def _draw_usage_header_fixed(self, data):
-        sections = [s for s in data.get("usage_sections", [])
-                    if s["subsections"]]
-        if not sections:
-            return
-        c   = self.canvases[0][1]
-        s0  = sections[0]
-        sub = s0["subsections"][0]
-        hdr = f'Detailed Usage Charges for {s0["label"]}'
-        if s0["phone"]:
-            hdr += f' {s0["phone"]}'
-        c.setFont("Helvetica-Bold", 8)
-        c.drawString(COORDS["usage_header_x"], COORDS["usage_header_y"], hdr)
-        if sub["label"]:
-            c.drawString(COORDS["usage_subsection_x"],
-                         COORDS["usage_subsection_y"], sub["label"])
-
-    def _draw_usage_preview_rows_fixed(self, data):
-        sections = [s for s in data.get("usage_sections", [])
-                    if s["subsections"]]
-        if not sections:
-            return
-        c         = self.canvases[0][1]
-        first_sub = sections[0]["subsections"][0]
-        y         = COORDS["usage_rows_start_y"]
-        col_x     = COORDS["usage_col_x"]
-        amt_x     = COORDS["usage_amount_x"]
-        row_limit = COORDS["usage_row_limit"]
-        line_h    = COORDS["usage_row_line_h"]
-        headers   = first_sub["headers"]
-        combine   = (len(headers) >= 2 and
-                     headers[0] == 'Date' and headers[1] == 'Time')
-        c.setFont("Helvetica", 8)
-        for row in first_sub["rows"][:row_limit]:
-            disp = ([f"{row[0]}  {row[1]}"] + row[2:]
-                    if combine else row)
-            for i, val in enumerate(disp[:len(col_x) + 1]):
-                cx = col_x[i] if i < len(col_x) else amt_x
-                if i == len(disp) - 1:
-                    c.drawRightString(cx, y, val)
-                else:
-                    c.drawString(cx, y, val)
-            y -= line_h
-
-    def _draw_usage_continuation(self, data):
-        sections = [s for s in data.get("usage_sections", [])
-                    if s["subsections"]]
-        if not sections:
-            return
-
-        first_section = sections[0]
-        first_sub = first_section["subsections"][0]
-        row_limit = COORDS["usage_row_limit"]
-        first_has_rows = bool(first_sub.get("rows"))
-        remaining = (first_sub["rows"][row_limit:]
-                     if first_has_rows else [])
-
-        self.new_page()
-        y_state = {"y": 750}
-        y_min = 60
         line_h = 9
-        col_x = [50, 130, 190]
-        amount_x = 300
-        box_right = 305
-        total_label_x = 45
-        font_row = 7
-        font_header = 7
-        font_subtotal = 7
-        font_grand_total = 8
-        font_section_hdr = 9
+        y_start_other = CHARGES_TABLE.get("otherpage_y_start", 740.0)
+        y_min_other = CHARGES_TABLE.get("otherpage_y_min", 80.0)
+
+        first_page_idx = self.page_count() - 1
+        first_col_top = y_tc - 6
+
+        state = {"col": "left", "y": first_col_top}
+        line_extents = {}   # page_idx -> {"top": y, "bottom": y}
+
+        def col_def():
+            return left if state["col"] == "left" else right
+
+        def floor_y():
+            return CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 \
+                else y_min_other
+
+        def new_column_top():
+            return first_col_top if self.page_count() - 1 == first_page_idx \
+                else y_start_other
+
+        def record(y_val):
+            idx = self.page_count() - 1
+            ext = line_extents.setdefault(idx, {"top": y_val, "bottom": y_val})
+            ext["top"] = max(ext["top"], y_val)
+            ext["bottom"] = min(ext["bottom"], y_val)
+
+        def draw_cdr_header():
+            c = self.canvas
+            cd = col_def()
+            c.setLineWidth(0.5)
+            c.setStrokeColor(black)
+            c.rect(cd["x_start"] - 3, state["y"] - 2,
+                   (cd["x_end"] - cd["x_start"]) + 3, line_h + 2,
+                   stroke=1, fill=0)
+            col_width = cd["x_end"] - cd["x_start"]
+            xs = [cd["x_start"], cd["x_start"] + col_width * 0.35,
+                  cd["x_start"] + col_width * 0.60]
+            c.setFont("Helvetica-Bold", 7)
+            for i, h in enumerate(["Date &Time", "Dialled No.", "Duration"]):
+                c.drawString(xs[i], state["y"], h)
+            c.drawRightString(cd["x_end"], state["y"], "Charge")
+            record(state["y"])
+
+        def ensure_space(height):
+            if state["y"] - height >= floor_y():
+                return
+            if state["col"] == "left":
+                state["col"] = "right"
+                state["y"] = new_column_top()
+            else:
+                self.new_page()
+                state["col"] = "left"
+                state["y"] = y_start_other
+
+        def draw_text(text, bold=False, size=9, x=None):
+            c = self.canvas
+            cd = col_def()
+            c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+            c.setFillColor(black)
+            c.drawString(x if x is not None else cd["x_start"], state["y"], text)
+            record(state["y"])
+
+        def draw_amount(value, bold=False, size=9, fmt="{:,.2f}"):
+            c = self.canvas
+            cd = col_def()
+            c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+            c.drawRightString(cd["x_end"], state["y"], fmt.format(value))
+            record(state["y"])
+
+        def advance(mult=1.0):
+            state["y"] -= line_h * mult
 
         def get_last_numeric(row):
             for val in reversed(row):
@@ -411,160 +361,134 @@ class NonVATHomeRenderer(BaseRenderer):
         def sum_rows(rows):
             return sum(get_last_numeric(r) for r in rows if r)
 
-        def draw_section_header(sec_label, sec_phone):
-            hdr = f'Detailed Usage Charges for {sec_label}'
-            if sec_phone:
-                hdr += f' {sec_phone}'
-            self.text(45, y_state["y"], hdr,
-                      size=font_section_hdr, bold=True)
-            y_state["y"] -= line_h * 1.4
+        # ---- 1. Details of Payments Received ----
+        payments = data.get("payments", [])
+        if data.get("total_payments") or payments:
+            ensure_space(line_h * (len(payments) + 2.6))
+            draw_text("Details of Payments Received", bold=True)
+            advance(1.2)
+            for p in payments:
+                ensure_space(line_h)
+                line = (f"{p.get('pay_type', 'Payment')}-"
+                        f"{p.get('date', '')}-"
+                        f"{p.get('location', '')}").rstrip('-')
+                draw_text(line)
+                draw_amount(p['amount'])
+                advance()
+            ensure_space(line_h * 1.4)
+            draw_text("Total Payments Received", bold=True)
+            draw_amount(data.get('total_payments', 0), bold=True)
+            advance(1.6)
 
-        def draw_cdr_table(sub, rows, print_header):
-            if print_header and sub["label"]:
-                self.text(45, y_state["y"], sub["label"],
-                          size=font_row, bold=True)
-                y_state["y"] -= line_h * 1.2
+        # ---- 2. Cancel Payment ----
+        cancelled = data.get("cancelled_payments", [])
+        if cancelled:
+            ensure_space(line_h * (len(cancelled) + 1.4))
+            draw_text("Cancel Payment", bold=True)
+            advance(1.2)
+            for p in cancelled:
+                ensure_space(line_h)
+                line = (f"{p.get('pay_type', '')}-{p.get('date', '')}"
+                        f"-{p.get('location', '')}").rstrip('-')
+                draw_text(line)
+                draw_amount(p['amount'])
+                advance()
+            advance(1.2)
 
-            headers = sub["headers"]
-            combine = (len(headers) >= 2 and
-                       headers[0] == 'Date' and headers[1] == 'Time')
-            disp_h = (['Date &Time'] + headers[2:]
-                      if combine else headers)
-
-            if print_header:
-                try:
-                    self.canvas.rect(
-                        col_x[0] - 3, y_state["y"] - 2,
-                        box_right - (col_x[0] - 3), line_h + 2,
-                    )
-                except AttributeError:
-                    pass
-                for i, h in enumerate(disp_h[:len(col_x) + 1]):
-                    x = col_x[i] if i < len(col_x) else amount_x
-                    self.text(x, y_state["y"], h, size=font_header,
-                              bold=True,
-                              align=("right" if i == len(disp_h) - 1
-                                     else "left"))
-                y_state["y"] -= line_h
-
-            for row in rows:
-                if y_state["y"] < y_min:
-                    self.new_page()
-                    y_state["y"] = 780
-                disp = ([f"{row[0]}  {row[1]}"] + row[2:]
-                        if combine else list(row))
-                charge_val = get_last_numeric(row)
-                for i in range(min(len(disp) - 1, len(col_x))):
-                    self.text(col_x[i], y_state["y"],
-                              str(disp[i]), size=font_row)
-                self.number(amount_x, y_state["y"], charge_val,
-                            decimals=3, size=font_row, align="right")
-                y_state["y"] -= line_h
-
-        # First section (special: has preview on page 1)
-        if y_state["y"] < y_min:
-            self.new_page()
-            y_state["y"] = 780
-
-        # First subsection: draw remaining rows without header (already shown on p1)
-        if first_has_rows and remaining:
-            draw_cdr_table(first_sub, remaining, print_header=False)
-            first_sub_total = sum_rows(first_sub["rows"])
-        elif first_has_rows:
-            first_sub_total = sum_rows(first_sub["rows"])
-        else:
-            # Aggregate-only first subsection
-            if first_sub["label"]:
-                self.text(45, y_state["y"], first_sub["label"],
-                          size=font_row, bold=True)
-                y_state["y"] -= line_h
-            first_sub_total = first_sub.get("subtotal", 0)
-
-        self.text(total_label_x, y_state["y"],
-                  f'Total for {first_sub["label"]}',
-                  size=font_subtotal, bold=True)
-        self.number(amount_x, y_state["y"], first_sub_total,
-                    decimals=3, size=font_subtotal, bold=True, align="right")
-        y_state["y"] -= line_h * 1.3
-
-        # Remaining subsections of first section
-        for sub in first_section["subsections"][1:]:
-            if y_state["y"] < y_min:
-                self.new_page()
-                y_state["y"] = 780
-
-            rows = sub.get("rows", [])
-            if rows:
-                draw_cdr_table(sub, rows, print_header=True)
-                sub_total = sum_rows(rows) or sub.get("subtotal", 0)
-            else:
-                if sub["label"]:
-                    self.text(45, y_state["y"], sub["label"],
-                              size=font_row, bold=True)
-                    y_state["y"] -= line_h
-                sub_total = sub.get("subtotal", 0)
-
-            self.text(total_label_x, y_state["y"],
-                      f'Total for {sub["label"]}',
-                      size=font_subtotal, bold=True)
-            self.number(amount_x, y_state["y"], sub_total,
-                        decimals=3, size=font_subtotal, bold=True,
-                        align="right")
-            y_state["y"] -= line_h * 1.3
-
-        # First section grand total
-        gt = first_section.get("grand_total") or sum(
-            (sum_rows(s["rows"]) or s.get("subtotal", 0))
-            for s in first_section["subsections"]
-        )
-        self.text(total_label_x, y_state["y"],
-                  f'Total Usage Charges for {first_section["label"]}',
-                  size=font_grand_total, bold=True)
-        self.number(amount_x, y_state["y"], gt, decimals=3,
-                    size=font_grand_total, bold=True, align="right")
-        y_state["y"] -= line_h * 2
-
-        #Additional sections
-        for section in sections[1:]:
-            if y_state["y"] < y_min:
-                self.new_page()
-                y_state["y"] = 780
-            draw_section_header(section["label"], section["phone"])
+        # ---- 3. Detailed usage / CDR sections ----
+        sections = [s for s in data.get("usage_sections", []) if s["subsections"]]
+        for section in sections:
+            ensure_space(line_h * 4.5)
+            hdr = f'Detailed Usage Charges for {section["label"]}'
+            if section.get("phone"):
+                hdr += f' {section["phone"]}'
+            draw_text(hdr, bold=True, size=8)
+            advance(1.4)
 
             for sub in section["subsections"]:
-                if y_state["y"] < y_min:
-                    self.new_page()
-                    y_state["y"] = 780
-
                 rows = sub.get("rows", [])
-                if rows:
-                    draw_cdr_table(sub, rows, print_header=True)
-                    sub_total = sum_rows(rows) or sub.get("subtotal", 0)
-                else:
-                    if sub["label"]:
-                        self.text(45, y_state["y"], sub["label"],
-                                  size=font_row, bold=True)
-                        y_state["y"] -= line_h
-                    sub_total = sub.get("subtotal", 0)
+                if not rows:
+                    continue
+                sub_label = sub.get("label")
+                if sub_label:
+                    ensure_space(line_h * 2.7)
+                    draw_text(sub_label, bold=True)
+                    advance(1.2)
 
-                self.text(total_label_x, y_state["y"],
-                          f'Total for {sub["label"]}',
-                          size=font_subtotal, bold=True)
-                self.number(amount_x, y_state["y"], sub_total,
-                            decimals=3, size=font_subtotal, bold=True,
-                            align="right")
-                y_state["y"] -= line_h * 1.3
+                ensure_space(line_h * 1.5)
+                draw_cdr_header()
+                advance(1.5)
 
-            gt = section.get("grand_total") or sum(
-                (sum_rows(s["rows"]) or s.get("subtotal", 0))
-                for s in section["subsections"]
-            )
-            self.text(total_label_x, y_state["y"],
-                      f'Total Usage Charges for {section["label"]}',
-                      size=font_grand_total, bold=True)
-            self.number(amount_x, y_state["y"], gt, decimals=3,
-                        size=font_grand_total, bold=True, align="right")
-            y_state["y"] -= line_h * 2
+                for row in rows:
+                    ensure_space(line_h)
+                    cd = col_def()
+                    col_width = cd["x_end"] - cd["x_start"]
+                    date = row[0] if len(row) > 0 else ""
+                    time_ = row[1] if len(row) > 1 else ""
+                    dialled = row[2] if len(row) > 2 else ""
+                    duration = row[3] if len(row) > 3 else ""
+                    charge = row[4] if len(row) > 4 else "0"
+                    c = self.canvas
+                    c.setFont("Helvetica", 7)
+                    c.setFillColor(black)
+                    c.drawString(cd["x_start"], state["y"], f"{date} {time_}".strip())
+                    c.drawString(cd["x_start"] + col_width * 0.35, state["y"], str(dialled))
+                    c.drawString(cd["x_start"] + col_width * 0.60, state["y"], str(duration))
+                    try:
+                        val = float(str(charge).replace(",", ""))
+                    except (ValueError, TypeError):
+                        val = 0.0
+                    c.drawRightString(cd["x_end"], state["y"], f"{val:,.3f}")
+                    record(state["y"])
+                    advance()
+
+                sub_total = sum_rows(rows)
+                ensure_space(line_h * 1.5)
+                draw_text(f"Total for {sub_label or 'SLT-Mobile'}", bold=True, size=7)
+                draw_amount(sub_total, bold=True, size=7, fmt="{:,.3f}")
+                advance(1.5)
+
+            gt = section.get("grand_total") or sum_rows(
+                r for s in section["subsections"] for r in s["rows"])
+            ensure_space(line_h * 2.5)
+            draw_text(f"Total Usage Charges for {section['label']}", bold=True, size=8)
+            draw_amount(gt, bold=True, size=8, fmt="{:,.3f}")
+            advance(2.5)
+
+        # ---- 4. Marketing messages / suspended notice ----
+        messages = data.get("marketing_messages", [])
+        suspended = data.get("suspended_message", "")
+        if messages:
+            ensure_space(line_h * 1.2)
+            draw_text("Message on Bill", bold=True)
+            advance(1.2)
+            for m in messages:
+                ensure_space(line_h)
+                draw_text(m)
+                advance()
+        if suspended:
+            ensure_space(line_h)
+            draw_text(suspended, bold=True)
+            advance()
+
+        # ---- Vertical divider line, drawn per page after content is known ----
+        last_page_idx = self.page_count() - 1
+        for idx in range(first_page_idx, last_page_idx + 1):
+            c_idx = self.canvases[idx][1]
+            c_idx.setLineWidth(0.5)
+            c_idx.setStrokeColor(black)
+
+            top_y = y_tc if idx == first_page_idx else y_start_other + 5
+            if idx in line_extents:
+                bottom_y = line_extents[idx]["bottom"] - 5
+            else:
+                bottom_y = max(
+                    CHARGES_TABLE["page1_y_min"] if idx == 0 else y_min_other,
+                    top_y - 20,
+                )
+            if top_y > bottom_y:
+                c_idx.line(vert_x, top_y, vert_x, bottom_y)
+
 
     def _draw_page_indicators(self, data, total_pages):
         f     = FONTS["page_indicator"]

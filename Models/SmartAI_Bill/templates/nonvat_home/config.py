@@ -77,9 +77,10 @@ COORDS = {
 
 CHARGES_TABLE = {
     "page1_y_start":       467,
-    "page1_y_min":         235,
-    "otherpage_y_start":   780,
+    "page1_y_min":         165.0,
+    "otherpage_y_start":   740.0,
     "otherpage_y_min":     80,
+
 
     "line_h":              8,
     "font_size":           8,
@@ -107,3 +108,9 @@ FONTS = {
     "page_indicator": {"size": 9,   "bold": False},
     "invoice_no_p2":  {"size": 10,  "bold": True},
 }
+
+POST_TC_COLUMNS = {
+    "left":  {"x_start": 45, "x_end": 300, "amount_x": 295},
+    "right": {"x_start": 315, "x_end": 555, "amount_x": 550},
+    "vert_line_x": 308,
+}
