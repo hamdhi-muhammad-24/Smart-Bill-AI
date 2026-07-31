@@ -59,9 +59,22 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             log_callback("No PDFs found to organise")
         return []
 
+    if cycle_label and "cycle" in cycle_label.lower():
+        import re
+        match = re.search(r'(\d+)', str(cycle_label))
+        if match:
+            cycle_label = f"Cycle_{match.group(1)}"
+        else:
+            cycle_label = str(cycle_label).strip().replace(" ", "_")
+    elif cycle_label:
+        cycle_label = str(cycle_label).strip().replace(" ", "_")
+    else:
+        cycle_label = "Cycle_1"
+
     today = datetime.now().strftime("%Y-%m-%d")
     base = os.path.join(OUTPUT_BASE_DIR, today, cycle_label)
     os.makedirs(base, exist_ok=True)
+
 
     if log_callback:
         log_callback(

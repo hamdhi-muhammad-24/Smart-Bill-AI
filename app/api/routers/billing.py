@@ -42,6 +42,10 @@ if _smartai_path not in sys.path:
     sys.path.insert(0, _smartai_path)
 
 from processing.batch_processor import process_single_file, process_batch
+from core.gmf_reader import is_red_notice
+from core.gmf_splitter import split_gmf_documents, write_doc_to_temp
+from core.template_identifier import identify_template
+
 from processing.output_manager import (
     create_output_batches,
     list_output_dates,
@@ -402,31 +406,71 @@ def preview_invoice(
     preview_dir.mkdir(parents=True, exist_ok=True)
 
     args = (upload.file_path, str(preview_dir), 1, True)
-    result = process_single_file(args)
+    results = process_single_file(args)
 
-    if not result.success:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Invoice engine failed: {result.error}"
-        )
+    if isinstance(results, list):
+        if not results or not results[0].success:
+            err = results[0].error if results else "Invoice engine failed"
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invoice engine failed: {err}"
+            )
+        result = results[0]
+    else:
+        result = results
+        if not result.success:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invoice engine failed: {result.error}"
+            )
+
+
+    # Collect detected templates across document blocks
+    if isinstance(results, list):
+        detected_templates = sorted(list({r.template_id for r in results if r.template_id}))
+        total_docs = len(results)
+    else:
+        detected_templates = [results.template_id] if results.template_id else []
+        total_docs = 1
+
+    template_str = ", ".join(detected_templates) if detected_templates else (result.template_id or "unknown")
+
+    # Ensure InvoiceTemplate records exist in DB for all detected templates
+    for t_code in detected_templates:
+        if t_code and t_code != "unknown":
+            tmpl_obj = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == t_code).first()
+            if not tmpl_obj:
+                tmpl_obj = InvoiceTemplate(
+                    template_code=t_code,
+                    name=t_code.replace("_", " ").title(),
+                    is_system_template=True,
+                    approval_status=TemplateApprovalStatus.PENDING,
+                    is_active=False
+                )
+                db.add(tmpl_obj)
 
     # Update upload status and log notification
+    upload.template_detected = template_str
     upload.status = GmfUploadStatus.PENDING_APPROVAL
     notif = NotificationEvent(
         event_type=NotificationEventType.PREVIEW_GENERATED,
         title="Test Invoice Preview Ready",
-        message=f"Preview for '{upload.filename}' generated successfully. Ready for approval.",
+        message=f"Preview for '{upload.filename}' ({total_docs} document(s), templates: {template_str}) generated successfully. Ready for approval.",
         upload_id=upload.id,
     )
     db.add(notif)
     db.commit()
 
+
     pdf_filename = os.path.basename(result.output_pdf)
     return {
         "message": "Preview generated successfully",
         "pdf_url": f"/billing/preview-pdfs/{pdf_filename}",
-        "template_detected": result.template_id,
+        "template_detected": template_str,
+        "total_documents": total_docs,
+        "templates_detected": detected_templates,
     }
+
 
 
 @router.get("/preview-pdfs/{filename}")
@@ -446,9 +490,72 @@ def serve_preview_pdf(
     return FileResponse(path, media_type="application/pdf", filename=safe_filename)
 
 
+@router.get("/uploads/{upload_id}/summary")
+def get_upload_summary(
+    upload_id: int,
+    db: Session = Depends(get_db),
+    _: UserOut = Depends(require_admin),
+):
+
+    """Return detailed document, RED notice, and template breakdown for a GMF upload."""
+    upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Upload not found")
+
+    is_red = is_red_notice(upload.filename)
+
+    breakdown = []
+    total_docs = upload.total_records_count or 1
+    if os.path.exists(upload.file_path):
+        try:
+            docs = split_gmf_documents(upload.file_path)
+            total_docs = len(docs)
+            with tempfile.TemporaryDirectory(prefix="gmf_summary_") as tmp:
+                counts = {}
+                for idx, doc_lines in enumerate(docs, start=1):
+                    tmp_path = write_doc_to_temp(doc_lines, tmp, upload.filename, idx)
+                    ident = identify_template(tmp_path)
+                    t_id = ident.template_id or "unknown"
+                    counts[t_id] = counts.get(t_id, 0) + 1
+
+                active_templates = set(
+                    t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.is_active == True).all()
+                )
+
+                for t_id, count in counts.items():
+                    is_active = t_id in active_templates
+                    breakdown.append({
+                        "template_id": t_id,
+                        "template_name": t_id.replace("_", " ").title(),
+                        "count": count,
+                        "is_approved": is_active,
+                        "status": "APPROVED" if is_active else "PENDING_APPROVAL"
+                    })
+        except Exception:
+            pass
+
+    processed = upload.processed_records_count or 0
+    remaining = max(0, total_docs - processed)
+
+    return {
+        "upload_id": upload.id,
+        "filename": upload.filename,
+        "is_red_notice": is_red,
+        "folder_type": upload.folder_type,
+        "status": upload.status.value,
+        "total_documents": total_docs,
+        "processed_documents": processed,
+        "remaining_documents": remaining,
+        "template_detected": upload.template_detected,
+        "detected_at": upload.detected_at,
+        "template_breakdown": breakdown,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Approve / Reject
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @router.post("/approve/{upload_id}")
 def approve_upload(
@@ -1037,17 +1144,33 @@ def update_template_status(
     _: UserOut = Depends(require_admin)
 ):
     """Approve or Reject an invoice template globally."""
-    t = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == template_id).first()
-    if not t:
-        raise HTTPException(status_code=404, detail="Template not found in DB")
-        
     try:
         from app.db.models import TemplateApprovalStatus
         new_status = TemplateApprovalStatus[body.status]
     except KeyError:
         raise HTTPException(status_code=400, detail="Invalid status")
-        
-    t.approval_status = new_status
+
+    target_ids = [t.strip() for t in template_id.split(",") if t.strip()]
+    if not target_ids:
+        target_ids = [template_id]
+
+    for t_code in target_ids:
+        t = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == t_code).first()
+        if not t:
+            t = InvoiceTemplate(
+                template_code=t_code,
+                name=t_code.replace("_", " ").title(),
+                is_system_template=True,
+                is_active=(new_status == TemplateApprovalStatus.APPROVED),
+                approval_status=new_status,
+            )
+            db.add(t)
+        else:
+            t.approval_status = new_status
+            t.is_active = (new_status == TemplateApprovalStatus.APPROVED)
+
+    db.commit()
+
     
     # Cascade status update to pending uploads and physically move files
     import logging
@@ -1073,18 +1196,27 @@ def update_template_status(
     )
     db.add(hist)
     
+    target_ids_set = set(target_ids)
+
     if new_status == TemplateApprovalStatus.APPROVED:
-        uploads = db.query(GmfUpload).filter(
-            GmfUpload.template_detected == template_id,
+        candidate_uploads = db.query(GmfUpload).filter(
             GmfUpload.status.in_([GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.REJECTED])
         ).all()
-        
+
         non_test_uploads = []
-        for upload in uploads:
+        for upload in candidate_uploads:
+            raw_detected = str(upload.template_detected or "")
+            for char in ['(', ')', "'", '"']:
+                raw_detected = raw_detected.replace(char, '')
+            detected_list = [t.strip() for t in raw_detected.split(",") if t.strip() and not t.strip().isdigit()]
+
+            if detected_list and not any(t in target_ids_set for t in detected_list):
+                continue
+
+
             if upload.folder_type != "Test_GMFs":
                 old_path = Path(upload.file_path)
-                
-                # Check mode. If auto, move to queue_incoming_dir. If manual, keep in queue_pending_dir
+
                 if billing_mode == "auto":
                     new_path = settings.queue_incoming_dir / upload.filename
                     if old_path.exists():
@@ -1101,8 +1233,9 @@ def update_template_status(
                         except Exception as e:
                             logger.error(f"Failed to move file {upload.filename} to incoming queue: {e}")
                     else:
-                        upload.status = GmfUploadStatus.FAILED
-                        upload.error_message = "Source GMF file missing on disk"
+                        upload.status = GmfUploadStatus.APPROVED
+                        upload.rejection_reason = None
+                        non_test_uploads.append(upload)
                 else:
                     new_path = settings.queue_pending_dir / upload.filename
                     if old_path.exists():
@@ -1118,12 +1251,12 @@ def update_template_status(
                         except Exception as e:
                             logger.error(f"Failed to ensure file {upload.filename} in pending queue: {e}")
                     else:
-                        upload.status = GmfUploadStatus.FAILED
-                        upload.error_message = "Source GMF file missing on disk"
+                        upload.status = GmfUploadStatus.APPROVED
+                        upload.rejection_reason = None
             else:
                 upload.status = GmfUploadStatus.APPROVED
                 upload.rejection_reason = None
-            
+
         # In Auto Mode, automatically generate invoices immediately
         if billing_mode == "auto" and non_test_uploads:
             run = BillingRun(
@@ -1139,11 +1272,10 @@ def update_template_status(
             )
             db.add(run)
             db.flush()
-            
+
             for upload in non_test_uploads:
                 upload.billing_run_id = run.id
-            
-            # Add notification event
+
             notif = NotificationEvent(
                 event_type=NotificationEventType.BATCH_STARTED,
                 title="Auto Batch Generation Started",
@@ -1151,13 +1283,21 @@ def update_template_status(
                 run_id=run.id,
             )
             db.add(notif)
-            
+
     elif new_status == TemplateApprovalStatus.REJECTED:
-        uploads = db.query(GmfUpload).filter(
-            GmfUpload.template_detected == template_id,
+        candidate_uploads = db.query(GmfUpload).filter(
             GmfUpload.status.in_([GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.APPROVED])
         ).all()
-        for upload in uploads:
+        for upload in candidate_uploads:
+            raw_detected = str(upload.template_detected or "")
+            for char in ['(', ')', "'", '"']:
+                raw_detected = raw_detected.replace(char, '')
+            detected_list = [t.strip() for t in raw_detected.split(",") if t.strip() and not t.strip().isdigit()]
+
+            if detected_list and not any(t in target_ids_set for t in detected_list):
+                continue
+
+
             if upload.folder_type != "Test_GMFs":
                 old_path = Path(upload.file_path)
                 new_path = settings.queue_pending_dir / upload.filename
@@ -1172,9 +1312,10 @@ def update_template_status(
                     logger.error(f"Failed to move file {upload.filename} to pending queue: {e}")
             upload.status = GmfUploadStatus.REJECTED
             upload.rejection_reason = body.reason
-        
+
     db.commit()
     return {"message": "Status updated successfully", "status": new_status.value}
+
 
 
 
@@ -1367,7 +1508,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 logger.error("Staged upload disappeared before registration: %s", source_path)
                 continue
 
-            template_detected = _detect_template(str(source_path))
+            template_detected, total_records_count = _detect_template(str(source_path))
             template_status = templates_cache.get(template_detected)
             is_approved = (template_status == TemplateApprovalStatus.APPROVED)
             is_rejected = (template_status == TemplateApprovalStatus.REJECTED)
@@ -1415,6 +1556,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 existing.rejection_reason = None
                 existing.billing_run_id = None
                 existing.template_detected = template_detected
+                existing.total_records_count = total_records_count
             else:
                 db.add(GmfUpload(
                     filename=filename,
@@ -1422,8 +1564,10 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     folder_type=folder_type,
                     cycle_number=cycle_number,
                     template_detected=template_detected,
+                    total_records_count=total_records_count,
                     status=final_status,
                 ))
+
 
             registered_count += 1
             move_plan.append((source_path, final_path, filename))
@@ -1505,7 +1649,7 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
             for idx, file_path in enumerate(extracted_files):
                 filename = file_path.name
                 
-                template_detected = _detect_template(str(file_path))
+                template_detected, total_records_count = _detect_template(str(file_path))
                 is_approved = templates_cache.get(template_detected) == TemplateApprovalStatus.APPROVED if template_detected else False
                 
                 if is_test:
@@ -1531,6 +1675,8 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
                     existing.error_message = None
                     existing.rejection_reason = None
                     existing.billing_run_id = None
+                    existing.template_detected = template_detected
+                    existing.total_records_count = total_records_count
                 else:
                     upload = GmfUpload(
                         filename=filename,
@@ -1538,9 +1684,11 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
                         folder_type=folder_type,
                         cycle_number=cycle_number,
                         template_detected=template_detected,
+                        total_records_count=total_records_count,
                         status=final_status,
                     )
                     db.add(upload)
+
                 
                 # 2. COMMIT DB to ensure the watcher sees this record if it triggers
                 db.commit()

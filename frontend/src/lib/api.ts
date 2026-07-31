@@ -135,7 +135,36 @@ export interface GmfUploadOut {
   rejection_reason: string | null
   billing_run_id: number | null
   template_status?: string | null
+  processed_records_count?: number
+  total_records_count?: number
 }
+
+export interface TemplateBreakdownItem {
+  template_id: string
+  template_name: string
+  count: number
+  is_approved: boolean
+  status: string
+}
+
+export interface GmfSummaryOut {
+  upload_id: number
+  filename: string
+  is_red_notice: boolean
+  folder_type: string
+  status: string
+  total_documents: number
+  processed_documents: number
+  remaining_documents: number
+  template_detected: string | null
+  detected_at: string
+  template_breakdown: TemplateBreakdownItem[]
+}
+
+export function getUploadSummary(uploadId: number): Promise<GmfSummaryOut> {
+  return request(`/billing/uploads/${uploadId}/summary`)
+}
+
 
 export interface BillingRunOut {
   id: number

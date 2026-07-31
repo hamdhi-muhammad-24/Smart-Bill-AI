@@ -221,8 +221,10 @@ class GmfUploadStatus(enum.Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     GENERATING = "GENERATING"
+    PARTIALLY_PROCESSED = "PARTIALLY_PROCESSED"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
 
 class GmfUpload(Base):
     __tablename__ = "gmf_uploads"
