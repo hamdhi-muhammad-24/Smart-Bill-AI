@@ -84,9 +84,8 @@ function GmfSummaryModal({ uploadId, onClose }: { uploadId: number | null; onClo
           </div>
           <div className="flex items-center gap-2">
             {summary && (
-              <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wider ${
-                summary.is_red_notice ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200'
-              }`}>
+              <span className={`px-2.5 py-0.5 rounded-full text-xs font-extrabold uppercase tracking-wider ${summary.is_red_notice ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200'
+                }`}>
                 {summary.is_red_notice ? 'RED Notice' : 'NON-RED'}
               </span>
             )}
@@ -105,11 +104,11 @@ function GmfSummaryModal({ uploadId, onClose }: { uploadId: number | null; onClo
           </div>
         ) : (
           <div className="space-y-5">
-            {/* File Info Banner */}
+            {/* File Info & Status */}
             <div className="rounded-xl bg-muted/40 border border-border/60 p-4 space-y-3">
               <div className="flex justify-between items-start">
                 <div>
-                  <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Filename</div>
+                  <div className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">GMF File</div>
                   <div className="text-sm font-bold text-foreground break-all">{summary.filename}</div>
                 </div>
                 <StatusBadge
@@ -119,10 +118,26 @@ function GmfSummaryModal({ uploadId, onClose }: { uploadId: number | null; onClo
                 />
               </div>
 
+              {/* 3 Stat Cards Grid */}
+              <div className="grid grid-cols-3 gap-3 pt-2">
+                <div className="flex flex-col items-center justify-center bg-card p-3 rounded-lg border border-border/50 shadow-sm">
+                  <span className="text-xl font-bold text-foreground">{summary.total_documents}</span>
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Total Invoices</span>
+                </div>
+                <div className="flex flex-col items-center justify-center bg-emerald-50/50 dark:bg-emerald-950/20 p-3 rounded-lg border border-emerald-200/50 dark:border-emerald-800/30 shadow-sm">
+                  <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{summary.processed_documents}</span>
+                  <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">Generated</span>
+                </div>
+                <div className="flex flex-col items-center justify-center bg-amber-50/50 dark:bg-amber-950/20 p-3 rounded-lg border border-amber-200/50 dark:border-amber-800/30 shadow-sm">
+                  <span className="text-xl font-bold text-amber-600 dark:text-amber-400">{summary.remaining_documents}</span>
+                  <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300 uppercase tracking-wider">Remaining</span>
+                </div>
+              </div>
+
               {/* Progress Bar */}
-              <div className="space-y-1.5 pt-1">
+              <div className="space-y-1.5 pt-2">
                 <div className="flex justify-between text-xs font-semibold">
-                  <span className="text-muted-foreground">Invoices Processed</span>
+                  <span className="text-muted-foreground">Overall Progress</span>
                   <span className="text-foreground">{summary.processed_documents} / {summary.total_documents} ({pct}%)</span>
                 </div>
                 <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
@@ -138,12 +153,12 @@ function GmfSummaryModal({ uploadId, onClose }: { uploadId: number | null; onClo
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 <Layers size={14} />
-                Detected Templates Breakdown
+                Detected Template Types Breakdown
               </div>
 
               {summary.template_breakdown.length === 0 ? (
                 <div className="text-xs text-muted-foreground italic p-3 border rounded-lg">
-                  Single invoice GMF template: <span className="font-bold text-foreground">{summary.template_detected}</span>
+                  Single invoice template detected: <span className="font-bold text-foreground">{summary.template_detected}</span>
                 </div>
               ) : (
                 <div className="border border-border/60 rounded-xl overflow-hidden divide-y divide-border/40">
@@ -165,7 +180,7 @@ function GmfSummaryModal({ uploadId, onClose }: { uploadId: number | null; onClo
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/30 border border-amber-200/50 px-2 py-0.5 rounded-full text-[11px]">
-                            <AlertTriangle size={11} /> Awaiting Approval
+                            <AlertTriangle size={11} /> Waiting Approval (Unapproved)
                           </span>
                         )}
                       </div>
@@ -193,6 +208,7 @@ function GmfSummaryModal({ uploadId, onClose }: { uploadId: number | null; onClo
             )}
           </div>
         )}
+
       </div>
     </div>
   )
@@ -256,9 +272,8 @@ export default function GmfMonitor() {
             <div className="flex items-center gap-2">
               <FileText size={16} className="text-muted-foreground" />
               <span className="font-semibold text-foreground hover:underline">{upload.filename}</span>
-              <span className={`px-2 py-0.2 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
-                isRed ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200'
-              }`}>
+              <span className={`px-2 py-0.2 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${isRed ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300 border border-red-200' : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200'
+                }`}>
                 {isRed ? 'RED NOTICE' : 'NON-RED'}
               </span>
             </div>
@@ -425,8 +440,10 @@ export default function GmfMonitor() {
             columns={COLS}
             data={displayedUploads}
             keyExtractor={(upload) => upload.id}
+            onRowClick={(upload) => setSelectedSummaryId(upload.id)}
             emptyLabel="No GMF uploads detected yet."
           />
+
         )}
       </div>
 

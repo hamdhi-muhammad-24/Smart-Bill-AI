@@ -506,35 +506,71 @@ def get_upload_summary(
 
     breakdown = []
     total_docs = upload.total_records_count or 1
-    if os.path.exists(upload.file_path):
+    
+    # Locate existing file on disk with fallbacks
+    file_path = upload.file_path
+    if not os.path.exists(file_path):
+        fn = upload.filename
+        fallbacks = [
+            settings.queue_incoming_dir / fn,
+            settings.queue_pending_dir / fn,
+            settings.gmf_drive_path / "Processed" / (upload.folder_type or "unknown") / fn,
+            settings.gmf_drive_path / "Staged" / fn,
+            settings.gmf_drive_path / (upload.folder_type or "") / fn
+        ]
+        for fb in fallbacks:
+            if os.path.exists(fb):
+                file_path = str(fb)
+                break
+
+    active_templates = set(
+        t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.is_active == True).all()
+    )
+
+    if os.path.exists(file_path):
         try:
-            docs = split_gmf_documents(upload.file_path)
-            total_docs = len(docs)
-            with tempfile.TemporaryDirectory(prefix="gmf_summary_") as tmp:
-                counts = {}
-                for idx, doc_lines in enumerate(docs, start=1):
-                    tmp_path = write_doc_to_temp(doc_lines, tmp, upload.filename, idx)
-                    ident = identify_template(tmp_path)
-                    t_id = ident.template_id or "unknown"
-                    counts[t_id] = counts.get(t_id, 0) + 1
+            docs = split_gmf_documents(file_path)
+            if docs:
+                total_docs = len(docs)
+                with tempfile.TemporaryDirectory(prefix="gmf_summary_") as tmp:
+                    counts = {}
+                    for idx, doc_lines in enumerate(docs, start=1):
+                        tmp_path = write_doc_to_temp(doc_lines, tmp, upload.filename, idx)
+                        ident = identify_template(tmp_path)
+                        t_id = ident.template_id or "unknown"
+                        counts[t_id] = counts.get(t_id, 0) + 1
 
-                active_templates = set(
-                    t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.is_active == True).all()
-                )
-
-                for t_id, count in counts.items():
-                    is_active = t_id in active_templates
-                    breakdown.append({
-                        "template_id": t_id,
-                        "template_name": t_id.replace("_", " ").title(),
-                        "count": count,
-                        "is_approved": is_active,
-                        "status": "APPROVED" if is_active else "PENDING_APPROVAL"
-                    })
+                    for t_id, count in counts.items():
+                        is_active = t_id in active_templates
+                        breakdown.append({
+                            "template_id": t_id,
+                            "template_name": t_id.replace("_", " ").title(),
+                            "count": count,
+                            "is_approved": is_active,
+                            "status": "APPROVED" if is_active else "PENDING_APPROVAL"
+                        })
         except Exception:
             pass
 
+    # Fallback breakdown if file parsing was not possible
+    if not breakdown and upload.template_detected:
+        raw = str(upload.template_detected)
+        for char in ['(', ')', "'", '"']:
+            raw = raw.replace(char, '')
+        parts = [p.strip() for p in raw.split(',') if p.strip() and not p.strip().isdigit()]
+        for t_id in parts:
+            is_active = t_id in active_templates
+            breakdown.append({
+                "template_id": t_id,
+                "template_name": t_id.replace("_", " ").title(),
+                "count": total_docs if len(parts) == 1 else max(1, total_docs // len(parts)),
+                "is_approved": is_active,
+                "status": "APPROVED" if is_active else "PENDING_APPROVAL"
+            })
+
     processed = upload.processed_records_count or 0
+    if upload.status == GmfUploadStatus.COMPLETED:
+        processed = total_docs
     remaining = max(0, total_docs - processed)
 
     return {
@@ -550,6 +586,7 @@ def get_upload_summary(
         "detected_at": upload.detected_at,
         "template_breakdown": breakdown,
     }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

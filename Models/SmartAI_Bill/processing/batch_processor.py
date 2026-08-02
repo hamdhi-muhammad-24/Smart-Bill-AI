@@ -96,7 +96,8 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
 
     try:
         temp_gmf_path = write_doc_to_temp(
-            doc_lines, split_dir, source_filename, doc_index)
+            doc_lines, split_dir, source_filename, doc_index, original_file_path=source_file)
+
 
         identification = identify_template(temp_gmf_path)
 
