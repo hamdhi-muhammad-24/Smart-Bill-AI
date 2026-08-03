@@ -34,6 +34,16 @@ def create_app() -> FastAPI:
     @application.on_event("startup")
     async def startup_event():
         try:
+            from sqlalchemy import text
+            from app.db.base import SessionLocal
+            with SessionLocal() as db:
+                db.execute(text("ALTER TYPE gmf_upload_status ADD VALUE IF NOT EXISTS 'PARTIALLY_PROCESSED';"))
+                db.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger("uvicorn").debug(f"Enum sync skipped or already exists: {e}")
+
+        try:
             await azure_scheme.openid_config.load_config()
         except Exception as e:
             import logging

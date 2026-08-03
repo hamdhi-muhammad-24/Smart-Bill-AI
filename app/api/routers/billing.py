@@ -298,14 +298,12 @@ def get_pending_batches(
 ):
     """Group approved GMF files into one batch per cycle or folder (excluding Test GMFs) for manual runs."""
     pending_uploads = db.query(GmfUpload).filter(
-        GmfUpload.status == GmfUploadStatus.APPROVED,
+        GmfUpload.status.in_([GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED]),
         GmfUpload.folder_type != "Test_GMFs",
         or_(
             GmfUpload.billing_run_id.is_(None),
-            and_(
-                GmfUpload.total_records_count > 0,
-                GmfUpload.processed_records_count < GmfUpload.total_records_count
-            )
+            GmfUpload.total_records_count == 0,
+            GmfUpload.processed_records_count < GmfUpload.total_records_count
         )
     ).order_by(GmfUpload.detected_at.asc()).all()
 
@@ -660,7 +658,7 @@ def generate_batch(
     if not upload:
         raise HTTPException(status_code=404, detail="Upload not found")
 
-    if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL):
+    if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.PARTIALLY_PROCESSED):
         raise HTTPException(
             status_code=400,
             detail=f"GMF is already generating/completed. Current status: {upload.status.value}"
@@ -753,7 +751,7 @@ def generate_batch_endpoint(
     # First, mark uploads as approved and set billing_run_id in DB, and commit
     valid_uploads = []
     for upload in uploads:
-        if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL):
+        if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.PARTIALLY_PROCESSED):
             continue
         if not os.path.exists(upload.file_path):
             continue
@@ -1151,7 +1149,13 @@ def get_templates(db: Session = Depends(get_db), _: UserOut = Depends(require_ad
         
         # Ensure DB record exists
         if tid not in db_templates:
-            new_t = InvoiceTemplate(template_code=tid, name=info["name"], is_system_template=True)
+            new_t = InvoiceTemplate(
+                template_code=tid,
+                name=info["name"],
+                is_system_template=True,
+                is_active=True,
+                approval_status=TemplateApprovalStatus.APPROVED,
+            )
             db.add(new_t)
             db.commit()
             db.refresh(new_t)
@@ -1278,6 +1282,7 @@ def update_template_status(
                     if old_path.exists():
                         upload.status = GmfUploadStatus.APPROVED
                         upload.rejection_reason = None
+                        upload.billing_run_id = None
                         try:
                             settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
                             if old_path != new_path:
@@ -1290,6 +1295,7 @@ def update_template_status(
                     else:
                         upload.status = GmfUploadStatus.APPROVED
                         upload.rejection_reason = None
+                        upload.billing_run_id = None
             else:
                 upload.status = GmfUploadStatus.APPROVED
                 upload.rejection_reason = None
