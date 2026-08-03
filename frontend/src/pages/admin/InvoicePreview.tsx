@@ -97,6 +97,7 @@ export default function InvoicePreview() {
       toast.success(`Template APPROVED successfully`)
       queryClient.invalidateQueries({ queryKey: ['billing-templates'] })
       queryClient.invalidateQueries({ queryKey: ['billing-uploads'] })
+      queryClient.invalidateQueries({ queryKey: ['billing-pending-batches'] })
       queryClient.invalidateQueries({ queryKey: ['template-history'] })
     },
     onError: (err: any) => toast.error(err.detail || 'Failed to approve template')
@@ -111,6 +112,7 @@ export default function InvoicePreview() {
       setRejectReason('')
       queryClient.invalidateQueries({ queryKey: ['billing-templates'] })
       queryClient.invalidateQueries({ queryKey: ['billing-uploads'] })
+      queryClient.invalidateQueries({ queryKey: ['billing-pending-batches'] })
       queryClient.invalidateQueries({ queryKey: ['template-history'] })
     },
     onError: (err: any) => toast.error(err.detail || 'Failed to reject template')
