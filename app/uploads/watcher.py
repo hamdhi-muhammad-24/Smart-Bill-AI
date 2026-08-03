@@ -56,12 +56,12 @@ _process_lock = threading.Lock()
 def _detect_template(file_path: str) -> tuple[str | None, int]:
     """Run SmartAI_Bill's template identifier across document blocks. Returns (template_summary, total_count)."""
     try:
-        from core.gmf_splitter import split_gmf_documents, write_doc_to_temp
+        from core.gmf_splitter import split_gmf_documents, write_doc_to_temp, count_documents
         from core.template_identifier import identify_template
         import tempfile
 
         docs = split_gmf_documents(file_path)
-        total_count = len(docs)
+        total_count = count_documents(file_path)
         detected_set = set()
 
         with tempfile.TemporaryDirectory(prefix="gmf_scan_") as tmp_dir:

@@ -103,6 +103,20 @@ def _worker_process(worker_id):
 
             filename = file_path.name
             logger.info(f"Worker {worker_id} processing {filename}")
+
+            # Check for sidecar JSON metadata (offset & limit) written by generate-batch endpoint
+            meta_path = incoming_dir / f"{filename}.meta.json"
+            offset = 0
+            limit = None
+            if meta_path.exists():
+                try:
+                    with open(meta_path, "r", encoding="utf-8") as meta_f:
+                        meta_data = json.load(meta_f)
+                        offset = meta_data.get("offset", 0)
+                        limit = meta_data.get("limit")
+                    _robust_file_op(os.remove, meta_path)
+                except Exception as meta_err:
+                    logger.warning(f"Could not read meta JSON for {filename}: {meta_err}")
             
             # DB lookup to get cycle and template ID (with up to 3 retry attempts for delayed transaction commits)
             upload = None
@@ -183,10 +197,17 @@ def _worker_process(worker_id):
 
             # Query active approved templates
             with SessionLocal() as db:
-                from app.db.models import InvoiceTemplate
-                active_templates = set(
-                    t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.is_active == True).all()
-                )
+                from app.db.models import InvoiceTemplate, TemplateApprovalStatus
+                from sqlalchemy import or_
+                db_templates = db.query(InvoiceTemplate).filter(
+                    or_(InvoiceTemplate.is_active == True, InvoiceTemplate.approval_status != TemplateApprovalStatus.REJECTED)
+                ).all()
+                active_templates = set(t.template_code for t in db_templates)
+                # Include standard system templates by default unless explicitly rejected
+                for sys_tid in ("lod", "vat_confirmation", "nonvat_home", "nonvat_enterprise", "vat_enterprise", "vat_home"):
+                    t_obj = next((t for t in db_templates if t.template_code == sys_tid), None)
+                    if not t_obj or t_obj.approval_status != TemplateApprovalStatus.REJECTED:
+                        active_templates.add(sys_tid)
 
             # Construct output folder: output/<YYYY-MM-DD>/<Cycle_N|LOD|VAT_Confirmation>/Batch_1/
             today_str = datetime.now().strftime("%Y-%m-%d")
@@ -194,10 +215,10 @@ def _worker_process(worker_id):
             cycle_base_dir.mkdir(parents=True, exist_ok=True)
 
             from processing.batch_processor import process_single_file
-            args = (str(working_path), str(cycle_base_dir), 1, False, active_templates)
+            args = (str(working_path), str(cycle_base_dir), 1, False, active_templates, offset, limit)
             results = process_single_file(args)
 
-            generated_count = sum(1 for r in results if r.success)
+            generated_count = sum(getattr(r, "output_pdf_count", 1) for r in results if r.success)
             total_count = len(results)
 
 
@@ -207,7 +228,13 @@ def _worker_process(worker_id):
                     upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
                     if upload:
                         upload.processed_records_count = (upload.processed_records_count or 0) + generated_count
-                        upload.total_records_count = total_count
+                        if not upload.total_records_count or upload.total_records_count <= 1:
+                            try:
+                                from core.gmf_splitter import count_documents
+                                real_total = count_documents(str(working_path))
+                                upload.total_records_count = max(real_total, total_count)
+                            except Exception:
+                                upload.total_records_count = max(upload.total_records_count or 0, total_count)
 
                         if upload.processed_records_count >= upload.total_records_count and upload.total_records_count > 0:
                             processed_dest = settings.gmf_drive_path / "Processed" / (cycle_label or "unknown")
