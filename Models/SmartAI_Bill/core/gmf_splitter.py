@@ -4,8 +4,9 @@ import shutil
 
 
 def split_gmf_documents(file_path):
+    clean_path = str(file_path)[:-11] if str(file_path).lower().endswith('.processing') else str(file_path)
     # If the file is an Excel file (.xlsx / .xls), treat as a single document
-    if str(file_path).lower().endswith(('.xlsx', '.xls')):
+    if clean_path.lower().endswith(('.xlsx', '.xls')):
         return [["__EXCEL_FILE__\n", f"PATH={os.path.abspath(file_path)}\n"]]
 
     documents = []
@@ -48,7 +49,8 @@ def write_doc_to_temp(doc_lines, temp_dir, source_filename, doc_index, original_
     Write a single document's lines to a temporary GMF file.
     Preserves original outer filename and binary integrity for Excel files.
     """
-    base, ext = os.path.splitext(source_filename)
+    clean_filename = source_filename[:-11] if source_filename.lower().endswith('.processing') else source_filename
+    base, ext = os.path.splitext(clean_filename)
     if ext.lower() in ('.xlsx', '.xls'):
         temp_name = f"{base}__doc{doc_index:04d}{ext}"
         temp_path = os.path.join(temp_dir, temp_name)
@@ -75,8 +77,29 @@ def write_doc_to_temp(doc_lines, temp_dir, source_filename, doc_index, original_
 
 
 def count_documents(file_path):
-    if str(file_path).lower().endswith(('.xlsx', '.xls')):
-        return 1
+    clean_path = str(file_path)[:-11] if str(file_path).lower().endswith('.processing') else str(file_path)
+    ext = os.path.splitext(clean_path)[1].lower()
+    if ext in ('.xlsx', '.xls', '.csv'):
+        try:
+            if ext == '.csv':
+                import csv
+                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    reader = csv.reader(f)
+                    rows = [r for r in reader if any(cell.strip() for cell in r)]
+                    return max(1, len(rows) - 1 if len(rows) > 1 else len(rows))
+            else:
+                import openpyxl
+                wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+                sheet = wb.active
+                # Count non-empty rows
+                row_count = 0
+                for row in sheet.iter_rows(values_only=True):
+                    if any(cell is not None and str(cell).strip() != "" for cell in row):
+                        row_count += 1
+                wb.close()
+                return max(1, row_count - 1 if row_count > 1 else row_count)
+        except Exception as e:
+            return 1
     count = 0
     try:
         with open(file_path, 'r', encoding='utf-8', errors='replace') as f:

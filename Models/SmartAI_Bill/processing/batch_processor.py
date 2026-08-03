@@ -35,7 +35,7 @@ class ProcessingResult:
 def process_single_file(args):
     """
     Process a GMF file which may contain 1 or multiple documents.
-    args format: (file_path, temp_pdf_dir, attempt, is_preview, approved_templates)
+    args format: (file_path, temp_pdf_dir, attempt, is_preview, approved_templates, offset, limit)
     Returns a LIST of ProcessingResult (one per document).
     """
     file_path = args[0]
@@ -43,6 +43,8 @@ def process_single_file(args):
     attempt = args[2] if len(args) > 2 else 1
     is_preview = args[3] if len(args) > 3 else False
     approved_templates = args[4] if len(args) > 4 else None
+    offset = args[5] if len(args) > 5 else 0
+    limit = args[6] if len(args) > 6 else None
 
     results = []
     source_filename = os.path.basename(file_path)
@@ -70,6 +72,8 @@ def process_single_file(args):
                     attempt=attempt,
                     is_preview=is_preview,
                     approved_templates=approved_templates,
+                    offset=offset,
+                    limit=limit,
                 )
                 results.append(result)
 
@@ -85,7 +89,7 @@ def process_single_file(args):
 
 def _process_one_document(doc_lines, doc_index, source_file, source_filename,
                            split_dir, temp_pdf_dir, attempt, is_preview=False,
-                           approved_templates=None):
+                           approved_templates=None, offset=0, limit=None):
     """Process a single document block from a GMF file."""
     start_time = time.perf_counter()
     result = ProcessingResult(
@@ -129,7 +133,10 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
                 if list_key in data and isinstance(data[list_key], list) and len(data[list_key]) > 10:
                     data[list_key] = data[list_key][:10]
         else:
-            data = parser_func(temp_gmf_path)
+            try:
+                data = parser_func(temp_gmf_path, limit=limit, offset=offset)
+            except TypeError:
+                data = parser_func(temp_gmf_path)
 
         renderer = RendererClass()
         renderer.render(data)
@@ -154,6 +161,8 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
 
         renderer.save(output_path)
 
+        gen_count = len(getattr(renderer, "generated_pdfs", []))
+        result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
         result.output_pdf = output_path
         result.success = True
 
