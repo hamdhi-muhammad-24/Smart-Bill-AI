@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     gmf_drive_path: Path = Path("./local_gmf_uploads")
     queue_incoming_dir: Path = Path("./queue/incoming")
     queue_pending_dir: Path = Path("./queue/pending")
+    envelope_base_dir: Path = Path("./Models/SmartAI_Bill/templates/envelope/base")
+    envelope_artwork_dir: Path = Path("./Models/SmartAI_Bill/templates/envelope/Image")
+    envelope_output_dir: Path = Path("./Models/SmartAI_Bill/templates/envelope/output")
     gmf_scan_interval_seconds: int = 5
     log_level: str = "INFO"
 

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.errors import register_exception_handlers
-from app.api.routers import billing, health, users
+from app.api.routers import billing, health, users, envelope
 from app.auth.router import router as auth_router
 from app.billing_scheduler import start_scheduler
 
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     application.include_router(billing.router)
     application.include_router(health.router)
     application.include_router(users.router)
+    application.include_router(envelope.router)
 
     register_exception_handlers(application)
     
@@ -39,6 +40,18 @@ def create_app() -> FastAPI:
             import logging
             logging.getLogger("uvicorn").warning(f"Azure AD OpenID config load skipped: {e}")
         start_scheduler()
+        try:
+            from app.db.base import engine
+            from sqlalchemy import text
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TYPE gmf_upload_status ADD VALUE IF NOT EXISTS 'PARTIALLY_PROCESSED'"))
+                conn.execute(text("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN1'"))
+                conn.execute(text("ALTER TABLE gmf_uploads ADD COLUMN IF NOT EXISTS template_breakdown TEXT;"))
+                conn.commit()
+        except Exception as e:
+            import logging
+            logging.getLogger("uvicorn").warning(f"Database enum migration skipped: {e}")
+
         try:
             from app.billing.worker_queue import start_worker_threads
             start_worker_threads(4)
