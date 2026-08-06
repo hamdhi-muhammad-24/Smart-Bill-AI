@@ -99,8 +99,16 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             dest = os.path.join(batch_dir, os.path.basename(pdf_path))
             
             try:
-                local_vm_batch_dir = os.path.join("./output", today, cycle_label, f"Batch_{current_batch_num}")
-                os.makedirs(local_vm_batch_dir, exist_ok=True)
+                local_base = os.path.join("./output", today, cycle_label)
+                # Find local batch dir with < 10 PDFs
+                b_num = 1
+                while True:
+                    local_vm_batch_dir = os.path.join(local_base, f"Batch_{b_num}")
+                    os.makedirs(local_vm_batch_dir, exist_ok=True)
+                    local_cnt = len([f for f in os.listdir(local_vm_batch_dir) if f.lower().endswith(".pdf")])
+                    if local_cnt < BATCH_FOLDER_SIZE:
+                        break
+                    b_num += 1
                 shutil.copy2(pdf_path, os.path.join(local_vm_batch_dir, os.path.basename(pdf_path)))
             except Exception as copy_err:
                 if log_callback:

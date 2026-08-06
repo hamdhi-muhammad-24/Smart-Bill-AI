@@ -1,0 +1,173 @@
+import os
+import openpyxl
+import csv
+import tempfile
+
+def count_documents(file_path: str) -> int:
+    """Counts customer records in GMF text file, Excel spreadsheet, or CSV."""
+    if not file_path or not os.path.exists(file_path):
+        return 0
+
+    clean_path = file_path[:-11] if file_path.lower().endswith(".processing") else file_path
+    ext = os.path.splitext(clean_path)[1].lower()
+
+    if ext in (".xlsx", ".xls"):
+        try:
+            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb.active
+            count = 0
+            has_header = False
+            for row in ws.iter_rows(values_only=True):
+                if row and any(cell is not None and str(cell).strip() != "" for cell in row):
+                    if not has_header:
+                        has_header = True
+                    else:
+                        count += 1
+            wb.close()
+            return count
+        except Exception:
+            return 0
+    elif ext == ".csv":
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                reader = csv.reader(f)
+                lines = [r for r in reader if r and any(cell.strip() for cell in r)]
+                return max(0, len(lines) - 1)
+        except Exception:
+            return 0
+    else:
+        # Standard GMF text file record counting: Count DOCSTART blocks
+        docstart_count = 0
+        acc_count = 0
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    l = line.strip().upper()
+                    if l.startswith("DOCSTART"):
+                        docstart_count += 1
+                    elif l.startswith(("ACC_NO", "ACCOUNT", "BILLSTYLE", "1,")):
+                        acc_count += 1
+            if docstart_count > 0:
+                return docstart_count
+            return max(1, acc_count)
+        except Exception:
+            return 1
+
+
+def count_documents_with_breakdown(file_path: str) -> tuple[int, dict[str, int]]:
+    """Returns (total_customer_count, template_breakdown_dict) for any GMF file."""
+    if not file_path or not os.path.exists(file_path):
+        return 0, {}
+
+    clean_path = file_path[:-11] if file_path.lower().endswith(".processing") else file_path
+    ext = os.path.splitext(clean_path)[1].lower()
+
+    if ext in (".xlsx", ".xls", ".csv"):
+        total = count_documents(file_path)
+        from core.template_identifier import identify_template
+        tid = identify_template(file_path).template_id or "spreadsheet"
+        return total, {tid: total}
+    else:
+        from core.template_identifier import identify_template
+        doc_blocks = []
+        current_block = []
+        in_doc = False
+
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.upper().startswith("DOCSTART"):
+                    if current_block:
+                        doc_blocks.append("\n".join(current_block))
+                    current_block = [line]
+                    in_doc = True
+                elif stripped.upper().startswith("DOCEND"):
+                    current_block.append(line)
+                    doc_blocks.append("\n".join(current_block))
+                    current_block = []
+                    in_doc = False
+                elif in_doc:
+                    current_block.append(line)
+
+        if current_block:
+            doc_blocks.append("\n".join(current_block))
+
+        if not doc_blocks:
+            total = count_documents(file_path)
+            res = identify_template(file_path)
+            tid = res.template_id or "unknown"
+            return total, {tid: total}
+
+        breakdown = {}
+        for block in doc_blocks:
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".gmf", encoding="utf-8") as tf:
+                tf.write(block)
+                tmp_name = tf.name
+            try:
+                res = identify_template(tmp_name)
+                tid = res.template_id or "unknown"
+                breakdown[tid] = breakdown.get(tid, 0) + 1
+            finally:
+                if os.path.exists(tmp_name):
+                    try:
+                        os.remove(tmp_name)
+                    except OSError:
+                        pass
+
+        total = sum(breakdown.values())
+        return total, breakdown
+
+
+def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None) -> list[str]:
+    """
+    Splits a multi-document GMF text file into individual temporary document file paths.
+    For spreadsheets/CSV files, returns [file_path].
+    """
+    if not file_path or not os.path.exists(file_path):
+        return []
+
+    clean_path = file_path[:-11] if file_path.lower().endswith(".processing") else file_path
+    ext = os.path.splitext(clean_path)[1].lower()
+
+    if ext in (".xlsx", ".xls", ".csv"):
+        return [file_path]
+
+    doc_blocks = []
+    current_block = []
+    in_doc = False
+
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped.upper().startswith("DOCSTART"):
+                if current_block:
+                    doc_blocks.append("\n".join(current_block))
+                current_block = [line]
+                in_doc = True
+            elif stripped.upper().startswith("DOCEND"):
+                current_block.append(line)
+                doc_blocks.append("\n".join(current_block))
+                current_block = []
+                in_doc = False
+            elif in_doc:
+                current_block.append(line)
+
+    if current_block:
+        doc_blocks.append("\n".join(current_block))
+
+    if not doc_blocks:
+        return [file_path]
+
+    if offset > 0:
+        doc_blocks = doc_blocks[offset:]
+    if limit is not None and limit > 0:
+        doc_blocks = doc_blocks[:limit]
+
+    temp_files = []
+    for i, block in enumerate(doc_blocks, 1):
+        tf = tempfile.NamedTemporaryFile("w", delete=False, suffix=f"_{i}.gmf", encoding="utf-8")
+        tf.write(block)
+        tf.close()
+        temp_files.append(tf.name)
+
+    return temp_files

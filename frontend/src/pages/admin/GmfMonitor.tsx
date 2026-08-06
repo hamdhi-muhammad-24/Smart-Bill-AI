@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileText, CheckCircle2, AlertTriangle, Loader2, XCircle, Trash2 } from 'lucide-react'
+import { FileText, CheckCircle2, AlertTriangle, Loader2, XCircle, Trash2, Eye } from 'lucide-react'
 import { getUploads, deleteUpload, clearAllUploads, type GmfUploadOut } from '../../lib/api'
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { DataTable, type ColumnDef } from '../../components/ui-kit/DataTable'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { toast } from 'sonner'
 import { useAuth } from '../../auth/AuthProvider'
 
@@ -55,6 +57,7 @@ export default function GmfMonitor() {
   const queryClient = useQueryClient()
   const { session } = useAuth()
   const [showCompleted, setShowCompleted] = useState(false)
+  const [selectedUpload, setSelectedUpload] = useState<GmfUploadOut | null>(null)
   const canManageUploads = session?.role === 'gmf_handler' || (session?.role as string) === 'admin1'
 
   const { data: uploads, isLoading } = useQuery({
@@ -103,8 +106,8 @@ export default function GmfMonitor() {
       cell: (upload) => (
         <div className="flex flex-col">
           <div className="flex items-center gap-2">
-            <FileText size={16} className="text-muted-foreground" />
-            <span className="font-semibold text-foreground">{upload.filename}</span>
+            <FileText size={16} className="text-muted-foreground shrink-0" />
+            <span className="font-semibold text-foreground hover:text-indigo-600 transition-colors">{upload.filename}</span>
           </div>
           {upload.error_message && (
             <span className="text-xs text-red-500 mt-1 flex items-center gap-1">
@@ -121,6 +124,8 @@ export default function GmfMonitor() {
         let label = 'Test GMF'
         if (upload.folder_type === 'LOD') label = 'LOD'
         else if (upload.folder_type === 'VAT_Confirmation') label = 'VAT Confirmation'
+        else if (upload.folder_type === 'Final_Notice') label = 'Final Notice'
+        else if (upload.folder_type === 'Customer_Letter' || upload.folder_type === 'Customer_Letter_Logo_V1Print') label = 'Customer Letter'
         else if (upload.cycle_number) label = `Cycle ${upload.cycle_number}`
         return (
           <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-bold text-slate-800 dark:bg-slate-800 dark:text-slate-200 border border-slate-200/50 dark:border-slate-700/30">
@@ -130,12 +135,55 @@ export default function GmfMonitor() {
       },
     },
     {
-      header: 'Detected Template',
-      cell: (upload) => (
-        <span className="text-sm font-semibold text-foreground">
-          {upload.template_detected ? upload.template_detected.replace('_', ' ') : <span className="text-muted-foreground font-medium">Unknown</span>}
-        </span>
-      ),
+      header: 'Detected Templates & Customer Breakdown',
+      cell: (upload) => {
+        const breakdown = upload.template_breakdown
+        const total = upload.total_records_count || 0
+        const processed = upload.processed_records_count || 0
+
+        const hasBreakdown = breakdown && Object.keys(breakdown).length > 0
+
+        return (
+          <div className="flex flex-col gap-1.5 py-0.5">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-extrabold text-foreground tracking-tight">
+                {total > 0 ? total.toLocaleString() : '-'} <span className="text-xs font-normal text-muted-foreground">total records</span>
+              </span>
+              {processed > 0 && (
+                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                  {processed.toLocaleString()} processed
+                </span>
+              )}
+            </div>
+
+            {/* Template Breakdown Pill List */}
+            <div className="flex flex-wrap gap-1.5 max-w-md">
+              {hasBreakdown ? (
+                Object.entries(breakdown).map(([tid, count]) => {
+                  const formattedName = tid.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                  return (
+                    <span 
+                      key={tid} 
+                      className="inline-flex items-center gap-1.5 rounded-md bg-indigo-50/80 px-2 py-0.5 text-xs font-semibold text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200 border border-indigo-200/60 dark:border-indigo-800/40 shadow-xs"
+                    >
+                      <span>{formattedName}</span>
+                      <span className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-1.5 py-0.2 text-[10px] font-black text-white dark:bg-indigo-400 dark:text-slate-950">
+                        {count.toLocaleString()}
+                      </span>
+                    </span>
+                  )
+                })
+              ) : upload.template_detected ? (
+                <span className="inline-flex items-center gap-1.5 rounded-md bg-indigo-50 px-2.5 py-0.5 text-xs font-bold text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/40">
+                  {upload.template_detected.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}: {total > 0 ? total.toLocaleString() : 1}
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground italic">Template Unknown</span>
+              )}
+            </div>
+          </div>
+        )
+      },
     },
     {
       header: 'Detected At',
@@ -145,12 +193,25 @@ export default function GmfMonitor() {
       header: 'Status',
       cell: (upload) => <StatusBadge status={upload.status} />,
     },
-    ...(canManageUploads
-      ? [{
-          header: 'Actions',
-          cell: (upload: GmfUploadOut) => {
-            const isLocked = upload.template_status === 'APPROVED' || upload.template_status === 'REJECTED'
-            return (
+    {
+      header: 'Actions',
+      cell: (upload: GmfUploadOut) => {
+        const isLocked = upload.template_status === 'APPROVED' || upload.template_status === 'REJECTED'
+        return (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={(e) => {
+                e.stopPropagation()
+                setSelectedUpload(upload)
+              }}
+              title="View File Summary"
+              className="rounded-full size-8 text-muted-foreground hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/50"
+            >
+              <Eye size={15} />
+            </Button>
+            {canManageUploads && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -164,10 +225,11 @@ export default function GmfMonitor() {
               >
                 <Trash2 size={14} />
               </Button>
-            )
-          }
-        } satisfies ColumnDef<GmfUploadOut>]
-      : [])
+            )}
+          </div>
+        )
+      }
+    }
   ]
 
   const allUploads = uploads || []
@@ -191,7 +253,7 @@ export default function GmfMonitor() {
     <div className="space-y-6">
       <PageHeader
         title="GMF Monitor"
-        description="Monitor detected GMF files and their generation status."
+        description="Monitor detected GMF files and click any row to view full file breakdown and metrics."
         actions={
           canManageUploads && allUploads.length > 0 ? (
             <Button
@@ -250,9 +312,164 @@ export default function GmfMonitor() {
             data={displayedUploads}
             keyExtractor={(upload) => upload.id}
             emptyLabel="No GMF uploads detected yet."
+            onRowClick={(upload) => setSelectedUpload(upload)}
           />
         )}
       </div>
+
+      {/* GMF File Summary Drawer */}
+      <Sheet open={!!selectedUpload} onOpenChange={(open) => !open && setSelectedUpload(null)}>
+        <SheetContent className="sm:max-w-md md:max-w-lg overflow-y-auto p-6 space-y-6">
+          {selectedUpload && (
+            <div className="space-y-6">
+              <SheetHeader className="space-y-1 text-left border-b pb-4">
+                <div className="flex items-center gap-2">
+                  <FileText className="text-indigo-600 shrink-0" size={20} />
+                  <SheetTitle className="text-lg font-bold truncate">
+                    {selectedUpload.filename}
+                  </SheetTitle>
+                </div>
+                <div className="flex items-center gap-2 pt-1">
+                  <StatusBadge status={selectedUpload.status} />
+                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                    {selectedUpload.folder_type === 'LOD' ? 'LOD' : selectedUpload.folder_type === 'VAT_Confirmation' ? 'VAT Confirmation' : selectedUpload.folder_type === 'Final_Notice' ? 'Final Notice' : selectedUpload.folder_type === 'Customer_Letter' || selectedUpload.folder_type === 'Customer_Letter_Logo_V1Print' ? 'Customer Letter' : `Cycle ${selectedUpload.cycle_number || 1}`}
+                  </span>
+                </div>
+              </SheetHeader>
+
+              {/* 3 Cards Stats Grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border bg-card p-3 text-center shadow-xs">
+                  <span className="text-xl font-extrabold text-foreground">
+                    {(selectedUpload.total_records_count || 0).toLocaleString()}
+                  </span>
+                  <span className="block text-[11px] font-bold text-muted-foreground uppercase mt-0.5">
+                    Total Records
+                  </span>
+                </div>
+                <div className="rounded-xl border bg-emerald-50/60 dark:bg-emerald-950/20 p-3 text-center border-emerald-200/50 shadow-xs">
+                  <span className="text-xl font-extrabold text-emerald-700 dark:text-emerald-400">
+                    {(selectedUpload.processed_records_count || 0).toLocaleString()}
+                  </span>
+                  <span className="block text-[11px] font-bold text-emerald-800/80 dark:text-emerald-300 uppercase mt-0.5">
+                    Processed
+                  </span>
+                </div>
+                <div className="rounded-xl border bg-amber-50/60 dark:bg-amber-950/20 p-3 text-center border-amber-200/50 shadow-xs">
+                  <span className="text-xl font-extrabold text-amber-700 dark:text-amber-400">
+                    {Math.max(0, (selectedUpload.total_records_count || 0) - (selectedUpload.processed_records_count || 0)).toLocaleString()}
+                  </span>
+                  <span className="block text-[11px] font-bold text-amber-800/80 dark:text-amber-300 uppercase mt-0.5">
+                    Remaining
+                  </span>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              {(selectedUpload.total_records_count || 0) > 0 && (
+                <div className="space-y-1.5 bg-muted/40 p-3.5 rounded-xl border border-border/50">
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="text-muted-foreground">Generation Progress</span>
+                    <span className="text-indigo-600 dark:text-indigo-400">
+                      {Math.round(((selectedUpload.processed_records_count || 0) / (selectedUpload.total_records_count || 1)) * 100)}%
+                    </span>
+                  </div>
+                  <Progress 
+                    value={Math.round(((selectedUpload.processed_records_count || 0) / (selectedUpload.total_records_count || 1)) * 100)} 
+                    className="h-2"
+                  />
+                </div>
+              )}
+
+              {/* Template Breakdown */}
+              <div className="space-y-2.5">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                  Detected Templates & Customer Breakdown
+                </h4>
+                <div className="flex flex-col gap-2">
+                  {selectedUpload.template_breakdown && Object.keys(selectedUpload.template_breakdown).length > 0 ? (
+                    Object.entries(selectedUpload.template_breakdown).map(([tid, count]) => {
+                      const formattedName = tid.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+                      const percent = selectedUpload.total_records_count 
+                        ? Math.round((count / selectedUpload.total_records_count) * 100)
+                        : 100
+                      return (
+                        <div key={tid} className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/40 transition-colors">
+                          <div className="flex items-center gap-2">
+                            <div className="size-2 rounded-full bg-indigo-500" />
+                            <span className="font-bold text-sm text-foreground">{formattedName}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-muted-foreground">{percent}%</span>
+                            <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-black text-xs">
+                              {count.toLocaleString()} customers
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })
+                  ) : selectedUpload.template_detected ? (
+                    <div className="flex items-center justify-between p-3 rounded-lg border bg-card">
+                      <span className="font-bold text-sm text-foreground">
+                        {selectedUpload.template_detected.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-black text-xs">
+                        {(selectedUpload.total_records_count || 1).toLocaleString()} customers
+                      </span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">No breakdown available.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Detailed File Properties */}
+              <div className="space-y-2.5">
+                <h4 className="text-xs font-extrabold uppercase tracking-wider text-muted-foreground">
+                  File Metadata & Location
+                </h4>
+                <div className="space-y-2 rounded-xl border bg-muted/20 p-3.5 text-xs">
+                  <div className="flex justify-between py-1 border-b border-border/40">
+                    <span className="font-medium text-muted-foreground">Upload ID</span>
+                    <span className="font-bold font-mono text-foreground">#{selectedUpload.id}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-border/40">
+                    <span className="font-medium text-muted-foreground">Detected Date</span>
+                    <span className="font-bold text-foreground">
+                      {new Date(selectedUpload.detected_at).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-border/40">
+                    <span className="font-medium text-muted-foreground">File Path</span>
+                    <span className="font-mono text-[11px] text-muted-foreground truncate max-w-[220px]" title={selectedUpload.file_path}>
+                      {selectedUpload.file_path}
+                    </span>
+                  </div>
+                  {selectedUpload.billing_run_id && (
+                    <div className="flex justify-between py-1 border-b border-border/40">
+                      <span className="font-medium text-muted-foreground">Active Billing Run</span>
+                      <span className="font-bold text-indigo-600">Run #{selectedUpload.billing_run_id}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Error / Rejection Info */}
+              {(selectedUpload.error_message || selectedUpload.rejection_reason) && (
+                <div className="rounded-xl border border-red-200 bg-red-50/50 p-3.5 dark:border-red-900/50 dark:bg-red-950/20 text-xs">
+                  <div className="flex items-center gap-2 font-bold text-red-700 dark:text-red-400">
+                    <AlertTriangle size={14} />
+                    <span>Issue Details</span>
+                  </div>
+                  <p className="mt-1 text-red-600 dark:text-red-300 font-medium">
+                    {selectedUpload.error_message || selectedUpload.rejection_reason}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

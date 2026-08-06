@@ -75,6 +75,7 @@ class GmfUploadOut(BaseModel):
     template_status: Optional[str] = None
     processed_records_count: Optional[int] = 0
     total_records_count: Optional[int] = 0
+    template_breakdown: Optional[dict[str, int]] = None
 
     class Config:
         from_attributes = True
@@ -292,7 +293,12 @@ def get_pending_batches(
     db: Session = Depends(get_db),
     _: UserOut = Depends(require_admin),
 ):
-    """Group approved GMF files into one batch per cycle or folder (excluding Test GMFs) for manual runs."""
+    # Check active billing mode. In Auto Mode, Ready for Generation should NOT list files.
+    setting = db.query(SystemSetting).filter(SystemSetting.key == "billing_mode").first()
+    billing_mode = setting.value if setting else "auto"
+    if billing_mode == "auto":
+        return []
+
     pending_uploads = db.query(GmfUpload).filter(
         GmfUpload.status == GmfUploadStatus.APPROVED,
         GmfUpload.folder_type != "Test_GMFs",
@@ -372,6 +378,9 @@ def get_uploads(
             "template_status": template_status_map.get(u.template_detected) if u.template_detected else None,
             "processed_records_count": u.processed_records_count or 0,
             "total_records_count": u.total_records_count or 0,
+            "template_breakdown": json.loads(u.template_breakdown) if (u.template_breakdown and u.template_breakdown.startswith('{')) else (
+                {u.template_detected: u.total_records_count or 1} if u.template_detected else None
+            ),
         }
         res.append(d)
     return res
@@ -590,6 +599,17 @@ def generate_batch_endpoint(
 
     settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
     
+    # Calculate expected total accounts for this batch run
+    expected_count = req.limit if req.limit else sum((u.total_records_count or 1) - (u.processed_records_count or 0) for u in uploads)
+    total_accounts = max(1, expected_count)
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    first_up = uploads[0] if uploads else None
+    f_type = first_up.folder_type if first_up else ""
+    t_id = first_up.template_detected if first_up else ""
+    folder_name = f_type if f_type in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter") else TEMPLATE_FOLDER_MAP.get(str(t_id), str(t_id) or "output")
+    out_dir_path = str(settings.output_dir / today_str / folder_name)
+
     # Create BillingRun to track progress
     run = BillingRun(
         batch_name=f"Batch {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
@@ -597,9 +617,10 @@ def generate_batch_endpoint(
         period_start=date.today(),
         period_end=date.today(),
         status=RunStatus.RUNNING,
-        total_accounts=len(upload_ids),
+        total_accounts=total_accounts,
         succeeded=0,
         failed=0,
+        output_path=out_dir_path,
         started_at=datetime.now()
     )
     db.add(run)
@@ -649,7 +670,6 @@ def generate_batch_endpoint(
             with open(meta_path, "w", encoding="utf-8") as meta_f:
                 json.dump(meta_data, meta_f)
 
-            upload.file_path = str(new_path)
             success_count += 1
         except Exception as e:
             # If staging fails, mark this GMF as failed immediately so the run status stays consistent
@@ -671,7 +691,7 @@ def generate_batch_endpoint(
         update(BillingRun)
         .where(BillingRun.id == run_id)
         .values(
-            total_accounts=success_count + staging_failures,
+            total_accounts=total_accounts,
             failed=BillingRun.failed + staging_failures,
         )
     )
@@ -1074,10 +1094,21 @@ def update_template_status(
     db.add(hist)
     
     if new_status == TemplateApprovalStatus.APPROVED:
-        uploads = db.query(GmfUpload).filter(
-            GmfUpload.template_detected == template_id,
+        all_pending = db.query(GmfUpload).filter(
             GmfUpload.status.in_([GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.REJECTED])
         ).all()
+        
+        uploads = []
+        for u in all_pending:
+            if u.template_detected == template_id:
+                uploads.append(u)
+            elif u.template_breakdown:
+                try:
+                    bd = json.loads(u.template_breakdown)
+                    if template_id in bd:
+                        uploads.append(u)
+                except Exception:
+                    pass
         
         non_test_uploads = []
         for upload in uploads:
@@ -1132,7 +1163,7 @@ def update_template_status(
                 period_start=date.today(),
                 period_end=date.today(),
                 status=RunStatus.RUNNING,
-                total_accounts=len(non_test_uploads),
+                total_accounts=sum(u.total_records_count or 1 for u in non_test_uploads),
                 succeeded=0,
                 failed=0,
                 started_at=datetime.now()
@@ -1409,13 +1440,20 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     registered_count += 1
                     continue
 
+                from core.gmf_splitter import count_documents_with_breakdown
+                total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
+
                 existing.file_path = str(final_path)
                 existing.status = final_status
                 existing.error_message = None
                 existing.rejection_reason = None
                 existing.billing_run_id = None
                 existing.template_detected = template_detected
+                existing.total_records_count = total_cnt
+                existing.template_breakdown = json.dumps(breakdown) if breakdown else None
             else:
+                from core.gmf_splitter import count_documents_with_breakdown
+                total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
                 db.add(GmfUpload(
                     filename=filename,
                     file_path=str(final_path),
@@ -1423,6 +1461,8 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     cycle_number=cycle_number,
                     template_detected=template_detected,
                     status=final_status,
+                    total_records_count=total_cnt,
+                    template_breakdown=json.dumps(breakdown) if breakdown else None,
                 ))
 
             registered_count += 1
@@ -1578,7 +1618,7 @@ def upload_gmf(
     _: UserOut = Depends(require_admin1_or_admin)
 ):
     """Accept direct GMF file or ZIP uploads."""
-    if folder_type not in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs", "LOD", "VAT_Confirmation"):
+    if folder_type not in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "Customer_Letter_Logo_V1Print"):
         raise HTTPException(status_code=400, detail="Invalid folder_type.")
 
     staged_files: list[tuple[str, str]] = []
