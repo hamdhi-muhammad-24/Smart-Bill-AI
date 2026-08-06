@@ -43,7 +43,10 @@ CYCLE_FOLDERS = {
 TEST_FOLDER = "Test_GMFs"
 LOD_FOLDER = "LOD"
 VAT_CONF_FOLDER = "VAT_Confirmation"
-VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {TEST_FOLDER, LOD_FOLDER, VAT_CONF_FOLDER}
+FINAL_NOTICE_FOLDER = "Final_Notice"
+CUSTOMER_LETTER_FOLDER = "Customer_Letter"
+CUSTOMER_LETTER_ALT_FOLDER = "Customer_Letter_Logo_V1Print"
+VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {TEST_FOLDER, LOD_FOLDER, VAT_CONF_FOLDER, FINAL_NOTICE_FOLDER, CUSTOMER_LETTER_FOLDER, CUSTOMER_LETTER_ALT_FOLDER}
 
 # Files to skip (system/temp files)
 SKIP_PREFIXES = (".", "~", "__")
@@ -311,7 +314,9 @@ class GmfFolderHandler(FileSystemEventHandler):
                             logger.error(f"Failed to move file {filename}: {move_err}")
                             return
 
-                    # Create GMF upload record
+                    from core.gmf_splitter import count_documents_with_breakdown
+                    import json
+                    total_cnt, breakdown = count_documents_with_breakdown(str(new_filepath))
                     upload = GmfUpload(
                         filename=filename,
                         file_path=str(new_filepath),
@@ -319,6 +324,8 @@ class GmfFolderHandler(FileSystemEventHandler):
                         cycle_number=cycle_number,
                         template_detected=template_detected,
                         status=final_status,
+                        total_records_count=total_cnt,
+                        template_breakdown=json.dumps(breakdown) if breakdown else None,
                     )
                     db.add(upload)
                     db.flush()  # get upload.id

@@ -5,7 +5,7 @@ import { useMsal } from '@azure/msal-react'
 import { loginRequest } from './msalConfig'
 
 export interface Session {
-  role: 'admin' | 'gmf_handler' | 'manager' | 'customer'
+  role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'customer'
   customerId?: number
 }
 
@@ -49,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (r === 'ADMIN') role = 'admin'
           else if (r === 'MANAGER') role = 'manager'
           else if (r === 'GMF_HANDLER' || r === 'ADMIN1') role = 'gmf_handler'
+          else if (r === 'ENVELOPE_HANDLER') role = 'envelope_handler'
 
           const verified: Session =
             role === 'customer' && me.customer_id != null

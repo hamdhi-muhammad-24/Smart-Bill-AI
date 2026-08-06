@@ -135,6 +135,9 @@ export interface GmfUploadOut {
   rejection_reason: string | null
   billing_run_id: number | null
   template_status?: string | null
+  processed_records_count?: number
+  total_records_count?: number
+  template_breakdown?: Record<string, number> | null
 }
 
 export interface BillingRunOut {

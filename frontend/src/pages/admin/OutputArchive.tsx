@@ -5,7 +5,6 @@ import { getOutputDates, getOutputCycles, getOutputBatches, getOutputPdfs, fetch
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { ScrollArea } from '@/components/ui/scroll-area'
 
 export default function OutputArchive() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -55,10 +54,10 @@ export default function OutputArchive() {
         description="Browse and view all generated invoices organized by date, cycle, and batch." 
       />
 
-      <div className="flex flex-1 min-h-0 gap-4">
+      <div className="flex flex-1 min-h-0 gap-4 overflow-hidden">
         {/* Left Panel: File Browser */}
-        <div className="w-1/3 flex flex-col glass-card shadow-lg overflow-hidden">
-          <div className="bg-muted/30 border-b p-3 flex flex-wrap gap-1 items-center text-sm">
+        <div className="w-1/3 flex flex-col glass-card shadow-lg overflow-hidden h-full min-h-0">
+          <div className="bg-muted/30 border-b p-3 flex flex-wrap gap-1 items-center text-sm shrink-0">
             <span className="font-semibold text-foreground/80 cursor-pointer hover:text-foreground" onClick={() => setSelectedDate(null)}>
               Output
             </span>
@@ -82,7 +81,7 @@ export default function OutputArchive() {
             )}
           </div>
           
-          <ScrollArea className="flex-1 p-2">
+          <div className="flex-1 overflow-y-auto p-2.5 space-y-1 min-h-0">
             {!selectedDate ? (
               // Show Dates
               loadingDates ? <div className="flex justify-center p-4"><Loader2 className="animate-spin text-muted-foreground" /></div> :
@@ -131,7 +130,7 @@ export default function OutputArchive() {
                 </div>
               ))
             )}
-          </ScrollArea>
+          </div>
         </div>
 
         {/* Right Panel: PDF Viewer */}
