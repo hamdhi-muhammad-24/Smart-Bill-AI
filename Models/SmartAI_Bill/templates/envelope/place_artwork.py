@@ -96,7 +96,7 @@ def place_image(pdf_in, pdf_out, box_rect, image_path, rotate_deg=0, fit="cover"
     fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
     os.close(fd)
     try:
-        fitted.save(tmp_path, quality=95)
+        fitted.save(tmp_path, quality=100, subsampling=0)
         doc = fitz.open(pdf_in)
         page = doc[0]
         page.insert_image(box_rect, filename=tmp_path)
@@ -107,7 +107,7 @@ def place_image(pdf_in, pdf_out, box_rect, image_path, rotate_deg=0, fit="cover"
     return pdf_out
 
 
-def render_preview(pdf_path, png_path, dpi=150, page_number=0):
+def render_preview(pdf_path, png_path, dpi=300, page_number=0):
     doc = fitz.open(pdf_path)
     pix = doc[page_number].get_pixmap(dpi=dpi)
     pix.save(png_path)

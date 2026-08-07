@@ -177,9 +177,15 @@ def list_batches_for_cycle(date_str, cycle_label):
     for root in get_output_roots():
         cycle_path = os.path.join(root, date_str, cycle_label)
         if os.path.exists(cycle_path):
+            has_direct_pdfs = False
             for d in os.listdir(cycle_path):
-                if os.path.isdir(os.path.join(cycle_path, d)):
+                full_p = os.path.join(cycle_path, d)
+                if os.path.isdir(full_p):
                     batches.add(d)
+                elif d.lower().endswith('.pdf'):
+                    has_direct_pdfs = True
+            if has_direct_pdfs:
+                batches.add("Batch_01")
     return sorted(list(batches))
 
 
@@ -188,8 +194,15 @@ def list_pdfs_in_batch(date_str, cycle_label, batch_name):
     pdfs = set()
     for root in get_output_roots():
         batch_path = os.path.join(root, date_str, cycle_label, batch_name)
-        if os.path.exists(batch_path):
+        if os.path.exists(batch_path) and os.path.isdir(batch_path):
             for f in os.listdir(batch_path):
+                if f.lower().endswith(".pdf"):
+                    pdfs.add(f)
+        
+        # Check direct files if batch_name is Batch_01
+        cycle_path = os.path.join(root, date_str, cycle_label)
+        if os.path.exists(cycle_path):
+            for f in os.listdir(cycle_path):
                 if f.lower().endswith(".pdf"):
                     pdfs.add(f)
     return sorted(list(pdfs))
@@ -198,7 +211,12 @@ def list_pdfs_in_batch(date_str, cycle_label, batch_name):
 def get_pdf_path(date_str, cycle_label, batch_name, filename):
     """Return absolute path to a specific PDF file across all output roots."""
     for root in get_output_roots():
+        # Check batch subfolder first
         p = os.path.join(root, date_str, cycle_label, batch_name, filename)
         if os.path.exists(p):
             return p
+        # Check direct cycle directory
+        p_direct = os.path.join(root, date_str, cycle_label, filename)
+        if os.path.exists(p_direct):
+            return p_direct
     return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, filename)
