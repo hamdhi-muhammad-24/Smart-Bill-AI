@@ -20,6 +20,7 @@ import ManagerDashboard from './pages/admin/ManagerDashboard'
 import EnvelopeLayout from './components/EnvelopeLayout'
 import EnvelopeDashboard from './pages/envelope/EnvelopeDashboard'
 import EnvelopeManager from './pages/envelope/EnvelopeManager'
+import SavedArtworkGallery from './pages/envelope/SavedArtworkGallery'
 import { ThemeProvider } from './components/ThemeProvider'
 
 export default function App() {
@@ -56,6 +57,7 @@ export default function App() {
           <Route path="/envelope-handler" element={<EnvelopeLayout />}>
             <Route index element={<EnvelopeDashboard />} />
             <Route path="manager" element={<EnvelopeManager />} />
+            <Route path="gallery" element={<SavedArtworkGallery />} />
           </Route>
         </Route>
 
