@@ -425,6 +425,18 @@ export function deleteAllTemplateHistoryLogs(): Promise<{ message: string }> {
   return request('/billing/template-history', { method: 'DELETE' })
 }
 
+export function getEnvelopeHistory(): Promise<any[]> {
+  return request('/api/envelope/history')
+}
+
+export function deleteEnvelopeHistoryLog(historyId: number): Promise<{ message: string }> {
+  return request(`/api/envelope/history/${historyId}`, { method: 'DELETE' })
+}
+
+export function deleteAllEnvelopeHistoryLogs(): Promise<{ message: string }> {
+  return request('/api/envelope/history', { method: 'DELETE' })
+}
+
 export function deleteRun(runId: number): Promise<{ message: string }> {
   return request(`/billing/runs/${runId}`, { method: 'DELETE' })
 }

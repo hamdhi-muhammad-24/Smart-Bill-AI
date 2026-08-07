@@ -38,7 +38,6 @@ export default function InvoiceTemplates() {
     }
   }, [data])
 
-  // Map template names/IDs to static fallback PDF files (if API preview fails or is not ready)
   const getTemplateFallbackPdf = (name: string, id: string) => {
     const lowerName = name.toLowerCase()
     const lowerId = id.toLowerCase()
@@ -51,10 +50,10 @@ export default function InvoiceTemplates() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-6xl mx-auto">
+    <div className="flex flex-col gap-6 max-w-6xl mx-auto pb-10">
       <PageHeader 
-        title="Invoice Templates" 
-        description="Available layout templates for SLT billing generation." 
+        title="Invoice Base Templates" 
+        description="Available fixed layout templates for SLT billing generation." 
       />
 
       {isLoading ? (
@@ -75,7 +74,6 @@ export default function InvoiceTemplates() {
                   className="h-64 bg-slate-100 relative cursor-pointer overflow-hidden border-b"
                   onClick={() => setSelectedPdf(pdfUrl)}
                 >
-                  {/* We use scale to render a zoomed-out thumbnail of the real PDF */}
                   <div className="absolute inset-0 pointer-events-none">
                     <iframe 
                       src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} 
@@ -84,7 +82,6 @@ export default function InvoiceTemplates() {
                     />
                   </div>
                   
-                  {/* Hover Overlay */}
                   <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                     <span className="bg-white/95 text-slate-900 px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 shadow-sm backdrop-blur-sm transform translate-y-4 group-hover:translate-y-0 transition-transform">
                       <Maximize2 size={16} /> View Layout PDF
@@ -129,7 +126,7 @@ export default function InvoiceTemplates() {
           {data?.templates.length === 0 && (
             <div className="col-span-full text-center p-12 border border-dashed rounded-xl text-muted-foreground bg-slate-50/50">
               <LayoutTemplate size={48} className="mx-auto mb-4 opacity-20" />
-              <p>No templates discovered in the engine.</p>
+              <p>No base templates discovered in the engine.</p>
             </div>
           )}
         </div>
