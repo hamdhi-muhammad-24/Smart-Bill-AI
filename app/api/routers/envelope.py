@@ -11,8 +11,9 @@ import shutil
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form, Body
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session as DbSession
 from PIL import Image as PILImage
@@ -20,7 +21,7 @@ from PIL import Image as PILImage
 from app.db.base import SessionLocal
 from app.db.models import (
     EnvelopeTemplate, EnvelopeArtwork, EnvelopeType,
-    EnvelopeArtworkStatus,
+    EnvelopeArtworkStatus, EnvelopeHistory,
 )
 from app.core.config import settings
 
@@ -44,8 +45,8 @@ ENVELOPE_SPECS = {
     EnvelopeType.LARGE: {
         "display_name": "SLT Large Envelope",
         "base_pdf": "05717-SLT Large Envelope.pdf",
-        "box": (1182, 706, 2015, 1524),  # x0, y0, x1, y1 in pts
-        "box_size": (834, 818),           # width x height pts
+        "box": (756.39, 451.97, 1289.96, 975.42),  # x0, y0, x1, y1 in pts for base PDF (1350x1139)
+        "box_size": (534, 523),
         "min_width": 700, "min_height": 700,
         "aspect_min": 70, "aspect_max": 140,  # 0.70 - 1.40 (square-ish)
         "rotation_deg": 0, "fit_mode": "stretch",
@@ -54,8 +55,8 @@ ENVELOPE_SPECS = {
     EnvelopeType.MEDIUM: {
         "display_name": "SLT Medium Envelope",
         "base_pdf": "05717-SLT Medium Envelope.pdf",
-        "box": (152, 912, 1040, 1379),
-        "box_size": (888, 467),
+        "box": (97.42, 583.48, 665.58, 882.57),  # x0, y0, x1, y1 in pts for base PDF (763x981)
+        "box_size": (568, 299),
         "min_width": 800, "min_height": 400,
         "aspect_min": 150, "aspect_max": 250,  # 1.50 - 2.50 (wide)
         "sample_img_size": "1179x618 px",
@@ -64,8 +65,8 @@ ENVELOPE_SPECS = {
     EnvelopeType.SELF_SEAL: {
         "display_name": "SLT Self-Seal A4 Envelope",
         "base_pdf": "05717-SLT Self Seal-01.pdf",
-        "box": (57, 420, 865, 697),
-        "box_size": (808, 276),
+        "box": (36.68, 269.05, 553.16, 445.90),  # x0, y0, x1, y1 in pts for base PDF (589x842)
+        "box_size": (516, 177),
         "min_width": 800, "min_height": 200,
         "aspect_min": 250, "aspect_max": 450,  # 2.50 - 4.50 (very wide/flat)
         "sample_img_size": "1070x361 px",
@@ -79,12 +80,12 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _ensure_envelope_templates_seeded(db: DbSession):
-    """Create the 3 envelope template DB records if they don't exist."""
+    """Create or update the 3 envelope template DB records with exact box coords."""
     for etype, spec in ENVELOPE_SPECS.items():
-        existing = db.query(EnvelopeTemplate).filter(
+        tmpl = db.query(EnvelopeTemplate).filter(
             EnvelopeTemplate.envelope_type == etype
         ).first()
-        if not existing:
+        if not tmpl:
             tmpl = EnvelopeTemplate(
                 envelope_type=etype,
                 display_name=spec["display_name"],
@@ -99,11 +100,18 @@ def _ensure_envelope_templates_seeded(db: DbSession):
                 aspect_max=spec["aspect_max"],
             )
             db.add(tmpl)
+        else:
+            # Sync coordinates to ensure exact placement
+            tmpl.box_x0 = spec["box"][0]
+            tmpl.box_y0 = spec["box"][1]
+            tmpl.box_x1 = spec["box"][2]
+            tmpl.box_y1 = spec["box"][3]
+            tmpl.base_pdf_path = str(settings.envelope_base_dir / spec["base_pdf"])
     db.commit()
 
 
-def _render_pdf_page_as_png(pdf_path: str, dpi: int = 120) -> bytes:
-    """Render first page of PDF as PNG bytes."""
+def _render_pdf_page_as_png(pdf_path: str, dpi: int = 250) -> bytes:
+    """Render first page of PDF as high-definition PNG bytes."""
     import fitz
     doc = fitz.open(pdf_path)
     pix = doc[0].get_pixmap(dpi=dpi)
@@ -266,13 +274,54 @@ def preview_base_template(template_id: int, db: DbSession = Depends(get_db)):
     return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
 
 
+@router.get("/artworks")
+def list_artworks(
+    envelope_type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    db: DbSession = Depends(get_db),
+):
+    """List all artwork campaign records with optional envelope_type and status filters."""
+    query = db.query(EnvelopeArtwork).join(EnvelopeTemplate)
+    if envelope_type:
+        try:
+            etype_enum = EnvelopeType(envelope_type.upper())
+            query = query.filter(EnvelopeTemplate.envelope_type == etype_enum)
+        except ValueError:
+            pass
+    if status:
+        try:
+            status_enum = EnvelopeArtworkStatus(status.upper())
+            query = query.filter(EnvelopeArtwork.status == status_enum)
+        except ValueError:
+            pass
+
+    artworks = query.order_by(EnvelopeArtwork.created_at.desc()).all()
+
+    return [{
+        "id": a.id,
+        "template_id": a.envelope_template_id,
+        "envelope_type": a.template.envelope_type.value,
+        "display_name": a.template.display_name,
+        "original_filename": a.original_filename,
+        "campaign_name": a.campaign_name or a.original_filename,
+        "image_size": f"{a.image_width}x{a.image_height}",
+        "output_pdf_path": a.output_pdf_path,
+        "status": a.status.value,
+        "rejection_reason": a.rejection_reason,
+        "uploaded_by": a.uploaded_by,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    } for a in artworks]
+
+
 @router.post("/templates/{template_id}/upload-artwork")
 def upload_artwork(
     template_id: int,
     file: UploadFile = File(...),
+    target_status: str = Query("DRAFT"),
+    campaign_name: Optional[str] = Form(None),
     db: DbSession = Depends(get_db),
 ):
-    """Upload a promotional image for an envelope type with dimension validation."""
+    """Upload a promotional image for an envelope type (saves as DRAFT or SUBMITTED)."""
     _ensure_envelope_templates_seeded(db)
     tmpl = db.query(EnvelopeTemplate).filter(EnvelopeTemplate.id == template_id).first()
     if not tmpl:
@@ -335,14 +384,8 @@ def upload_artwork(
     with open(save_path, "wb") as f:
         f.write(contents)
 
-    # 5. Mark any current ACTIVE artwork as REPLACED
-    active = db.query(EnvelopeArtwork).filter(
-        EnvelopeArtwork.envelope_template_id == tmpl.id,
-        EnvelopeArtwork.status == EnvelopeArtworkStatus.ACTIVE,
-    ).all()
-    for a in active:
-        a.status = EnvelopeArtworkStatus.REPLACED
-        a.replaced_at = datetime.now()
+    # 5. Determine initial artwork status
+    initial_status = EnvelopeArtworkStatus.SUBMITTED if target_status.upper() == "SUBMITTED" else EnvelopeArtworkStatus.DRAFT
 
     # 6. Generate composite PDF + preview
     try:
@@ -355,12 +398,13 @@ def upload_artwork(
     artwork = EnvelopeArtwork(
         envelope_template_id=tmpl.id,
         original_filename=file.filename or safe_name,
+        campaign_name=campaign_name or (file.filename or safe_name).rsplit(".", 1)[0],
         image_path=str(save_path),
         image_width=img_w,
         image_height=img_h,
         output_pdf_path=out_pdf,
         preview_png_path=out_png,
-        status=EnvelopeArtworkStatus.ACTIVE,
+        status=initial_status,
     )
     db.add(artwork)
     db.commit()
@@ -369,11 +413,12 @@ def upload_artwork(
     return {
         "id": artwork.id,
         "filename": artwork.original_filename,
+        "campaign_name": artwork.campaign_name,
         "image_size": f"{img_w}x{img_h}",
         "status": artwork.status.value,
         "output_pdf_path": artwork.output_pdf_path,
         "preview_available": artwork.preview_png_path is not None,
-        "message": f"Artwork uploaded successfully for {tmpl.display_name}!",
+        "message": f"Artwork saved as {artwork.status.value} for {tmpl.display_name}!",
     }
 
 
@@ -420,26 +465,66 @@ def download_artwork_pdf(artwork_id: int, db: DbSession = Depends(get_db)):
     )
 
 
+@router.delete("/artworks/all")
+def delete_all_artworks(
+    envelope_type: Optional[str] = Query(None),
+    db: DbSession = Depends(get_db),
+):
+    """Permanently delete ALL envelope artwork records from database and clean up disk files."""
+    query = db.query(EnvelopeArtwork)
+    if envelope_type and envelope_type != "ALL":
+        try:
+            etype_enum = EnvelopeType(envelope_type.upper())
+            query = query.join(EnvelopeTemplate).filter(EnvelopeTemplate.envelope_type == etype_enum)
+        except ValueError:
+            pass
+
+    artworks = query.all()
+    count = len(artworks)
+    for art in artworks:
+        if art.image_path and os.path.exists(art.image_path):
+            try: os.remove(art.image_path)
+            except Exception: pass
+        if art.output_pdf_path and os.path.exists(art.output_pdf_path):
+            try: os.remove(art.output_pdf_path)
+            except Exception: pass
+        if art.preview_png_path and os.path.exists(art.preview_png_path):
+            try: os.remove(art.preview_png_path)
+            except Exception: pass
+        db.delete(art)
+
+    db.commit()
+    return {"message": f"Permanently deleted {count} envelope artworks from database", "count": count}
+
+
 @router.delete("/artworks/{artwork_id}")
 def remove_artwork(artwork_id: int, db: DbSession = Depends(get_db)):
-    """Remove/soft-delete an artwork (reverts envelope to empty template)."""
+    """Permanently delete a saved envelope artwork from database and clean up disk files."""
     artwork = db.query(EnvelopeArtwork).filter(EnvelopeArtwork.id == artwork_id).first()
     if not artwork:
         raise HTTPException(404, "Artwork not found")
-    artwork.status = EnvelopeArtworkStatus.REMOVED
-    artwork.replaced_at = datetime.now()
+
+    if artwork.image_path and os.path.exists(artwork.image_path):
+        try: os.remove(artwork.image_path)
+        except Exception: pass
+    if artwork.output_pdf_path and os.path.exists(artwork.output_pdf_path):
+        try: os.remove(artwork.output_pdf_path)
+        except Exception: pass
+    if artwork.preview_png_path and os.path.exists(artwork.preview_png_path):
+        try: os.remove(artwork.preview_png_path)
+        except Exception: pass
+
+    db.delete(artwork)
     db.commit()
-    return {"message": "Artwork removed successfully", "id": artwork_id}
+    return {"message": "Artwork permanently deleted from database", "id": artwork_id}
 
 
 @router.post("/artworks/{artwork_id}/submit")
 def submit_for_approval(artwork_id: int, db: DbSession = Depends(get_db)):
-    """Submit artwork for admin review/approval."""
+    """Submit a draft or active artwork for admin review/approval."""
     artwork = db.query(EnvelopeArtwork).filter(EnvelopeArtwork.id == artwork_id).first()
     if not artwork:
         raise HTTPException(404, "Artwork not found")
-    if artwork.status != EnvelopeArtworkStatus.ACTIVE:
-        raise HTTPException(400, f"Can only submit ACTIVE artwork. Current status: {artwork.status.value}")
     artwork.status = EnvelopeArtworkStatus.SUBMITTED
     db.commit()
     return {"message": "Artwork submitted for admin approval", "id": artwork_id, "status": "SUBMITTED"}
@@ -451,17 +536,27 @@ def approve_artwork(artwork_id: int, db: DbSession = Depends(get_db)):
     artwork = db.query(EnvelopeArtwork).filter(EnvelopeArtwork.id == artwork_id).first()
     if not artwork:
         raise HTTPException(404, "Artwork not found")
-    if artwork.status != EnvelopeArtworkStatus.SUBMITTED:
-        raise HTTPException(400, f"Can only approve SUBMITTED artwork. Current status: {artwork.status.value}")
     artwork.status = EnvelopeArtworkStatus.APPROVED
+
+    # Log to EnvelopeHistory
+    history = EnvelopeHistory(
+        template_name=artwork.template.display_name if artwork.template else f"Template #{artwork.envelope_template_id}",
+        action="APPROVED",
+        filename=artwork.original_filename,
+        reason="Approved by admin for envelope batch output"
+    )
+    db.add(history)
     db.commit()
 
-    # Copy approved output to main output archive
     if artwork.output_pdf_path and os.path.exists(artwork.output_pdf_path):
-        archive_dir = settings.output_dir / datetime.now().strftime("%Y-%m-%d") / "Envelope"
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        dest = archive_dir / Path(artwork.output_pdf_path).name
-        shutil.copy2(artwork.output_pdf_path, dest)
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        envelope_dir = settings.output_dir / today_str / "Envelope"
+        batch_dir = envelope_dir / "Batch_01"
+        batch_dir.mkdir(parents=True, exist_ok=True)
+        
+        pdf_name = Path(artwork.output_pdf_path).name
+        shutil.copy2(artwork.output_pdf_path, envelope_dir / pdf_name)
+        shutil.copy2(artwork.output_pdf_path, batch_dir / pdf_name)
 
     return {"message": "Artwork approved!", "id": artwork_id, "status": "APPROVED"}
 
@@ -470,6 +565,7 @@ def approve_artwork(artwork_id: int, db: DbSession = Depends(get_db)):
 def reject_artwork(
     artwork_id: int,
     reason: str = Query("", description="Rejection reason"),
+    payload: Optional[dict] = Body(None),
     db: DbSession = Depends(get_db),
 ):
     """Admin rejects submitted artwork."""
@@ -478,10 +574,47 @@ def reject_artwork(
         raise HTTPException(404, "Artwork not found")
     if artwork.status != EnvelopeArtworkStatus.SUBMITTED:
         raise HTTPException(400, f"Can only reject SUBMITTED artwork. Current status: {artwork.status.value}")
+    
+    reject_reason = (payload.get("reason") if payload and isinstance(payload, dict) else None) or reason or "Rejected by admin"
     artwork.status = EnvelopeArtworkStatus.REJECTED
-    artwork.rejection_reason = reason or "Rejected by admin"
+    artwork.rejection_reason = reject_reason
+
+    # Log to EnvelopeHistory
+    history = EnvelopeHistory(
+        template_name=artwork.template.display_name if artwork.template else f"Template #{artwork.envelope_template_id}",
+        action="REJECTED",
+        filename=artwork.original_filename,
+        reason=reject_reason
+    )
+    db.add(history)
     db.commit()
+
     return {"message": "Artwork rejected", "id": artwork_id, "status": "REJECTED", "reason": artwork.rejection_reason}
+
+
+@router.get("/history")
+def get_envelope_history(db: DbSession = Depends(get_db)):
+    """List all envelope approval/rejection log history."""
+    return db.query(EnvelopeHistory).order_by(EnvelopeHistory.timestamp.desc()).all()
+
+
+@router.delete("/history/{history_id}")
+def delete_envelope_history(history_id: int, db: DbSession = Depends(get_db)):
+    """Delete a specific envelope history log entry."""
+    entry = db.query(EnvelopeHistory).filter(EnvelopeHistory.id == history_id).first()
+    if not entry:
+        raise HTTPException(404, "Envelope history log not found")
+    db.delete(entry)
+    db.commit()
+    return {"message": "Envelope history log entry deleted"}
+
+
+@router.delete("/history")
+def delete_all_envelope_history(db: DbSession = Depends(get_db)):
+    """Delete all envelope history log entries."""
+    db.query(EnvelopeHistory).delete(synchronize_session=False)
+    db.commit()
+    return {"message": "All envelope history logs deleted"}
 
 
 @router.get("/size-guide")

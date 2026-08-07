@@ -277,6 +277,17 @@ class TemplateHistory(Base):
     timestamp     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class EnvelopeHistory(Base):
+    __tablename__ = "envelope_history"
+
+    id            = Column(BigInteger, Identity(always=True), primary_key=True)
+    template_name = Column(Text, nullable=False)
+    action        = Column(Text, nullable=False)  # 'APPROVED' or 'REJECTED'
+    filename      = Column(Text)
+    reason        = Column(Text)
+    timestamp     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 # ── Envelope Portal Models ────────────────────────────────────────────────
 
 class EnvelopeType(enum.Enum):
@@ -286,6 +297,7 @@ class EnvelopeType(enum.Enum):
 
 class EnvelopeArtworkStatus(enum.Enum):
     ACTIVE = "ACTIVE"
+    DRAFT = "DRAFT"
     SUBMITTED = "SUBMITTED"     # submitted for admin approval
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -323,6 +335,7 @@ class EnvelopeArtwork(Base):
     id                    = Column(BigInteger, Identity(always=True), primary_key=True)
     envelope_template_id  = Column(BigInteger, ForeignKey("envelope_templates.id", ondelete="CASCADE"), nullable=False)
     original_filename     = Column(Text, nullable=False)
+    campaign_name         = Column(Text, nullable=True)        # optional custom campaign title
     image_path            = Column(Text, nullable=False)       # stored artwork image
     image_width           = Column(Integer, nullable=False)
     image_height          = Column(Integer, nullable=False)

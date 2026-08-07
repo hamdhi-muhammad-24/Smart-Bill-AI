@@ -46,7 +46,9 @@ def create_app() -> FastAPI:
             with engine.connect() as conn:
                 conn.execute(text("ALTER TYPE gmf_upload_status ADD VALUE IF NOT EXISTS 'PARTIALLY_PROCESSED'"))
                 conn.execute(text("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN1'"))
+                conn.execute(text("ALTER TYPE envelope_artwork_status_enum ADD VALUE IF NOT EXISTS 'DRAFT'"))
                 conn.execute(text("ALTER TABLE gmf_uploads ADD COLUMN IF NOT EXISTS template_breakdown TEXT;"))
+                conn.execute(text("ALTER TABLE envelope_artworks ADD COLUMN IF NOT EXISTS campaign_name TEXT;"))
                 conn.commit()
         except Exception as e:
             import logging
