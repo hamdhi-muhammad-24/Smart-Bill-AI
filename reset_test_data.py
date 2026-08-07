@@ -17,6 +17,9 @@ from app.db.models import (
     BillingRun,
     InvoiceTemplate,
     TemplateApprovalStatus,
+    EnvelopeArtwork,
+    EnvelopeHistory,
+    TemplateHistory,
 )
 
 
@@ -60,8 +63,8 @@ def _force_delete(path_item):
 
 
 def reset_test_data():
-    print("WARNING: This script will delete all transaction history (GMF Uploads, Invoices, Billing Runs, Notifications).")
-    print("It will NOT delete Users, Templates, or Billing Schedules.")
+    print("WARNING: This script will delete all transaction history (GMF Uploads, Invoices, Billing Runs, Notifications, Envelope Artworks, Audit History).")
+    print("It will NOT delete Users, Base Templates, or Billing Schedules.")
     
     if "--yes" in sys.argv or "-y" in sys.argv:
         confirm = "YES"
@@ -93,6 +96,15 @@ def reset_test_data():
             
             deleted_runs = db.query(BillingRun).delete()
             print(f"Deleted {deleted_runs} BillingRuns.")
+
+            deleted_artworks = db.query(EnvelopeArtwork).delete()
+            print(f"Deleted {deleted_artworks} EnvelopeArtworks.")
+
+            deleted_env_hist = db.query(EnvelopeHistory).delete()
+            print(f"Deleted {deleted_env_hist} EnvelopeHistory logs.")
+
+            deleted_tmpl_hist = db.query(TemplateHistory).delete()
+            print(f"Deleted {deleted_tmpl_hist} TemplateHistory logs.")
             
             updated_templates = db.query(InvoiceTemplate).update({"approval_status": TemplateApprovalStatus.PENDING})
             print(f"Reset {updated_templates} templates to PENDING status.")
@@ -112,6 +124,8 @@ def reset_test_data():
                 Path("./queue/completed_temp"),
                 Path("./output"),
                 Path("./output/previews"),
+                Path("./uploads"),
+                Path("./uploads/envelope_artworks"),
                 settings.gmf_drive_path / "Test_GMFs",
                 settings.gmf_drive_path / "Cycle_1",
                 settings.gmf_drive_path / "Cycle_2",

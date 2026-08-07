@@ -1,13 +1,23 @@
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileText, Eye, CheckCircle2, XCircle, Loader2, Sparkles, FileSearch, Maximize2, Download, X, AlertCircle, History, Trash2 } from 'lucide-react'
-import { getUploads, previewInvoice, fetchPreviewPdfBlobUrl, updateTemplateStatus, getSettings, updateSettings, getTemplateHistory, deleteTemplateHistoryLog, deleteAllTemplateHistoryLogs } from '../../lib/api'
+import { FileText, Eye, CheckCircle2, XCircle, Loader2, Sparkles, FileSearch, Maximize2, Download, X, AlertCircle, History, Trash2, Mail, Check, RefreshCw } from 'lucide-react'
+import { getUploads, previewInvoice, fetchPreviewPdfBlobUrl, updateTemplateStatus, getSettings, updateSettings, getTemplateHistory, deleteTemplateHistoryLog, deleteAllTemplateHistoryLogs, getEnvelopeHistory, deleteEnvelopeHistoryLog, deleteAllEnvelopeHistoryLogs } from '../../lib/api'
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+
+const API_BASE = 'http://localhost:8090'
+
+async function fetchSubmittedEnvelopes() {
+  const res = await fetch(`${API_BASE}/api/envelope/artworks?status=SUBMITTED`)
+  if (!res.ok) return []
+  return res.json()
+}
 
 export default function InvoicePreview() {
   const queryClient = useQueryClient()
@@ -15,12 +25,52 @@ export default function InvoicePreview() {
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [selectedMode, setSelectedMode] = useState<'auto' | 'manual' | null>(null)
+  const [activeSection, setActiveSection] = useState<'gmf' | 'envelopes'>('gmf')
   const [showHistory, setShowHistory] = useState(false)
-  const abortControllerRef = useRef<AbortController | null>(null)
-
-  // Rejection dialog state
+  const [historyTab, setHistoryTab] = useState<'gmf' | 'envelope'>('gmf')
   const [rejectTemplateId, setRejectTemplateId] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState<string>('')
+  const [rejectEnvelopeId, setRejectEnvelopeId] = useState<number | null>(null)
+  const [rejectEnvelopeReason, setRejectEnvelopeReason] = useState<string>('')
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  const { data: submittedEnvelopes, isLoading: loadingEnvelopes, refetch: refetchEnvelopes } = useQuery({
+    queryKey: ['submittedEnvelopes'],
+    queryFn: fetchSubmittedEnvelopes,
+    refetchInterval: 5000,
+  })
+
+  const approveEnvelopeMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`${API_BASE}/api/envelope/artworks/${id}/approve`, { method: 'POST' })
+      if (!res.ok) throw new Error('Failed to approve envelope artwork')
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success('Generated envelope campaign approved successfully!')
+      queryClient.invalidateQueries({ queryKey: ['submittedEnvelopes'] })
+      queryClient.invalidateQueries({ queryKey: ['envelopeHistory'] })
+    },
+  })
+
+  const rejectEnvelopeMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: number; reason: string }) => {
+      const res = await fetch(`${API_BASE}/api/envelope/artworks/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      })
+      if (!res.ok) throw new Error('Failed to reject envelope artwork')
+      return res.json()
+    },
+    onSuccess: () => {
+      toast.success('Generated envelope artwork rejected.')
+      setRejectEnvelopeId(null)
+      setRejectEnvelopeReason('')
+      queryClient.invalidateQueries({ queryKey: ['submittedEnvelopes'] })
+      queryClient.invalidateQueries({ queryKey: ['envelopeHistory'] })
+    },
+  })
 
   const { data: uploads, isLoading } = useQuery({
     queryKey: ['billing-uploads'],
@@ -136,6 +186,30 @@ export default function InvoicePreview() {
     onError: (err: any) => toast.error(err.detail || 'Failed to delete history logs')
   })
 
+  const { data: envelopeHistoryData } = useQuery({
+    queryKey: ['envelopeHistory'],
+    queryFn: getEnvelopeHistory,
+    enabled: showHistory,
+  })
+
+  const deleteEnvelopeHistoryMutation = useMutation({
+    mutationFn: (historyId: number) => deleteEnvelopeHistoryLog(historyId),
+    onSuccess: () => {
+      toast.success('Envelope history log deleted.')
+      queryClient.invalidateQueries({ queryKey: ['envelopeHistory'] })
+    },
+    onError: (err: any) => toast.error(err.detail || 'Failed to delete history log')
+  })
+
+  const deleteAllEnvelopeHistoryMutation = useMutation({
+    mutationFn: () => deleteAllEnvelopeHistoryLogs(),
+    onSuccess: () => {
+      toast.success('All envelope history logs deleted.')
+      queryClient.invalidateQueries({ queryKey: ['envelopeHistory'] })
+    },
+    onError: (err: any) => toast.error(err.detail || 'Failed to delete history logs')
+  })
+
   const checkMode = (action: () => void) => {
     if (selectedMode === null) {
       toast.error("First select the mode", {
@@ -168,7 +242,135 @@ export default function InvoicePreview() {
         </Button>
       </div>
 
-      {/* Mode Selector */}
+      {/* Section Tabs */}
+      <div className="flex border-b border-border gap-6 shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveSection('gmf')}
+          className={cn(
+            "pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2",
+            activeSection === 'gmf'
+              ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
+              : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+          )}
+        >
+          <FileText size={16} />
+          Invoice GMF Previews
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSection('envelopes')}
+          className={cn(
+            "pb-3 text-sm font-bold border-b-2 transition-colors flex items-center gap-2",
+            activeSection === 'envelopes'
+              ? "border-indigo-600 text-indigo-600 dark:text-indigo-400"
+              : "border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+          )}
+        >
+          <Mail size={16} />
+          Generated Envelope Approvals
+          {submittedEnvelopes && submittedEnvelopes.length > 0 && (
+            <Badge className="bg-indigo-600 text-white text-[10px] px-1.5 py-0.2">
+              {submittedEnvelopes.length}
+            </Badge>
+          )}
+        </button>
+      </div>
+
+      {activeSection === 'envelopes' ? (
+        /* Generated Envelope Approvals Workspace */
+        <div className="space-y-4 flex-1">
+          <div className="flex justify-between items-center bg-card p-4 rounded-xl border border-border shadow-sm">
+            <div>
+              <h3 className="font-bold text-base text-foreground">Generated Envelope Submissions</h3>
+              <p className="text-xs text-muted-foreground">Review promotional artwork campaign envelopes submitted by envelope handlers for Admin approval.</p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => refetchEnvelopes()} className="gap-2 text-xs font-semibold">
+              <RefreshCw size={14} className={loadingEnvelopes ? "animate-spin text-indigo-500" : ""} />
+              Refresh Queue
+            </Button>
+          </div>
+
+          {loadingEnvelopes ? (
+            <div className="flex justify-center p-12">
+              <Loader2 className="animate-spin text-muted-foreground size-8" />
+            </div>
+          ) : submittedEnvelopes && submittedEnvelopes.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {submittedEnvelopes.map((env: any) => {
+                const pdfViewUrl = `${API_BASE}/api/envelope/artworks/${env.id}/view-pdf`
+                const pngPreviewUrl = `${API_BASE}/api/envelope/artworks/${env.id}/preview`
+
+                return (
+                  <Card key={env.id} className="rounded-2xl overflow-hidden border border-border shadow-sm flex flex-col justify-between bg-card">
+                    <div
+                      className="h-56 bg-slate-950 relative cursor-pointer flex items-center justify-center p-3 border-b border-slate-800 group"
+                      onClick={() => {
+                        setPreviewPdfUrl(pdfViewUrl)
+                        setIsFullscreen(true)
+                      }}
+                    >
+                      <img src={pngPreviewUrl} alt={env.campaign_name} className="max-h-full max-w-full object-contain rounded-lg" />
+                      <div className="absolute top-3 left-3">
+                        <Badge className="bg-amber-600 text-white text-xs font-bold">SUBMITTED</Badge>
+                      </div>
+                      <div className="absolute top-3 right-3">
+                        <Badge variant="outline" className="bg-slate-900 text-indigo-300 border-slate-700 text-xs font-mono font-bold">
+                          {env.envelope_type}
+                        </Badge>
+                      </div>
+
+                      <div className="absolute inset-0 bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
+                        <span className="bg-white text-slate-900 px-3.5 py-2 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                          <Maximize2 size={14} className="text-indigo-600" /> Inspect Composite PDF
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-3">
+                      <div>
+                        <h4 className="font-bold text-sm text-foreground truncate">{env.campaign_name}</h4>
+                        <p className="text-xs text-muted-foreground font-mono">{env.display_name} • {env.image_size}</p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
+                        <Button
+                          size="sm"
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs gap-1.5 h-8 shadow-xs"
+                          onClick={() => approveEnvelopeMutation.mutate(env.id)}
+                          disabled={approveEnvelopeMutation.isPending}
+                        >
+                          <Check size={14} /> Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="font-semibold text-xs gap-1.5 h-8"
+                          onClick={() => {
+                            setRejectEnvelopeId(env.id)
+                            setRejectEnvelopeReason('')
+                          }}
+                          disabled={rejectEnvelopeMutation.isPending}
+                        >
+                          <XCircle size={14} /> Reject
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-center p-12 border border-dashed rounded-2xl text-muted-foreground bg-muted/20">
+              <Mail size={40} className="mx-auto mb-3 opacity-30 text-indigo-500" />
+              <p className="font-medium text-sm">No envelope campaign submissions currently awaiting admin approval.</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Mode Selector */}
       <div className="flex flex-col gap-3 p-4 rounded-xl border bg-card shadow-sm shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex flex-col">
@@ -450,6 +652,8 @@ export default function InvoicePreview() {
           </AnimatePresence>
         </div>
       </div>
+      </>
+      )}
 
       {/* Full Screen PDF Modal */}
       <AnimatePresence>
@@ -542,6 +746,59 @@ export default function InvoicePreview() {
         )}
       </AnimatePresence>
 
+      {/* Envelope Rejection Reason Modal */}
+      <AnimatePresence>
+        {rejectEnvelopeId !== null && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-card border border-border p-6 rounded-2xl shadow-2xl max-w-md w-full flex flex-col gap-4"
+            >
+              <div className="flex items-center gap-3 text-red-600">
+                <AlertCircle size={24} />
+                <h3 className="text-lg font-bold text-foreground">Reject Envelope Artwork</h3>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Please provide a reason for rejecting this promotional envelope artwork. The uploader will see this reason in their portal.
+              </p>
+              <textarea
+                value={rejectEnvelopeReason}
+                onChange={(e) => setRejectEnvelopeReason(e.target.value)}
+                placeholder="Enter rejection reason (e.g. low image resolution, misaligned aspect ratio, incorrect promotional text)..."
+                rows={4}
+                className="w-full rounded-xl border border-input bg-muted/50 px-4 py-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:border-primary mb-6 transition-all"
+              />
+              <div className="flex justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setRejectEnvelopeId(null)
+                    setRejectEnvelopeReason('')
+                  }}
+                  className="font-bold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-red-600 hover:bg-red-700 text-white font-bold shadow-md"
+                  onClick={() => rejectEnvelopeMutation.mutate({ id: rejectEnvelopeId, reason: rejectEnvelopeReason || 'Rejected by admin' })}
+                  disabled={rejectEnvelopeMutation.isPending}
+                >
+                  Confirm Rejection
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Validation Logs Drawer */}
       <Sheet open={showHistory} onOpenChange={setShowHistory}>
         <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto border-l shadow-2xl">
@@ -549,17 +806,42 @@ export default function InvoicePreview() {
             <div className="flex flex-col gap-3 pr-10">
               <SheetTitle className="flex items-center gap-2 text-xl font-extrabold">
                 <History className="text-primary" />
-                Template History Logs
+                Audit Log History
               </SheetTitle>
               <SheetDescription className="text-sm">
-                View approval and rejection log history for test GMF templates.
+                View separate activity log history for Test GMF templates and Envelope campaigns.
               </SheetDescription>
-              {historyData && historyData.length > 0 && (
+
+              {/* Log Switcher Tabs */}
+              <div className="flex rounded-xl bg-muted p-1 gap-1 text-xs font-bold mt-1">
+                <button
+                  type="button"
+                  onClick={() => setHistoryTab('gmf')}
+                  className={cn(
+                    "flex-1 py-1.5 rounded-lg transition-all text-center",
+                    historyTab === 'gmf' ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Test GMF Logs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryTab('envelope')}
+                  className={cn(
+                    "flex-1 py-1.5 rounded-lg transition-all text-center",
+                    historyTab === 'envelope' ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Envelope Logs
+                </button>
+              </div>
+
+              {historyTab === 'gmf' && historyData && historyData.length > 0 && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    if (window.confirm('Are you sure you want to delete all template history logs?')) {
+                    if (window.confirm('Are you sure you want to delete all Test GMF template history logs?')) {
                       deleteAllHistoryMutation.mutate()
                     }
                   }}
@@ -567,52 +849,114 @@ export default function InvoicePreview() {
                   className="h-8 w-fit text-muted-foreground hover:text-destructive border-muted-foreground/25"
                 >
                   <Trash2 size={13} className="mr-1.5" />
-                  Delete All
+                  Delete All GMF Logs
+                </Button>
+              )}
+
+              {historyTab === 'envelope' && envelopeHistoryData && envelopeHistoryData.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (window.confirm('Are you sure you want to delete all Envelope history logs?')) {
+                      deleteAllEnvelopeHistoryMutation.mutate()
+                    }
+                  }}
+                  disabled={deleteAllEnvelopeHistoryMutation.isPending}
+                  className="h-8 w-fit text-muted-foreground hover:text-destructive border-muted-foreground/25"
+                >
+                  <Trash2 size={13} className="mr-1.5" />
+                  Delete All Envelope Logs
                 </Button>
               )}
             </div>
           </SheetHeader>
+
           <div className="mt-6 flex flex-col gap-4">
-            {!historyData || historyData.length === 0 ? (
-              <div className="flex flex-col items-center justify-center p-8 border border-dashed rounded-xl bg-muted/20">
-                <History size={32} className="text-muted-foreground/30 mb-3" />
-                <span className="text-sm font-medium text-muted-foreground block text-center">No validation history logged yet.</span>
-              </div>
-            ) : (
-              historyData.map(log => (
-                <div key={log.id} className="p-4 border rounded-xl bg-card shadow-sm text-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-border">
-                  <div className="flex items-center justify-between font-bold">
-                    <span className="text-foreground text-[15px] tracking-tight">{log.template_name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        "px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wider font-extrabold shadow-sm",
-                        log.action === 'APPROVED' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400"
-                      )}>
-                        {log.action}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title="Delete log"
-                        onClick={() => {
-                          if (window.confirm('Delete this template history log?')) {
-                            deleteHistoryMutation.mutate(log.id)
-                          }
-                        }}
-                        disabled={deleteHistoryMutation.isPending}
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 size={14} />
-                      </Button>
+            {historyTab === 'gmf' ? (
+              !historyData || historyData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 border border-dashed rounded-xl bg-muted/20">
+                  <History size={32} className="text-muted-foreground/30 mb-3" />
+                  <span className="text-sm font-medium text-muted-foreground block text-center">No GMF template history logged yet.</span>
+                </div>
+              ) : (
+                historyData.map(log => (
+                  <div key={log.id} className="p-4 border rounded-xl bg-card shadow-sm text-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-border">
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="text-foreground text-[15px] tracking-tight">{log.template_name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wider font-extrabold shadow-sm",
+                          log.action === 'APPROVED' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400"
+                        )}>
+                          {log.action}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Delete log"
+                          onClick={() => {
+                            if (window.confirm('Delete this template history log?')) {
+                              deleteHistoryMutation.mutate(log.id)
+                            }
+                          }}
+                          disabled={deleteHistoryMutation.isPending}
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                    {log.filename && <div className="text-muted-foreground text-xs mt-1 font-medium flex items-center gap-1.5"><FileText size={12} /> {log.filename}</div>}
+                    {log.reason && <div className="text-red-600 dark:text-red-400 font-semibold text-xs mt-1.5 bg-red-50 dark:bg-red-950/20 px-2.5 py-1.5 rounded flex gap-1.5 items-start"><AlertCircle size={14} className="shrink-0 mt-0.5" /> {log.reason}</div>}
+                    <div className="text-[11px] text-muted-foreground mt-2 font-mono bg-muted/50 px-2 py-1 rounded w-fit">
+                      {new Date(log.timestamp).toLocaleString()}
                     </div>
                   </div>
-                  {log.filename && <div className="text-muted-foreground text-xs mt-1 font-medium flex items-center gap-1.5"><FileText size={12} /> {log.filename}</div>}
-                  {log.reason && <div className="text-red-600 dark:text-red-400 font-semibold text-xs mt-1.5 bg-red-50 dark:bg-red-950/20 px-2.5 py-1.5 rounded flex gap-1.5 items-start"><AlertCircle size={14} className="shrink-0 mt-0.5" /> {log.reason}</div>}
-                  <div className="text-[11px] text-muted-foreground mt-2 font-mono bg-muted/50 px-2 py-1 rounded w-fit">
-                    {new Date(log.timestamp).toLocaleString()}
-                  </div>
+                ))
+              )
+            ) : (
+              !envelopeHistoryData || envelopeHistoryData.length === 0 ? (
+                <div className="flex flex-col items-center justify-center p-8 border border-dashed rounded-xl bg-muted/20">
+                  <Mail size={32} className="text-muted-foreground/30 mb-3" />
+                  <span className="text-sm font-medium text-muted-foreground block text-center">No envelope campaign history logged yet.</span>
                 </div>
-              ))
+              ) : (
+                envelopeHistoryData.map(log => (
+                  <div key={log.id} className="p-4 border rounded-xl bg-card shadow-sm text-sm flex flex-col gap-2 transition-all hover:shadow-md hover:border-border">
+                    <div className="flex items-center justify-between font-bold">
+                      <span className="text-foreground text-[15px] tracking-tight">{log.template_name}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          "px-2.5 py-1 rounded-md text-[11px] uppercase tracking-wider font-extrabold shadow-sm",
+                          log.action === 'APPROVED' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400" : "bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-400"
+                        )}>
+                          {log.action}
+                        </span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Delete log"
+                          onClick={() => {
+                            if (window.confirm('Delete this envelope history log?')) {
+                              deleteEnvelopeHistoryMutation.mutate(log.id)
+                            }
+                          }}
+                          disabled={deleteEnvelopeHistoryMutation.isPending}
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
+                    </div>
+                    {log.filename && <div className="text-muted-foreground text-xs mt-1 font-medium flex items-center gap-1.5"><FileText size={12} /> {log.filename}</div>}
+                    {log.reason && <div className="text-red-600 dark:text-red-400 font-semibold text-xs mt-1.5 bg-red-50 dark:bg-red-950/20 px-2.5 py-1.5 rounded flex gap-1.5 items-start"><AlertCircle size={14} className="shrink-0 mt-0.5" /> {log.reason}</div>}
+                    <div className="text-[11px] text-muted-foreground mt-2 font-mono bg-muted/50 px-2 py-1 rounded w-fit">
+                      {new Date(log.timestamp).toLocaleString()}
+                    </div>
+                  </div>
+                ))
+              )
             )}
           </div>
         </SheetContent>

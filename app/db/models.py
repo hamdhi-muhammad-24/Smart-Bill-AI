@@ -21,7 +21,9 @@ from sqlalchemy.orm import relationship
 
 class UserRole(enum.Enum):
     ADMIN = "ADMIN"
+    ADMIN1 = "ADMIN1"
     GMF_HANDLER = "GMF_HANDLER"
+    ENVELOPE_HANDLER = "ENVELOPE_HANDLER"
     MANAGER = "MANAGER"
     CUSTOMER = "CUSTOMER"
 
@@ -243,6 +245,7 @@ class GmfUpload(Base):
     billing_run_id    = Column(BigInteger, ForeignKey("billing_runs.id", ondelete="SET NULL"), nullable=True)
     processed_records_count = Column(Integer, nullable=False, default=0)
     total_records_count     = Column(Integer, nullable=False, default=0)
+    template_breakdown      = Column(Text, nullable=True)
 
 
 class NotificationEvent(Base):
@@ -274,3 +277,76 @@ class TemplateHistory(Base):
     filename      = Column(Text)
     reason        = Column(Text)
     timestamp     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EnvelopeHistory(Base):
+    __tablename__ = "envelope_history"
+
+    id            = Column(BigInteger, Identity(always=True), primary_key=True)
+    template_name = Column(Text, nullable=False)
+    action        = Column(Text, nullable=False)  # 'APPROVED' or 'REJECTED'
+    filename      = Column(Text)
+    reason        = Column(Text)
+    timestamp     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Envelope Portal Models ────────────────────────────────────────────────
+
+class EnvelopeType(enum.Enum):
+    LARGE = "LARGE"
+    MEDIUM = "MEDIUM"
+    SELF_SEAL = "SELF_SEAL"
+
+class EnvelopeArtworkStatus(enum.Enum):
+    ACTIVE = "ACTIVE"
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"     # submitted for admin approval
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    REPLACED = "REPLACED"       # superseded by a newer upload
+    REMOVED = "REMOVED"         # manually removed by uploader
+
+
+class EnvelopeTemplate(Base):
+    __tablename__ = "envelope_templates"
+
+    id             = Column(BigInteger, Identity(always=True), primary_key=True)
+    envelope_type  = Column(Enum(EnvelopeType, name="envelope_type_enum"), nullable=False, unique=True)
+    display_name   = Column(Text, nullable=False)
+    base_pdf_path  = Column(Text, nullable=False)  # relative path to empty PDF template
+    # Placeholder box coordinates in PDF points (auto-detected or manual)
+    box_x0         = Column(Integer, nullable=True)
+    box_y0         = Column(Integer, nullable=True)
+    box_x1         = Column(Integer, nullable=True)
+    box_y1         = Column(Integer, nullable=True)
+    rotation_deg   = Column(Integer, nullable=False, default=0)
+    fit_mode       = Column(Text, nullable=False, default="cover")
+    # Image validation constraints (flexible ranges)
+    min_width      = Column(Integer, nullable=False, default=800)
+    min_height     = Column(Integer, nullable=False, default=250)
+    aspect_min     = Column(Integer, nullable=False, default=70)   # x100: 0.70 = 70
+    aspect_max     = Column(Integer, nullable=False, default=350)  # x100: 3.50 = 350
+    created_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    artworks = relationship("EnvelopeArtwork", back_populates="template", lazy="dynamic")
+
+
+class EnvelopeArtwork(Base):
+    __tablename__ = "envelope_artworks"
+
+    id                    = Column(BigInteger, Identity(always=True), primary_key=True)
+    envelope_template_id  = Column(BigInteger, ForeignKey("envelope_templates.id", ondelete="CASCADE"), nullable=False)
+    original_filename     = Column(Text, nullable=False)
+    campaign_name         = Column(Text, nullable=True)        # optional custom campaign title
+    image_path            = Column(Text, nullable=False)       # stored artwork image
+    image_width           = Column(Integer, nullable=False)
+    image_height          = Column(Integer, nullable=False)
+    output_pdf_path       = Column(Text, nullable=True)        # generated composite PDF
+    preview_png_path      = Column(Text, nullable=True)        # generated PNG preview
+    status                = Column(Enum(EnvelopeArtworkStatus, name="envelope_artwork_status_enum"), nullable=False, default=EnvelopeArtworkStatus.ACTIVE)
+    rejection_reason      = Column(Text, nullable=True)
+    uploaded_by           = Column(Text, nullable=True)        # user email or ID
+    created_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    replaced_at           = Column(DateTime(timezone=True), nullable=True)
+
+    template = relationship("EnvelopeTemplate", back_populates="artworks")

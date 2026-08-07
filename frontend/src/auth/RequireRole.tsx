@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react'
 const roleHome: Record<Session['role'], string> = {
   admin: '/admin',
   gmf_handler: '/gmf-handler',
+  envelope_handler: '/envelope-handler',
   manager: '/manager',
   customer: '/app',
 }

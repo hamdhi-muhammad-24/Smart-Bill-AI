@@ -52,6 +52,44 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
         result.is_supported = True
         result.reasons.append("Filename/path matches VAT Confirmation template")
         return result
+    if "final" in path_str and "notice" in path_str:
+        result.template_id = "final_notice"
+        result.is_supported = True
+        result.reasons.append("Filename/path matches Final Notice template")
+        return result
+    if "letter" in path_str or "migration" in path_str or "v1print" in path_str:
+        result.template_id = "customer_letter_logo_v1print"
+        result.is_supported = True
+        result.reasons.append("Filename/path matches Customer Letter template")
+        return result
+
+    # Check Excel / CSV headers if extension is spreadsheet
+    if path_str.endswith(('.xlsx', '.xls', '.csv')):
+        try:
+            if path_str.endswith('.csv'):
+                import csv
+                with open(gmf_file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    reader = csv.reader(f)
+                    first_row = [str(cell).upper() for cell in next(reader, [])]
+            else:
+                import openpyxl
+                wb = openpyxl.load_workbook(gmf_file_path, read_only=True, data_only=True)
+                ws = wb.active
+                first_row = [str(cell).upper() for cell in next(ws.iter_rows(values_only=True), []) if cell is not None]
+                wb.close()
+
+            if any("TOTAL_ARREARS" in h or "DUE DATE" in h for h in first_row):
+                result.template_id = "final_notice"
+                result.is_supported = True
+                result.reasons.append("Headers match Final Notice template")
+                return result
+            if any("ADDR_FULL" in h or "TELEPHONE_STATUS" in h for h in first_row):
+                result.template_id = "customer_letter_logo_v1print"
+                result.is_supported = True
+                result.reasons.append("Headers match Customer Letter template")
+                return result
+        except Exception:
+            pass
 
     header = read_gmf_header(gmf_file_path)
     result.header = header

@@ -1,1 +1,1 @@
-# Package marker for SmartAI_Bill
+# SmartAI_Bill package

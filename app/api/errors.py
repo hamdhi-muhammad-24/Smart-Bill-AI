@@ -70,12 +70,15 @@ async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse
 async def unhandled_exception_handler(
     request: Request, exc: Exception
 ) -> JSONResponse:
+    import traceback
+    print(f"\n[UNHANDLED EXCEPTION] {request.method} {request.url.path}: {exc}")
+    traceback.print_exc()
     log.exception(
         "Unhandled exception on %s %s", request.method, request.url.path
     )
     return JSONResponse(
         status_code=500,
-        content={"detail": "An unexpected error occurred."},
+        content={"detail": f"Server error: {str(exc)}"},
     )
 
 

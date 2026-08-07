@@ -126,12 +126,14 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
             except TypeError:
                 data = parser_func(temp_gmf_path)
 
-            if "records" in data and isinstance(data["records"], list) and len(data["records"]) > 1:
-                data["records"] = data["records"][:1]
-
-            for list_key in ["product_labels", "lines", "charges", "adjustments", "payments", "taxes", "equipment", "rentals"]:
-                if list_key in data and isinstance(data[list_key], list) and len(data[list_key]) > 10:
-                    data[list_key] = data[list_key][:10]
+            if isinstance(data, list) and len(data) > 1:
+                data = data[:1]
+            elif isinstance(data, dict):
+                if "records" in data and isinstance(data["records"], list) and len(data["records"]) > 1:
+                    data["records"] = data["records"][:1]
+                for list_key in ["product_labels", "lines", "charges", "adjustments", "payments", "taxes", "equipment", "rentals"]:
+                    if list_key in data and isinstance(data[list_key], list) and len(data[list_key]) > 10:
+                        data[list_key] = data[list_key][:10]
         else:
             try:
                 data = parser_func(temp_gmf_path, limit=limit, offset=offset)
@@ -141,30 +143,41 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
         renderer = RendererClass()
         renderer.render(data)
 
-        account_number = str(data.get("account_number", "unknown"))
-        account_number = re.sub(r'[^A-Za-z0-9_-]+', '_', account_number).strip('_')
-        if not account_number:
-            account_number = "unknown"
-
-        name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
-
-        output_name = name_pattern.format(
-            account_number=account_number,
-            template_id=template_id,
-        )
-
         os.makedirs(temp_pdf_dir, exist_ok=True)
-        output_path = os.path.join(temp_pdf_dir, output_name)
-        if os.path.exists(output_path):
-            base, ext = os.path.splitext(output_name)
-            output_path = os.path.join(temp_pdf_dir, f"{base}_dup{doc_index}{ext}")
 
-        renderer.save(output_path)
+        if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
+            fname, pdf_bytes, _ = renderer.generated_pdfs[0]
+            output_path = os.path.join(temp_pdf_dir, fname)
+            with open(output_path, "wb") as f:
+                f.write(pdf_bytes)
+            result.output_pdf = output_path
+            gen_count = len(getattr(renderer, "generated_pdfs", []))
+            result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
+            result.success = True
+        else:
+            account_number = "unknown"
+            if isinstance(data, dict):
+                account_number = str(data.get("account_number", "unknown"))
+            account_number = re.sub(r'[^A-Za-z0-9_-]+', '_', account_number).strip('_')
+            if not account_number:
+                account_number = "unknown"
 
-        gen_count = len(getattr(renderer, "generated_pdfs", []))
-        result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
-        result.output_pdf = output_path
-        result.success = True
+            name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
+            output_name = name_pattern.format(
+                account_number=account_number,
+                template_id=template_id,
+            )
+
+            output_path = os.path.join(temp_pdf_dir, output_name)
+            if os.path.exists(output_path):
+                base, ext = os.path.splitext(output_name)
+                output_path = os.path.join(temp_pdf_dir, f"{base}_dup{doc_index}{ext}")
+
+            result.output_pdf = output_path
+            renderer.save(output_path)
+            gen_count = len(getattr(renderer, "generated_pdfs", []))
+            result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
+            result.success = True
 
     except Exception as e:
         result.error = f"Doc {doc_index}: {type(e).__name__}: {str(e)}"
