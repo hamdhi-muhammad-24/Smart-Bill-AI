@@ -229,7 +229,7 @@ class USDOpenItemRenderer(BaseRenderer):
         page_label = f"1  of  {total_pages}"
         self.text(
             555,
-            y + 12,
+            y + 20 ,
             page_label,
             size=ADDRESS_BOX["font_size"],
             bold=False,
@@ -290,11 +290,11 @@ class USDOpenItemRenderer(BaseRenderer):
         currency = (data.get("acc_currency_code") or "").strip()
         currency_bracket = f"({currency})" if currency else ""
         y = self._ensure_space(y, line_h * 2)
-        self.text(tbl["indent_l1"], y,
-                  "Details of Charges for the Period",
-                  size=font_size, bold=True)
+        #self.text(tbl["indent_l1"], y,
+                  #"Details of Charges for the Period",
+                  #size=font_size, bold=True)
         if currency_bracket:
-            self.text(tbl["amount_x"], y, currency_bracket,
+            self.text(tbl["amount_x"], y + 5, currency_bracket,
                       size=font_size, bold=True, align="right")
         y -= line_h
 

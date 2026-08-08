@@ -1,13 +1,13 @@
 """NonVAT Enterprise (Sheet 19) - Coordinates."""
 
 COORDS = {
-    "gen_id_line":      (273, 590),
-    "gen_id_line2":     (273, 580.4),
+    "gen_id_line":      (273, 593),
+    "gen_id_line2":     (273, 583),
     "telephone_number":     (175, 728),
     "account_number":       (155, 701),
     "invoice_number":       (155, 672),
     "billing_date":         (155, 643),
-    "billing_period":       (155, 615),
+    "billing_period":       (148, 618),
 
     "customer_business":    (280, 725),
     "customer_addr_start":  715,
@@ -15,14 +15,14 @@ COORDS = {
     "customer_addr_line_h": 11,
 
     # ENTERPRISE badge
-    "badge_text":           (330, 612),
+    "badge_text":           (330, 615),
 
     # Summary boxes
-    "balance_bf":           (85, 512),
-    "payments_received":    (190, 512),
-    "charges_period":       (295, 512),
-    "total_payable":        (408, 512),
-    "payment_due_date":     (510, 512),
+    "balance_bf":           (85, 514),
+    "payments_received":    (190, 514),
+    "charges_period":       (295, 514),
+    "total_payable":        (408, 514),
+    "payment_due_date":     (510, 514),
 
     # Taxes & Total
     "taxes_label":          (45, 250),
@@ -47,23 +47,23 @@ COORDS = {
     "page_invoice_no_p2":   (45, 780),
 
     # Barcode
-    "barcode":              (375, 638),
+    "barcode":              (375, 645),
     "barcode_width":        100,
     "barcode_height":       20,
 
-    "qr_code":       (511.2, 88.4),
+    "qr_code":       (511.2, 92),
     "qr_size":       48,
 
-    "payonline_qr":       (498, 689),
+    "payonline_qr":       (498, 695),
     "payonline_qr_size":  48,
 
-    "slip_barcode":        (309, 110),
+    "slip_barcode":        (310, 110),
     "slip_barcode_width":  138,
     "slip_barcode_height": 25,
     "slip_telephone":       (157, 120),
-    "slip_invoice":         (157, 97),
-    "slip_customer":        (157, 75),
-    "slip_account":         (157, 50),
+    "slip_invoice":         (157, 100),
+    "slip_customer":        (157, 77),
+    "slip_account":         (157, 54),
 }
 
 CHARGES_TABLE = {
@@ -86,7 +86,7 @@ FONTS = {
     "header":         {"size": 9,   "bold": False},
     "customer_name":  {"size": 9.5, "bold": True},
     "customer_addr":  {"size": 9,   "bold": True},
-    "badge":          {"size": 11,  "bold": True},
+    "badge":          {"size": 15,  "bold": True},
     "summary_box":    {"size": 10,  "bold": False},
     "summary_total":  {"size": 10,  "bold": True},
     "product_label":  {"size": 9,   "bold": True},
@@ -104,4 +104,4 @@ POST_TC_COLUMNS = {
     "left":  {"x_start": 45, "x_end": 300, "amount_x": 295},
     "right": {"x_start": 315, "x_end": 555, "amount_x": 550},
     "vert_line_x": 308,
-}
+}

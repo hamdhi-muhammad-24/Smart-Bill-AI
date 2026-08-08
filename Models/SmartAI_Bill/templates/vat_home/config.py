@@ -28,8 +28,8 @@ COORDS = {
     "billing_period":   (140.0, 225.25),
 
     # VAT registration lines
-    "slt_vat_reg":      (273.60, 98.25),
-    "customer_vat_reg": (273.60, 107.25),
+    "slt_vat_reg":      (273.60, 95),
+    "customer_vat_reg": (273.60, 105.25),
 
     # Customer address block (green rounded box)
     "customer_addr_x":      280.8,
@@ -65,12 +65,12 @@ COORDS = {
     # scan at several x positions all agreed on this value); the previous
     # y=83.25 put the indicator's own text bbox (73.6-85.9) straddling that
     # edge, overlapping the banner. 95 clears it with a real margin.
-    "page_indicator": (536.0, 95.0),
+    "page_indicator": (510, 93.0),
 
     # Barcodes / QR (address section)
     "barcode":       (387.0, 177.85),
-    "barcode_width": 80.16,
-    "barcode_height": 14.40,
+    "barcode_width": 100,
+    "barcode_height": 20,
     "payonline_qr":  (497, 105),
     "payonline_qr_size": 48.0,
     "qr_code": (511.20, 707),
