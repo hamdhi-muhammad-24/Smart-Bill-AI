@@ -28,7 +28,9 @@ interface EnvelopeTemplateInfo {
   } | null
 }
 
-const API_BASE = 'http://localhost:8090'
+import { BASE_URL } from '@/lib/api'
+
+const API_BASE = BASE_URL
 
 async function fetchEnvelopeTemplates(): Promise<EnvelopeTemplateInfo[]> {
   const res = await fetch(`${API_BASE}/api/envelope/templates`)

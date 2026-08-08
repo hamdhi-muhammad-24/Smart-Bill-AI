@@ -1,4 +1,4 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090').replace(/\/+$/, '')
+export const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090').replace(/\/+$/, '')
 
 const TOKEN_KEY = 'slt-token'
 

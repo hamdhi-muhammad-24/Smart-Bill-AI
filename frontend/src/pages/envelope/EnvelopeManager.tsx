@@ -40,7 +40,9 @@ interface EnvelopeTemplateDetail {
   artworks: ArtworkRecord[]
 }
 
-const API_BASE = 'http://localhost:8090'
+import { BASE_URL } from '@/lib/api'
+
+const API_BASE = BASE_URL
 
 async function fetchTemplateDetail(id: number): Promise<EnvelopeTemplateDetail> {
   const res = await fetch(`${API_BASE}/api/envelope/templates/${id}`)

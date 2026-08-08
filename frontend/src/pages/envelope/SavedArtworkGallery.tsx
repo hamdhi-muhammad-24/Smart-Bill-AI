@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
+import { BASE_URL } from '@/lib/api'
 
 interface SavedArtwork {
   id: number
@@ -25,7 +26,7 @@ interface SavedArtwork {
   created_at: string
 }
 
-const API_BASE = 'http://localhost:8090'
+const API_BASE = BASE_URL
 
 async function fetchSavedArtworks(envelopeType?: string, status?: string): Promise<SavedArtwork[]> {
   const params = new URLSearchParams()
