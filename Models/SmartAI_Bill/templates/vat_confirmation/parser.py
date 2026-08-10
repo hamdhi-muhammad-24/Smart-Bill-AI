@@ -82,11 +82,7 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
             vat_idx = _get_col_idx("VAT_REGISTRATION", "VAT_NO", "VAT_REGISTRATION_NUMBER")
             addr_cols = ["ADDR_LINE_1", "ADDR_LINE_2", "ADDR_LINE_3", "ADDR_LINE_4", "ADDR_LINE_5", "CITY"]
 
-            target_max = (offset + limit) if limit is not None else None
-
             for row in rows:
-                if target_max is not None and len(all_records) >= target_max:
-                    break
 
                 ref = _clean(row[ref_idx]) if ref_idx is not None and ref_idx < len(row) else ""
                 comp_name = _clean(row[comp_idx]) if comp_idx is not None and comp_idx < len(row) else ""

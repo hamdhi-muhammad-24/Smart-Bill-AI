@@ -165,10 +165,23 @@ class VATConfirmationRenderer:
             page_number += 1
 
     def save(self, output_path):
+        """
+        Save all generated PDFs in self.generated_pdfs to the directory containing output_path.
+        """
         if not self.generated_pdfs:
             raise RuntimeError("No PDFs generated in render()")
 
-        fname, pdf_bytes, _ = self.generated_pdfs[0]
-        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        with open(output_path, "wb") as f:
-            f.write(pdf_bytes)
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        os.makedirs(out_dir, exist_ok=True)
+
+        if len(self.generated_pdfs) == 1:
+            fname, pdf_bytes, _ = self.generated_pdfs[0]
+            target_file = output_path if output_path.lower().endswith(".pdf") else os.path.join(out_dir, fname)
+            with open(target_file, "wb") as f:
+                f.write(pdf_bytes)
+        else:
+            for fname, pdf_bytes, _ in self.generated_pdfs:
+                target_file = os.path.join(out_dir, fname)
+                with open(target_file, "wb") as f:
+                    f.write(pdf_bytes)
+

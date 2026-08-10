@@ -157,6 +157,8 @@ export default function UploadCenter() {
               <option value="Test_GMFs" className="bg-background text-foreground font-bold">Test GMFs</option>
               <option value="LOD" className="bg-background text-foreground font-bold">LOD</option>
               <option value="VAT_Confirmation" className="bg-background text-foreground font-bold">VAT Confirmation</option>
+              <option value="Final_Notice" className="bg-background text-foreground font-bold">Final Notice</option>
+              <option value="Customer_Letter" className="bg-background text-foreground font-bold">Customer Migration Letter</option>
             </select>
           </div>
 

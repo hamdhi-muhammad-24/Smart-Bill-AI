@@ -41,7 +41,29 @@ from .lod.parser import parse_lod
 from .vat_confirmation.renderer import VATConfirmationRenderer
 from .vat_confirmation.parser import parse_vat_confirmation
 
+# New imports for Final Notice
+from .final_notice.render import FinalNoticeRenderer
+from .final_notice.parser import parse_final_notice
+
+# New imports for Customer Letter Logo V1Print
+from .customer_letter_logo_v1print.render import CustomerLetterRenderer
+from .customer_letter_logo_v1print.parser import parse_customer_letter
+
 TEMPLATE_REGISTRY = {
+    "final_notice": {
+        "name": "Final Notice",
+        "description": "LTE Final Notice Demand Letter",
+        "renderer": FinalNoticeRenderer,
+        "parser": parse_final_notice,
+        "ready": True,
+    },
+    "customer_letter_logo_v1print": {
+        "name": "Customer Migration Letter",
+        "description": "Customer Migration Letter (Logo V1 Print)",
+        "renderer": CustomerLetterRenderer,
+        "parser": parse_customer_letter,
+        "ready": True,
+    },
     "lod": {
         "name": "Letter of Demand & Termination",
         "description": "LOD Template with Certified Sinhala/Tamil Translation Notice",

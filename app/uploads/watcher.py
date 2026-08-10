@@ -43,7 +43,10 @@ CYCLE_FOLDERS = {
 TEST_FOLDER = "Test_GMFs"
 LOD_FOLDER = "LOD"
 VAT_CONF_FOLDER = "VAT_Confirmation"
-VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {TEST_FOLDER, LOD_FOLDER, VAT_CONF_FOLDER}
+FINAL_NOTICE_FOLDER = "Final_Notice"
+CUSTOMER_LETTER_FOLDER = "Customer_Letter"
+CUSTOMER_LETTER_ALT_FOLDER = "Customer_Letter_Logo_V1Print"
+VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {TEST_FOLDER, LOD_FOLDER, VAT_CONF_FOLDER, FINAL_NOTICE_FOLDER, CUSTOMER_LETTER_FOLDER, CUSTOMER_LETTER_ALT_FOLDER}
 
 # Files to skip (system/temp files)
 SKIP_PREFIXES = (".", "~", "__")
@@ -53,15 +56,32 @@ SKIP_SUFFIXES = (".tmp", ".part", ".partial", ".crdownload")
 _process_lock = threading.Lock()
 
 
-def _detect_template(file_path: str) -> str | None:
-    """Run SmartAI_Bill's template identifier on the file. Returns template_id or None."""
+def _detect_template(file_path: str) -> tuple[str | None, int]:
+    """Run SmartAI_Bill's template identifier across document blocks. Returns (template_summary, total_count)."""
     try:
+        from core.gmf_splitter import split_gmf_documents, write_doc_to_temp, count_documents
         from core.template_identifier import identify_template
-        result = identify_template(file_path)
-        return result.template_id if result.is_supported else f"unsupported:{result.template_id}"
+        import tempfile
+
+        docs = split_gmf_documents(file_path)
+        total_count = count_documents(file_path)
+        detected_set = set()
+
+        with tempfile.TemporaryDirectory(prefix="gmf_scan_") as tmp_dir:
+            source_filename = os.path.basename(file_path)
+            for idx, doc_lines in enumerate(docs, start=1):
+                tmp_path = write_doc_to_temp(doc_lines, tmp_dir, source_filename, idx)
+                res = identify_template(tmp_path)
+                if res.template_id:
+                    detected_set.add(res.template_id)
+
+        detected_list = sorted(list(detected_set))
+        summary_str = ", ".join(detected_list) if detected_list else None
+        return summary_str, total_count
     except Exception as e:
         logger.warning(f"Template identification failed for {file_path}: {e}")
-        return None
+        return None, 1
+
 
 
 def _get_cycle(folder_name: str) -> int | None:
@@ -156,9 +176,10 @@ class GmfFolderHandler(FileSystemEventHandler):
         cycle_number = _get_cycle(folder_name)
         is_test = folder_name == TEST_FOLDER
 
-        # Auto-detect invoice template
-        template_detected = _detect_template(str(filepath))
-        logger.info(f"Template identified: {template_detected}")
+        # Auto-detect invoice templates and total document count
+        template_detected, total_records_count = _detect_template(str(filepath))
+        logger.info(f"Templates identified: {template_detected} (Total docs: {total_records_count})")
+
 
         with _process_lock:
             with SessionLocal() as db:
@@ -191,11 +212,16 @@ class GmfFolderHandler(FileSystemEventHandler):
                                         GmfUpload.status == GmfUploadStatus.REJECTED
                                     ).update({"status": GmfUploadStatus.PENDING_APPROVAL, "rejection_reason": None}, synchronize_session=False)
                             else:
-                                template_obj = None
-                                if template_detected:
-                                    template_obj = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == template_detected).first()
-                                is_approved = template_obj and template_obj.approval_status == TemplateApprovalStatus.APPROVED
-                                is_rejected = template_obj and template_obj.approval_status == TemplateApprovalStatus.REJECTED
+                                detected_list = [t.strip() for t in (template_detected or "").split(",") if t.strip()]
+                                approved_set = set(
+                                    t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED).all()
+                                )
+                                rejected_set = set(
+                                    t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.approval_status == TemplateApprovalStatus.REJECTED).all()
+                                )
+                                is_approved = bool(detected_list) and any(t in approved_set for t in detected_list)
+                                is_rejected = bool(detected_list) and any(t in rejected_set for t in detected_list)
+
                                 
                                 settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
                                 settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
@@ -261,12 +287,16 @@ class GmfFolderHandler(FileSystemEventHandler):
                             logger.info(f"Already registered (currently in status {existing.status.value}): {filename}")
                         return
 
-                    template_obj = None
-                    if template_detected:
-                        template_obj = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == template_detected).first()
-                        
-                    is_approved = template_obj and template_obj.approval_status == TemplateApprovalStatus.APPROVED
-                    is_rejected = template_obj and template_obj.approval_status == TemplateApprovalStatus.REJECTED
+                    detected_list = [t.strip() for t in (template_detected or "").split(",") if t.strip()]
+                    approved_set = set(
+                        t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED).all()
+                    )
+                    rejected_set = set(
+                        t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.approval_status == TemplateApprovalStatus.REJECTED).all()
+                    )
+                    is_approved = bool(detected_list) and any(t in approved_set for t in detected_list)
+                    is_rejected = bool(detected_list) and any(t in rejected_set for t in detected_list)
+
 
                     if is_test:
                         new_filepath = filepath
@@ -311,15 +341,21 @@ class GmfFolderHandler(FileSystemEventHandler):
                             logger.error(f"Failed to move file {filename}: {move_err}")
                             return
 
-                    # Create GMF upload record
+                    from core.gmf_splitter import count_documents_with_breakdown
+                    import json
+                    total_cnt, breakdown = count_documents_with_breakdown(str(new_filepath))
                     upload = GmfUpload(
                         filename=filename,
                         file_path=str(new_filepath),
                         folder_type=folder_name,
                         cycle_number=cycle_number,
                         template_detected=template_detected,
+                        total_records_count=total_records_count,
                         status=final_status,
+                        total_records_count=total_cnt,
+                        template_breakdown=json.dumps(breakdown) if breakdown else None,
                     )
+
                     db.add(upload)
                     db.flush()  # get upload.id
 

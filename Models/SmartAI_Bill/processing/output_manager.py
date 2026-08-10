@@ -59,9 +59,22 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             log_callback("No PDFs found to organise")
         return []
 
+    if cycle_label and "cycle" in cycle_label.lower():
+        import re
+        match = re.search(r'(\d+)', str(cycle_label))
+        if match:
+            cycle_label = f"Cycle_{match.group(1)}"
+        else:
+            cycle_label = str(cycle_label).strip().replace(" ", "_")
+    elif cycle_label:
+        cycle_label = str(cycle_label).strip().replace(" ", "_")
+    else:
+        cycle_label = "Cycle_1"
+
     today = datetime.now().strftime("%Y-%m-%d")
     base = os.path.join(OUTPUT_BASE_DIR, today, cycle_label)
     os.makedirs(base, exist_ok=True)
+
 
     if log_callback:
         log_callback(
@@ -99,8 +112,16 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             dest = os.path.join(batch_dir, os.path.basename(pdf_path))
             
             try:
-                local_vm_batch_dir = os.path.join("./output", today, cycle_label, f"Batch_{current_batch_num}")
-                os.makedirs(local_vm_batch_dir, exist_ok=True)
+                local_base = os.path.join("./output", today, cycle_label)
+                # Find local batch dir with < 10 PDFs
+                b_num = 1
+                while True:
+                    local_vm_batch_dir = os.path.join(local_base, f"Batch_{b_num}")
+                    os.makedirs(local_vm_batch_dir, exist_ok=True)
+                    local_cnt = len([f for f in os.listdir(local_vm_batch_dir) if f.lower().endswith(".pdf")])
+                    if local_cnt < BATCH_FOLDER_SIZE:
+                        break
+                    b_num += 1
                 shutil.copy2(pdf_path, os.path.join(local_vm_batch_dir, os.path.basename(pdf_path)))
             except Exception as copy_err:
                 if log_callback:
@@ -169,9 +190,15 @@ def list_batches_for_cycle(date_str, cycle_label):
     for root in get_output_roots():
         cycle_path = os.path.join(root, date_str, cycle_label)
         if os.path.exists(cycle_path):
+            has_direct_pdfs = False
             for d in os.listdir(cycle_path):
-                if os.path.isdir(os.path.join(cycle_path, d)):
+                full_p = os.path.join(cycle_path, d)
+                if os.path.isdir(full_p):
                     batches.add(d)
+                elif d.lower().endswith('.pdf'):
+                    has_direct_pdfs = True
+            if has_direct_pdfs:
+                batches.add("Batch_01")
     return sorted(list(batches))
 
 
@@ -180,8 +207,15 @@ def list_pdfs_in_batch(date_str, cycle_label, batch_name):
     pdfs = set()
     for root in get_output_roots():
         batch_path = os.path.join(root, date_str, cycle_label, batch_name)
-        if os.path.exists(batch_path):
+        if os.path.exists(batch_path) and os.path.isdir(batch_path):
             for f in os.listdir(batch_path):
+                if f.lower().endswith(".pdf"):
+                    pdfs.add(f)
+        
+        # Check direct files if batch_name is Batch_01
+        cycle_path = os.path.join(root, date_str, cycle_label)
+        if os.path.exists(cycle_path):
+            for f in os.listdir(cycle_path):
                 if f.lower().endswith(".pdf"):
                     pdfs.add(f)
     return sorted(list(pdfs))
@@ -190,7 +224,12 @@ def list_pdfs_in_batch(date_str, cycle_label, batch_name):
 def get_pdf_path(date_str, cycle_label, batch_name, filename):
     """Return absolute path to a specific PDF file across all output roots."""
     for root in get_output_roots():
+        # Check batch subfolder first
         p = os.path.join(root, date_str, cycle_label, batch_name, filename)
         if os.path.exists(p):
             return p
+        # Check direct cycle directory
+        p_direct = os.path.join(root, date_str, cycle_label, filename)
+        if os.path.exists(p_direct):
+            return p_direct
     return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, filename)

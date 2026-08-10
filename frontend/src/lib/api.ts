@@ -1,4 +1,4 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090').replace(/\/+$/, '')
+export const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090').replace(/\/+$/, '')
 
 const TOKEN_KEY = 'slt-token'
 
@@ -135,7 +135,37 @@ export interface GmfUploadOut {
   rejection_reason: string | null
   billing_run_id: number | null
   template_status?: string | null
+  processed_records_count?: number
+  total_records_count?: number
+  template_breakdown?: Record<string, number> | null
 }
+
+export interface TemplateBreakdownItem {
+  template_id: string
+  template_name: string
+  count: number
+  is_approved: boolean
+  status: string
+}
+
+export interface GmfSummaryOut {
+  upload_id: number
+  filename: string
+  is_red_notice: boolean
+  folder_type: string
+  status: string
+  total_documents: number
+  processed_documents: number
+  remaining_documents: number
+  template_detected: string | null
+  detected_at: string
+  template_breakdown: TemplateBreakdownItem[]
+}
+
+export function getUploadSummary(uploadId: number): Promise<GmfSummaryOut> {
+  return request(`/billing/uploads/${uploadId}/summary`)
+}
+
 
 export interface BillingRunOut {
   id: number
@@ -420,6 +450,18 @@ export function deleteTemplateHistoryLog(historyId: number): Promise<{ message: 
 
 export function deleteAllTemplateHistoryLogs(): Promise<{ message: string }> {
   return request('/billing/template-history', { method: 'DELETE' })
+}
+
+export function getEnvelopeHistory(): Promise<any[]> {
+  return request('/api/envelope/history')
+}
+
+export function deleteEnvelopeHistoryLog(historyId: number): Promise<{ message: string }> {
+  return request(`/api/envelope/history/${historyId}`, { method: 'DELETE' })
+}
+
+export function deleteAllEnvelopeHistoryLogs(): Promise<{ message: string }> {
+  return request('/api/envelope/history', { method: 'DELETE' })
 }
 
 export function deleteRun(runId: number): Promise<{ message: string }> {

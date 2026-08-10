@@ -17,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { useMsal } from '@azure/msal-react'
 import { loginRequest } from '../auth/msalConfig'
 
-const ROLE_HOME = { admin: '/admin', gmf_handler: '/gmf-handler', manager: '/manager', customer: '/app' } as const
+const ROLE_HOME = { admin: '/admin', gmf_handler: '/gmf-handler', envelope_handler: '/envelope-handler', manager: '/manager', customer: '/app' } as const
 
 export default function Login() {
   const { session, isChecking, login } = useAuth()
@@ -40,10 +40,11 @@ export default function Login() {
         const me = await authMe()
         const r = me.role.toUpperCase()
 
-        let role: 'admin' | 'gmf_handler' | 'manager' | 'customer' = 'customer'
+        let role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'customer' = 'customer'
         if (r === 'ADMIN') role = 'admin'
         else if (r === 'MANAGER') role = 'manager'
         else if (r === 'GMF_HANDLER' || r === 'ADMIN1') role = 'gmf_handler'
+        else if (r === 'ENVELOPE_HANDLER') role = 'envelope_handler'
 
         if (role === 'customer') {
           clearToken()
@@ -63,7 +64,7 @@ export default function Login() {
     }
   }
 
-  function handleDevLogin(targetRole: 'admin' | 'gmf_handler' | 'manager') {
+  function handleDevLogin(targetRole: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager') {
     const devToken = `dev-${targetRole}-token`
     setToken(devToken)
     login({ role: targetRole })
@@ -194,7 +195,7 @@ export default function Login() {
               <span className="text-[10px] font-bold bg-[#00a651]/15 text-[#00a651] px-2 py-0.5 rounded-full">DEV MODE</span>
             </div>
             <p className="text-xs text-muted-foreground font-medium">Test any portal instantly without needing a Microsoft account:</p>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => handleDevLogin('admin')}
@@ -208,6 +209,13 @@ export default function Login() {
                 className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
               >
                 GMF Portal
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDevLogin('envelope_handler')}
+                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+              >
+                Envelope Portal
               </button>
               <button
                 type="button"

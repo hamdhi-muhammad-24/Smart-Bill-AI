@@ -17,6 +17,10 @@ import Admin1Dashboard from './pages/admin/Admin1Dashboard'
 import UploadCenter from './pages/admin/UploadCenter'
 import ManagerLayout from './components/ManagerLayout'
 import ManagerDashboard from './pages/admin/ManagerDashboard'
+import EnvelopeLayout from './components/EnvelopeLayout'
+import EnvelopeDashboard from './pages/envelope/EnvelopeDashboard'
+import EnvelopeManager from './pages/envelope/EnvelopeManager'
+import SavedArtworkGallery from './pages/envelope/SavedArtworkGallery'
 import { ThemeProvider } from './components/ThemeProvider'
 
 export default function App() {
@@ -45,6 +49,15 @@ export default function App() {
             <Route index element={<Admin1Dashboard />} />
             <Route path="gmf-monitor" element={<GmfMonitor />} />
             <Route path="upload-center" element={<UploadCenter />} />
+          </Route>
+        </Route>
+
+        {/* Envelope Handler Operations Portal */}
+        <Route element={<RequireRole role="envelope_handler" />}>
+          <Route path="/envelope-handler" element={<EnvelopeLayout />}>
+            <Route index element={<EnvelopeDashboard />} />
+            <Route path="manager" element={<EnvelopeManager />} />
+            <Route path="gallery" element={<SavedArtworkGallery />} />
           </Route>
         </Route>
 

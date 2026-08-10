@@ -38,20 +38,65 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
     """Identify which template a GMF file needs."""
     result = IdentificationResult()
     
-    path_str = str(gmf_file_path).lower()
-    if path_str.endswith('.processing'):
-        path_str = path_str[:-11]
+    from pathlib import Path
+    path_obj = Path(gmf_file_path)
+    fname = path_obj.name.lower()
+    if fname.endswith('.processing'):
+        fname = fname[:-11]
 
-    if "lod" in path_str or "demand" in path_str:
-        result.template_id = "lod"
-        result.is_supported = True
-        result.reasons.append("Filename/path matches LOD template")
-        return result
-    if "vat" in path_str and ("confirm" in path_str or "customer" in path_str or "recipients" in path_str or "list" in path_str or "002" in path_str):
-        result.template_id = "vat_confirmation"
-        result.is_supported = True
-        result.reasons.append("Filename/path matches VAT Confirmation template")
-        return result
+    # Special spreadsheet template matching ONLY if filename matches and file is NOT a temp GMF document block
+    is_temp_gmf_block = fname.startswith("tmp") or fname.endswith(".gmf")
+
+    if not is_temp_gmf_block:
+        if "lod" in fname or "letter of demand" in fname:
+            result.template_id = "lod"
+            result.is_supported = True
+            result.reasons.append("Filename matches LOD template")
+            return result
+        if "vat" in fname and ("confirm" in fname or "customer" in fname or "recipients" in fname or "list" in fname or "002" in fname):
+            result.template_id = "vat_confirmation"
+            result.is_supported = True
+            result.reasons.append("Filename matches VAT Confirmation template")
+            return result
+        if "final" in fname and "notice" in fname:
+            result.template_id = "final_notice"
+            result.is_supported = True
+            result.reasons.append("Filename matches Final Notice template")
+            return result
+        if "letter" in fname or "migration" in fname or "v1print" in fname:
+            result.template_id = "customer_letter_logo_v1print"
+            result.is_supported = True
+            result.reasons.append("Filename matches Customer Letter template")
+            return result
+
+    path_str = str(gmf_file_path).lower()
+    # Check Excel / CSV headers if extension is spreadsheet
+    if path_str.endswith(('.xlsx', '.xls', '.csv')):
+        try:
+            if path_str.endswith('.csv'):
+                import csv
+                with open(gmf_file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    reader = csv.reader(f)
+                    first_row = [str(cell).upper() for cell in next(reader, [])]
+            else:
+                import openpyxl
+                wb = openpyxl.load_workbook(gmf_file_path, read_only=True, data_only=True)
+                ws = wb.active
+                first_row = [str(cell).upper() for cell in next(ws.iter_rows(values_only=True), []) if cell is not None]
+                wb.close()
+
+            if any("TOTAL_ARREARS" in h or "DUE DATE" in h for h in first_row):
+                result.template_id = "final_notice"
+                result.is_supported = True
+                result.reasons.append("Headers match Final Notice template")
+                return result
+            if any("ADDR_FULL" in h or "TELEPHONE_STATUS" in h for h in first_row):
+                result.template_id = "customer_letter_logo_v1print"
+                result.is_supported = True
+                result.reasons.append("Headers match Customer Letter template")
+                return result
+        except Exception:
+            pass
 
     header = read_gmf_header(gmf_file_path)
     result.header = header
@@ -86,7 +131,7 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
         result.is_supported = True
         return result
 
-    if header.doctype != "BILL":
+    if header.doctype not in ("BILL", "BCR"):
         result.reasons.append(f"Unrecognized DOCTYPE: {header.doctype}")
         result.warnings.append("Manual review needed")
         return result
