@@ -1207,7 +1207,7 @@ def update_template_status(
     template_id: str,
     body: TemplateStatusUpdate,
     db: Session = Depends(get_db),
-    _: UserOut = Depends(require_admin)
+    _: UserOut = Depends(require_admin1_or_admin)
 ):
     """Approve or Reject an invoice template globally."""
     try:
@@ -1219,6 +1219,7 @@ def update_template_status(
     target_ids = [t.strip() for t in template_id.split(",") if t.strip()]
     if not target_ids:
         target_ids = [template_id]
+    target_ids_set = set(target_ids)
 
     for t_code in target_ids:
         t = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == t_code).first()
