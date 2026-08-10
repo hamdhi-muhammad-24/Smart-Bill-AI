@@ -11,9 +11,7 @@ import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 
-import { BASE_URL } from '@/lib/api'
-
-const API_BASE = BASE_URL
+const API_BASE = 'http://localhost:8090'
 
 async function fetchSubmittedEnvelopes() {
   const res = await fetch(`${API_BASE}/api/envelope/artworks?status=SUBMITTED`)

@@ -536,26 +536,31 @@ def get_upload_summary(
 
     if os.path.exists(file_path):
         try:
-            docs = split_gmf_documents(file_path)
+            docs = split_gmf_documents(file_path, original_filename=upload.filename)
             if docs:
                 total_docs = len(docs)
-                with tempfile.TemporaryDirectory(prefix="gmf_summary_") as tmp:
-                    counts = {}
-                    for idx, doc_lines in enumerate(docs, start=1):
-                        tmp_path = write_doc_to_temp(doc_lines, tmp, upload.filename, idx)
-                        ident = identify_template(tmp_path)
+                counts = {}
+                for idx, doc_path in enumerate(docs, start=1):
+                    try:
+                        ident = identify_template(doc_path, original_filename=upload.filename)
                         t_id = ident.template_id or "unknown"
                         counts[t_id] = counts.get(t_id, 0) + 1
-
-                    for t_id, count in counts.items():
-                        is_active = t_id in active_templates
-                        breakdown.append({
-                            "template_id": t_id,
-                            "template_name": t_id.replace("_", " ").title(),
-                            "count": count,
-                            "is_approved": is_active,
-                            "status": "APPROVED" if is_active else "PENDING_APPROVAL"
-                        })
+                    finally:
+                        if doc_path != file_path and os.path.exists(doc_path):
+                            try:
+                                os.remove(doc_path)
+                            except OSError:
+                                pass
+                
+                for t_id, count in counts.items():
+                    is_active = t_id in active_templates
+                    breakdown.append({
+                        "template_id": t_id,
+                        "template_name": t_id.replace("_", " ").title(),
+                        "count": count,
+                        "is_approved": is_active,
+                        "status": "APPROVED" if is_active else "PENDING_APPROVAL"
+                    })
         except Exception:
             pass
 
@@ -1607,6 +1612,9 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 final_path = settings.queue_pending_dir / filename
                 final_status = GmfUploadStatus.PENDING_APPROVAL
 
+            from core.gmf_splitter import count_documents_with_breakdown
+            total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
+
             existing = db.query(GmfUpload).filter(
                 GmfUpload.filename == filename,
                 GmfUpload.folder_type == folder_type,
@@ -1621,9 +1629,6 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                             logger.warning(f"Could not remove duplicate staged file {source_path}: {rm_err}")
                     registered_count += 1
                     continue
-
-                from core.gmf_splitter import count_documents_with_breakdown
-                total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
 
                 existing.file_path = str(final_path)
                 existing.status = final_status

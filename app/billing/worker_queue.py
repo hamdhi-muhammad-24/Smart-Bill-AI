@@ -273,7 +273,7 @@ def _worker_process(worker_id):
                     logger.warning(f"Could not create BillingRun for {filename}: {create_run_err}")
 
             from core.gmf_splitter import split_gmf_documents
-            doc_paths = split_gmf_documents(str(working_path), offset=offset, limit=limit)
+            doc_paths = split_gmf_documents(str(working_path), offset=offset, limit=limit, original_filename=filename)
 
             today_str = datetime.now().strftime("%Y-%m-%d")
             folder_name = cycle_label if cycle_label in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter") else TEMPLATE_FOLDER_MAP.get(str(template_id), str(template_id))
@@ -302,7 +302,7 @@ def _worker_process(worker_id):
             generated_count = 0
             for doc_p in doc_paths:
                 try:
-                    doc_res = identify_template(doc_p)
+                    doc_res = identify_template(doc_p, original_filename=filename)
                     doc_tid = doc_res.template_id if (doc_res and doc_res.is_supported) else template_id
 
                     # Option 2 Strict Selective Filtering: Only generate PDFs for templates approved by Admin

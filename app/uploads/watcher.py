@@ -59,21 +59,26 @@ _process_lock = threading.Lock()
 def _detect_template(file_path: str) -> tuple[str | None, int]:
     """Run SmartAI_Bill's template identifier across document blocks. Returns (template_summary, total_count)."""
     try:
-        from core.gmf_splitter import split_gmf_documents, write_doc_to_temp, count_documents
+        from core.gmf_splitter import split_gmf_documents, count_documents
         from core.template_identifier import identify_template
         import tempfile
 
-        docs = split_gmf_documents(file_path)
+        source_filename = os.path.basename(file_path)
+        docs = split_gmf_documents(file_path, original_filename=source_filename)
         total_count = count_documents(file_path)
         detected_set = set()
 
-        with tempfile.TemporaryDirectory(prefix="gmf_scan_") as tmp_dir:
-            source_filename = os.path.basename(file_path)
-            for idx, doc_lines in enumerate(docs, start=1):
-                tmp_path = write_doc_to_temp(doc_lines, tmp_dir, source_filename, idx)
-                res = identify_template(tmp_path)
+        for doc_path in docs:
+            try:
+                res = identify_template(doc_path, original_filename=source_filename)
                 if res.template_id:
                     detected_set.add(res.template_id)
+            finally:
+                if doc_path != file_path and os.path.exists(doc_path):
+                    try:
+                        os.remove(doc_path)
+                    except OSError:
+                        pass
 
         detected_list = sorted(list(detected_set))
         summary_str = ", ".join(detected_list) if detected_list else None
@@ -350,7 +355,6 @@ class GmfFolderHandler(FileSystemEventHandler):
                         folder_type=folder_name,
                         cycle_number=cycle_number,
                         template_detected=template_detected,
-                        total_records_count=total_records_count,
                         status=final_status,
                         total_records_count=total_cnt,
                         template_breakdown=json.dumps(breakdown) if breakdown else None,

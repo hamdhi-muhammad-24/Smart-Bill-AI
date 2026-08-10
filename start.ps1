@@ -39,6 +39,12 @@ if ($setup) {
 
 # ── Step 2: FastAPI backend (new window) ──────────────────────────────────────
 Write-Host "[1/3] Starting FastAPI backend on http://localhost:8090 ..." -ForegroundColor Yellow
+$stale_api = (Get-NetTCPConnection -LocalPort 8090 -ErrorAction SilentlyContinue).OwningProcess
+if ($stale_api) {
+    Write-Host "      Killing stale process on port 8090 (PID $stale_api)..." -ForegroundColor DarkGray
+    Stop-Process -Id $stale_api -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+}
 $BackendCmd = if (Test-Path $VenvPython) { "& '$VenvPython' -m uvicorn app.api.main:app --reload --port 8090" } else { "uv run uvicorn app.api.main:app --reload --port 8090" }
 Start-Process powershell -ArgumentList @(
     "-NoExit",

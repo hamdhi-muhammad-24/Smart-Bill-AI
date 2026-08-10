@@ -120,7 +120,7 @@ def count_documents_with_breakdown(file_path: str) -> tuple[int, dict[str, int]]
         return total, breakdown
 
 
-def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None) -> list[str]:
+def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, original_filename: str = None) -> list[str]:
     """
     Splits a multi-document GMF text file into individual temporary document file paths.
     For spreadsheets/CSV files, returns [file_path].
@@ -166,8 +166,15 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None) -> l
         doc_blocks = doc_blocks[:limit]
 
     temp_files = []
+    base_name = original_filename or os.path.basename(file_path)
+    if base_name.lower().endswith(".processing"):
+        base_name = base_name[:-11]
+    
+    # Prefix is the original filename stripped of extension, to preserve it for downstream checks
+    base_prefix = os.path.splitext(base_name)[0]
+    
     for i, block in enumerate(doc_blocks, 1):
-        tf = tempfile.NamedTemporaryFile("w", delete=False, suffix=f"_{i}.gmf", encoding="utf-8")
+        tf = tempfile.NamedTemporaryFile("w", delete=False, prefix=f"{base_prefix}__", suffix=f"_{i}.gmf", encoding="utf-8")
         tf.write(block)
         tf.close()
         temp_files.append(tf.name)
