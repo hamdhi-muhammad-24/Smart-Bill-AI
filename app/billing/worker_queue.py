@@ -56,9 +56,14 @@ def _worker_process(worker_id):
     """
     Parallel worker process that generates PDFs from GMFs in the incoming queue.
     """
-    # Imports must be inside the process to avoid multiprocessing pickling issues
     from core.template_identifier import identify_template
+    from core.gmf_reader import read_gmf_header
+    from config import BATCH_FOLDER_SIZE
     from templates.registry import get_renderer, get_parser
+    from app.billing.gmf_core.bill_handling_categorizer import (
+    categorize_bill_handling_code,
+    get_category_folder,
+)
     
     logger.info(f"Worker {worker_id} started")
     COMPLETED_TEMP.mkdir(parents=True, exist_ok=True)
@@ -103,6 +108,14 @@ def _worker_process(worker_id):
 
             filename = file_path.name
             logger.info(f"Worker {worker_id} processing {filename}")
+
+            gmf_header = read_gmf_header(str(working_path))
+            category = categorize_bill_handling_code(gmf_header.bill_handling_code)
+            category_folder = get_category_folder(category)
+            logger.info(
+                f"Worker {worker_id}: {filename} -> BILLHANDLINGCODE="
+                f"{gmf_header.bill_handling_code!r} -> category={category} ({category_folder})"
+            )
             
             # DB lookup to get cycle and template ID (with up to 3 retry attempts for delayed transaction commits)
             upload = None
@@ -231,27 +244,29 @@ def _worker_process(worker_id):
                 renderer.render(data)
             except Exception as render_err:
                 raise Exception(f"PDF layout render error: {render_err}")
-            
-            # Construct output folder: output/<YYYY-MM-DD>/<Cycle_N|LOD|VAT_Confirmation>/Batch_X/
+            # Construct output folder: output/<YYYY-MM-DD>/<Cycle_N|LOD|VAT_Confirmation>/Batch_X/type-specific subfolder
             today_str = datetime.now().strftime("%Y-%m-%d")
             folder_name = cycle_label if cycle_label in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation") else TEMPLATE_FOLDER_MAP.get(str(template_id), str(template_id))
             cycle_base_dir = settings.output_dir / today_str / folder_name
             cycle_base_dir.mkdir(parents=True, exist_ok=True)
             
-            def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
+            def _get_batch_folder(base_dir: Path, max_per_batch: int = BATCH_FOLDER_SIZE) -> Path:
                 b_num = 1
                 while True:
                     b_dir = base_dir / f"Batch_{b_num}"
                     b_dir.mkdir(parents=True, exist_ok=True)
-                    pdf_count = len([f for f in b_dir.iterdir() if f.is_file() and f.name.lower().endswith(".pdf")])
+                    pdf_count = sum(1 for _ in b_dir.rglob("*.pdf"))
                     if pdf_count < max_per_batch:
                         return b_dir
                     b_num += 1
             
             generated_count = 0
+
             if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
                 for fname, pdf_bytes, _ in renderer.generated_pdfs:
-                    target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
+                    batch_dir = _get_batch_folder(cycle_base_dir, max_per_batch=BATCH_FOLDER_SIZE)
+                    target_dir = batch_dir / category_folder
+                    target_dir.mkdir(parents=True, exist_ok=True)
                     output_pdf_path = target_dir / fname
                     with open(output_pdf_path, "wb") as f:
                         f.write(pdf_bytes)
@@ -260,7 +275,9 @@ def _worker_process(worker_id):
                 account_number = str(data.get("account_number", "unknown")).replace(" ", "")
                 name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
                 output_name = name_pattern.format(account_number=account_number, template_id=template_id)
-                target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
+                batch_dir = _get_batch_folder(cycle_base_dir, max_per_batch=BATCH_FOLDER_SIZE)
+                target_dir = batch_dir / category_folder
+                target_dir.mkdir(parents=True, exist_ok=True)
                 output_pdf_path = target_dir / output_name
                 try:
                     renderer.save(str(output_pdf_path))

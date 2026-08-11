@@ -8,6 +8,10 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core.template_identifier import identify_template
+from app.billing.gmf_core.bill_handling_categorizer import (
+    categorize_bill_handling_code,
+    get_category_folder,
+)
 from templates.registry import get_renderer, get_parser
 from config import (
     DEFAULT_WORKERS,PROCESSED_DIR, FAILED_DIR, MOVE_AFTER_PROCESS,OUTPUT_PDF_NAMES, OUTPUT_PDF_NAME_DEFAULT
@@ -79,8 +83,12 @@ def process_single_file(args):
             template_id=template_id,
         )
 
-        os.makedirs(temp_pdf_dir, exist_ok=True)
-        output_path = os.path.join(temp_pdf_dir, output_name)
+        category = categorize_bill_handling_code(identification.header.bill_handling_code) # type: ignore
+        category_folder = get_category_folder(category)
+
+        category_dir = os.path.join(temp_pdf_dir, category_folder)
+        os.makedirs(category_dir, exist_ok=True)
+        output_path = os.path.join(category_dir, output_name)
         result.output_pdf = output_path
         
         renderer.save(output_path)

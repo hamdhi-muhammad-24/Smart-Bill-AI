@@ -47,6 +47,7 @@ from processing.output_manager import (
     list_output_dates,
     list_cycles_for_date,
     list_batches_for_cycle,
+    list_categories_in_batch,
     list_pdfs_in_batch,
     get_pdf_path,
 )
@@ -422,29 +423,32 @@ def preview_invoice(
     db.commit()
 
     pdf_filename = os.path.basename(result.output_pdf)
+    category_folder = os.path.basename(os.path.dirname(result.output_pdf))
     return {
         "message": "Preview generated successfully",
-        "pdf_url": f"/billing/preview-pdfs/{pdf_filename}",
+        "pdf_url": f"/billing/preview-pdfs/{category_folder}/{pdf_filename}",
         "template_detected": result.template_id,
     }
 
 
-@router.get("/preview-pdfs/{filename}")
+@router.get("/preview-pdfs/{category}/{filename}")
 def serve_preview_pdf(
+    category: str,
     filename: str,
     _: UserOut = Depends(require_admin),
 ):
     """Serve a generated preview PDF from backend-managed storage."""
     safe_filename = Path(filename).name
-    if safe_filename != filename or not safe_filename.lower().endswith(".pdf"):
+    safe_category = Path(category).name
+    if (safe_filename != filename or safe_category != category
+            or not safe_filename.lower().endswith(".pdf")):
         raise HTTPException(status_code=400, detail="Invalid preview PDF filename")
 
-    path = settings.output_dir / "previews" / safe_filename
+    path = settings.output_dir / "previews" / safe_category / safe_filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="Preview PDF not found")
 
     return FileResponse(path, media_type="application/pdf", filename=safe_filename)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Approve / Reject
@@ -962,26 +966,37 @@ def output_batches(date_str: str, cycle: str, _: UserOut = Depends(require_admin
 
 
 @router.get("/output/{date_str}/{cycle}/{batch}")
-def output_pdfs(
+def output_categories(
     date_str: str, cycle: str, batch: str,
     _: UserOut = Depends(require_admin)
 ):
-    """List all PDF files in a specific batch."""
-    pdfs = list_pdfs_in_batch(date_str, cycle, batch)
-    return {"date": date_str, "cycle": cycle, "batch": batch, "files": pdfs}
+    """List delivery-method categories (e-statement / print / print_and_e-statement / other) in a  batch."""
+    categories = list_categories_in_batch(date_str, cycle, batch)
+    return {"date": date_str, "cycle": cycle, "batch": batch, "categories": categories}
 
 
-@router.get("/output/{date_str}/{cycle}/{batch}/{filename}")
+@router.get("/output/{date_str}/{cycle}/{batch}/{category}")
+def output_pdfs(
+    date_str: str, cycle: str, batch: str, category: str,
+    _: UserOut = Depends(require_admin)
+):
+    """List all PDF files in a specific batch/category."""
+    pdfs = list_pdfs_in_batch(date_str, cycle, batch, category=category)
+    return {"date": date_str, "cycle": cycle, "batch": batch, "category": category, "files": pdfs}
+
+
+
+@router.get("/output/{date_str}/{cycle}/{batch}/{category}/{filename}")
 def serve_pdf(
-    date_str: str, cycle: str, batch: str, filename: str,
+    date_str: str, cycle: str, batch: str, category: str, filename: str,
     _: UserOut = Depends(require_admin)
 ):
     """Serve a single PDF file for inline viewing."""
     if batch == "COMPLETED_TEMP":
         path = os.path.abspath(os.path.join("./queue/completed_temp", cycle, filename))
     else:
-        path = get_pdf_path(date_str, cycle, batch, filename)
-        
+        path = get_pdf_path(date_str, cycle, batch, filename, category=category)
+
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="PDF file not found")
     return FileResponse(path, media_type="application/pdf", filename=filename)

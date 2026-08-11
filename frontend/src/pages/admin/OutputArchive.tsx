@@ -1,16 +1,24 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Folder, FolderOpen, FileText, ChevronRight, Download, Eye, Loader2 } from 'lucide-react'
-import { getOutputDates, getOutputCycles, getOutputBatches, getOutputPdfs, fetchPdfBlobUrl } from '../../lib/api'
+import { Folder, FolderOpen, Tags, FileText, ChevronRight, Download, Eye, Loader2 } from 'lucide-react'
+import { getOutputDates, getOutputCycles, getOutputBatches, getOutputCategories, getOutputPdfs, fetchPdfBlobUrl } from '../../lib/api'
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
+const CATEGORY_LABELS: Record<string, string> = {
+  'e-statement': 'E-Statement',
+  'print': 'Print',
+  'print_and_e-statement': 'Print & E-Statement',
+  'other': 'Other',
+}
+
 export default function OutputArchive() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [selectedCycle, setSelectedCycle] = useState<string | null>(null)
   const [selectedBatch, setSelectedBatch] = useState<string | null>(null)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedPdf, setSelectedPdf] = useState<string | null>(null)
 
   const { data: datesData, isLoading: loadingDates } = useQuery({
@@ -30,29 +38,36 @@ export default function OutputArchive() {
     enabled: !!selectedDate && !!selectedCycle
   })
 
-  const { data: pdfsData, isLoading: loadingPdfs } = useQuery({
-    queryKey: ['output-pdfs', selectedDate, selectedCycle, selectedBatch],
-    queryFn: () => getOutputPdfs(selectedDate!, selectedCycle!, selectedBatch!),
+  const { data: categoriesData, isLoading: loadingCategories } = useQuery({
+    queryKey: ['output-categories', selectedDate, selectedCycle, selectedBatch],
+    queryFn: () => getOutputCategories(selectedDate!, selectedCycle!, selectedBatch!),
     enabled: !!selectedDate && !!selectedCycle && !!selectedBatch
+  })
+
+  const { data: pdfsData, isLoading: loadingPdfs } = useQuery({
+    queryKey: ['output-pdfs', selectedDate, selectedCycle, selectedBatch, selectedCategory],
+    queryFn: () => getOutputPdfs(selectedDate!, selectedCycle!, selectedBatch!, selectedCategory!),
+    enabled: !!selectedDate && !!selectedCycle && !!selectedBatch && !!selectedCategory
   })
 
   // Securely fetch PDF Blob URL
   const { data: pdfUrl, isLoading: loadingPdfBlob } = useQuery({
-    queryKey: ['output-pdf-blob', selectedDate, selectedCycle, selectedBatch, selectedPdf],
-    queryFn: () => fetchPdfBlobUrl(selectedDate!, selectedCycle!, selectedBatch!, selectedPdf!),
-    enabled: !!selectedDate && !!selectedCycle && !!selectedBatch && !!selectedPdf
+    queryKey: ['output-pdf-blob', selectedDate, selectedCycle, selectedBatch, selectedCategory, selectedPdf],
+    queryFn: () => fetchPdfBlobUrl(selectedDate!, selectedCycle!, selectedBatch!, selectedCategory!, selectedPdf!),
+    enabled: !!selectedDate && !!selectedCycle && !!selectedBatch && !!selectedCategory && !!selectedPdf
   })
 
   // Reset downstream selections when upstream changes
-  useEffect(() => { setSelectedCycle(null); setSelectedBatch(null); setSelectedPdf(null); }, [selectedDate])
-  useEffect(() => { setSelectedBatch(null); setSelectedPdf(null); }, [selectedCycle])
-  useEffect(() => { setSelectedPdf(null); }, [selectedBatch])
+  useEffect(() => { setSelectedCycle(null); setSelectedBatch(null); setSelectedCategory(null); setSelectedPdf(null); }, [selectedDate])
+  useEffect(() => { setSelectedBatch(null); setSelectedCategory(null); setSelectedPdf(null); }, [selectedCycle])
+  useEffect(() => { setSelectedCategory(null); setSelectedPdf(null); }, [selectedBatch])
+  useEffect(() => { setSelectedPdf(null); }, [selectedCategory])
 
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)] gap-4">
-      <PageHeader 
-        title="Output Archive" 
-        description="Browse and view all generated invoices organized by date, cycle, and batch." 
+      <PageHeader
+        title="Output Archive"
+        description="Browse and view all generated invoices organized by date, cycle, batch, and delivery method."
       />
 
       <div className="flex flex-1 min-h-0 gap-4">
@@ -77,11 +92,17 @@ export default function OutputArchive() {
             {selectedBatch && (
               <>
                 <ChevronRight size={14} className="text-muted-foreground" />
-                <span>{selectedBatch.replace('_', ' ')}</span>
+                <span className="cursor-pointer hover:text-foreground" onClick={() => setSelectedCategory(null)}>{selectedBatch.replace('_', ' ')}</span>
+              </>
+            )}
+            {selectedCategory && (
+              <>
+                <ChevronRight size={14} className="text-muted-foreground" />
+                <span>{CATEGORY_LABELS[selectedCategory] ?? selectedCategory}</span>
               </>
             )}
           </div>
-          
+
           <ScrollArea className="flex-1 p-2">
             {!selectedDate ? (
               // Show Dates
@@ -116,14 +137,27 @@ export default function OutputArchive() {
                   <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 rounded-full">{b.pdf_count} PDFs</span>
                 </div>
               ))
+            ) : !selectedCategory ? (
+              // Show Categories (delivery method)
+              loadingCategories ? <div className="flex justify-center p-4"><Loader2 className="animate-spin text-muted-foreground" /></div> :
+              categoriesData?.categories.length === 0 ? <div className="text-center p-4 text-muted-foreground text-sm">No categories found in this batch.</div> :
+              categoriesData?.categories.map(c => (
+                <div key={c.category} onClick={() => setSelectedCategory(c.category)} className="flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-muted text-sm">
+                  <div className="flex items-center gap-2">
+                    <Tags size={16} className="text-violet-400 fill-violet-400/20" />
+                    <span className="font-medium">{CATEGORY_LABELS[c.category] ?? c.category}</span>
+                  </div>
+                  <span className="text-xs bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 rounded-full">{c.pdf_count} PDFs</span>
+                </div>
+              ))
             ) : (
               // Show PDFs
               loadingPdfs ? <div className="flex justify-center p-4"><Loader2 className="animate-spin text-muted-foreground" /></div> :
-              pdfsData?.files.length === 0 ? <div className="text-center p-4 text-muted-foreground text-sm">No PDFs found in this batch.</div> :
+              pdfsData?.files.length === 0 ? <div className="text-center p-4 text-muted-foreground text-sm">No PDFs found in this category.</div> :
               pdfsData?.files.map(pdf => (
-                <div 
-                  key={pdf} 
-                  onClick={() => setSelectedPdf(pdf)} 
+                <div
+                  key={pdf}
+                  onClick={() => setSelectedPdf(pdf)}
                   className={cn("flex items-center gap-2 p-2 rounded-lg cursor-pointer text-sm", selectedPdf === pdf ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted")}
                 >
                   <FileText size={16} className={selectedPdf === pdf ? "text-primary" : "text-rose-500"} />
@@ -165,8 +199,8 @@ export default function OutputArchive() {
                 </div>
               </div>
               <div className="flex-1 bg-slate-200/50 dark:bg-slate-950/50 p-2">
-                <iframe 
-                  src={`${pdfUrl}#toolbar=0`} 
+                <iframe
+                  src={`${pdfUrl}#toolbar=0`}
                   className="w-full h-full rounded border bg-white dark:bg-slate-900 shadow-sm"
                   title="PDF Viewer"
                 />

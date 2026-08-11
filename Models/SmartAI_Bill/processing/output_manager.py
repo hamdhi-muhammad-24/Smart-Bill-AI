@@ -9,6 +9,7 @@ import os
 import shutil
 from datetime import datetime
 from config import BATCH_FOLDER_SIZE, OUTPUT_BASE_DIR
+CATEGORY_FOLDERS = ["e-statement", "print", "print_and_e-statement", "other"]
 
 
 def get_output_roots():
@@ -33,9 +34,14 @@ def get_output_roots():
 
 def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None):
     """
-    Move generated PDFs from temp_pdf_dir into organised date/cycle/batch folders.
+    Move generated PDFs from temp_pdf_dir into organised date/cycle/batch/category folders.
 
-    Returns a list of batch folder paths that were created.
+    temp_pdf_dir is expected to contain PDFs inside per-category subfolders
+    (e-statement / print / print_and_e-statement / other), as written by
+    batch_processor.process_single_file(). Any stray PDFs sitting directly in
+    temp_pdf_dir (legacy callers) are treated as 'other'.
+
+    Returns a list of Batch_X folder paths that were touched.
     """
     if cycle_label == "Test_GMFs":
         if log_callback:
@@ -47,12 +53,18 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             log_callback("No PDFs to organise — temp dir does not exist")
         return []
 
-    # Collect all PDFs
-    pdfs = sorted([
-        os.path.join(temp_pdf_dir, f)
-        for f in os.listdir(temp_pdf_dir)
-        if f.lower().endswith(".pdf")
-    ])
+    # Collect (pdf_path, category) pairs
+    pdfs = []
+    for cat in CATEGORY_FOLDERS:
+        cat_dir = os.path.join(temp_pdf_dir, cat)
+        if os.path.isdir(cat_dir):
+            for f in sorted(os.listdir(cat_dir)):
+                if f.lower().endswith(".pdf"):
+                    pdfs.append((os.path.join(cat_dir, f), cat))
+    for f in sorted(os.listdir(temp_pdf_dir)):
+        full = os.path.join(temp_pdf_dir, f)
+        if os.path.isfile(full) and f.lower().endswith(".pdf"):
+            pdfs.append((full, "other"))
 
     if not pdfs:
         if log_callback:
@@ -69,56 +81,58 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
             f"(batches of {BATCH_FOLDER_SIZE})"
         )
 
+    def _batch_pdf_count(batch_dir):
+        total = 0
+        for _root, _dirs, files in os.walk(batch_dir):
+            total += sum(1 for f in files if f.lower().endswith(".pdf"))
+        return total
+
     batch_folders = []
     current_batch_num = 1
     pdf_index = 0
-    
+
     while pdf_index < len(pdfs):
         batch_dir = os.path.join(base, f"Batch_{current_batch_num}")
         os.makedirs(batch_dir, exist_ok=True)
-        
-        existing_files = [f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")]
-        existing_count = len(existing_files)
-        
-        space_left = BATCH_FOLDER_SIZE - existing_count
-        
-        if space_left <= 0:
+
+        if _batch_pdf_count(batch_dir) >= BATCH_FOLDER_SIZE:
             current_batch_num += 1
             continue
-            
+
         moved_in_this_batch = 0
         while pdf_index < len(pdfs):
-            existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
-            if existing_count >= BATCH_FOLDER_SIZE:
+            if _batch_pdf_count(batch_dir) >= BATCH_FOLDER_SIZE:
                 current_batch_num += 1
                 batch_dir = os.path.join(base, f"Batch_{current_batch_num}")
                 os.makedirs(batch_dir, exist_ok=True)
-                existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
+                continue
 
-            pdf_path = pdfs[pdf_index]
-            dest = os.path.join(batch_dir, os.path.basename(pdf_path))
-            
+            pdf_path, category = pdfs[pdf_index]
+            cat_dir = os.path.join(batch_dir, category)
+            os.makedirs(cat_dir, exist_ok=True)
+            dest = os.path.join(cat_dir, os.path.basename(pdf_path))
+
             try:
-                local_vm_batch_dir = os.path.join("./output", today, cycle_label, f"Batch_{current_batch_num}")
-                os.makedirs(local_vm_batch_dir, exist_ok=True)
-                shutil.copy2(pdf_path, os.path.join(local_vm_batch_dir, os.path.basename(pdf_path)))
+                local_vm_cat_dir = os.path.join("./output", today, cycle_label, f"Batch_{current_batch_num}", category)
+                os.makedirs(local_vm_cat_dir, exist_ok=True)
+                shutil.copy2(pdf_path, os.path.join(local_vm_cat_dir, os.path.basename(pdf_path)))
             except Exception as copy_err:
                 if log_callback:
                     log_callback(f"  Warning: failed to duplicate copy to VM local folder: {copy_err}")
-                    
+
             shutil.move(pdf_path, dest)
             moved_in_this_batch += 1
             pdf_index += 1
-            
+
         if log_callback:
             log_callback(
                 f"  Batch {current_batch_num}: "
                 f"added {moved_in_this_batch} invoices -> {batch_dir}"
             )
-            
+
         if batch_dir not in batch_folders:
             batch_folders.append(batch_dir)
-            
+
         current_batch_num += 1
 
     if log_callback:
@@ -175,22 +189,48 @@ def list_batches_for_cycle(date_str, cycle_label):
     return sorted(list(batches))
 
 
-def list_pdfs_in_batch(date_str, cycle_label, batch_name):
-    """Return list of PDF filenames in a specific batch folder across all output roots."""
+def list_categories_in_batch(date_str, cycle_label, batch_name):
+    """Return category subfolders (with pdf counts) present in a batch, across all output roots."""
+    counts = {}
+    for root in get_output_roots():
+        batch_path = os.path.join(root, date_str, cycle_label, batch_name)
+        if not os.path.exists(batch_path):
+            continue
+        for cat in CATEGORY_FOLDERS:
+            cat_path = os.path.join(batch_path, cat)
+            if os.path.isdir(cat_path):
+                n = len([f for f in os.listdir(cat_path) if f.lower().endswith(".pdf")])
+                counts[cat] = counts.get(cat, 0) + n
+    return [{"category": c, "pdf_count": counts[c]} for c in CATEGORY_FOLDERS if c in counts]
+
+
+def list_pdfs_in_batch(date_str, cycle_label, batch_name, category=None):
+    """
+    Return PDF filenames in a batch. If `category` is given, only look inside
+    that category subfolder; otherwise aggregate across all categories.
+    """
     pdfs = set()
     for root in get_output_roots():
         batch_path = os.path.join(root, date_str, cycle_label, batch_name)
-        if os.path.exists(batch_path):
-            for f in os.listdir(batch_path):
-                if f.lower().endswith(".pdf"):
-                    pdfs.add(f)
-    return sorted(list(pdfs))
+        if not os.path.exists(batch_path):
+            continue
+        categories = [category] if category else CATEGORY_FOLDERS
+        for cat in categories:
+            cat_path = os.path.join(batch_path, cat)
+            if os.path.exists(cat_path):
+                for f in os.listdir(cat_path):
+                    if f.lower().endswith(".pdf"):
+                        pdfs.add(f)
+    return sorted(pdfs)
 
 
-def get_pdf_path(date_str, cycle_label, batch_name, filename):
-    """Return absolute path to a specific PDF file across all output roots."""
+def get_pdf_path(date_str, cycle_label, batch_name, filename, category=None):
+    """Return absolute path to a PDF. Searches all category subfolders if `category` is omitted."""
+    categories = [category] if category else CATEGORY_FOLDERS
     for root in get_output_roots():
-        p = os.path.join(root, date_str, cycle_label, batch_name, filename)
-        if os.path.exists(p):
-            return p
-    return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, filename)
+        for cat in categories:
+            p = os.path.join(root, date_str, cycle_label, batch_name, cat, filename)
+            if os.path.exists(p):
+                return p
+    return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name,
+                         categories[0] if categories else "other", filename)

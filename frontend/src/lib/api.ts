@@ -317,14 +317,18 @@ export function getOutputBatches(dateStr: string, cycle: string): Promise<{ date
   return request(`/billing/output/${dateStr}/${cycle}`)
 }
 
-export function getOutputPdfs(dateStr: string, cycle: string, batch: string): Promise<{ date: string; cycle: string; batch: string; files: string[] }> {
+export function getOutputCategories(dateStr: string, cycle: string, batch: string): Promise<{ date: string; cycle: string; batch: string; categories: { category: string; pdf_count: number }[] }> {
   return request(`/billing/output/${dateStr}/${cycle}/${batch}`)
 }
 
+export function getOutputPdfs(dateStr: string, cycle: string, batch: string, category: string): Promise<{ date: string; cycle: string; batch: string; category: string; files: string[] }> {
+  return request(`/billing/output/${dateStr}/${cycle}/${batch}/${category}`)
+}
+
 // Fetch PDF securely as a Blob and create an Object URL
-export async function fetchPdfBlobUrl(dateStr: string, cycle: string, batch: string, filename: string): Promise<string> {
+export async function fetchPdfBlobUrl(dateStr: string, cycle: string, batch: string, category: string, filename: string): Promise<string> {
   const token = getToken()
-  const response = await fetch(`${BASE_URL}/billing/output/${dateStr}/${cycle}/${batch}/${filename}`, {
+  const response = await fetch(`${BASE_URL}/billing/output/${dateStr}/${cycle}/${batch}/${category}/${filename}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }

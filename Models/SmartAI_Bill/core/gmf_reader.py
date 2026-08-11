@@ -10,6 +10,7 @@ class GMFHeader:
         self.customer_type = None
         self.acc_tax_status = None
         self.acc_currency_code = None
+        self.bill_handling_code = None
         self.raw_tags = {}
         self.filename = ""
         self.file_path = ""
@@ -80,6 +81,8 @@ def read_gmf_header(file_path: str) -> GMFHeader:
                             header.acc_tax_status = value
                         elif key == 'ACCCURRENCYCODE':
                             header.acc_currency_code = value
+                        elif key == 'BILLHANDLINGCODE':  
+                            header.bill_handling_code = value
 
     return header
 
@@ -123,4 +126,4 @@ def is_red_notice(filename: str) -> bool:
     if not filename:
         return False
     name = str(filename).upper()
-    return "BILL-RED" in name or "-RED_" in name or "_RED." in name or name.endswith("-RED")
+    return "BILL-RED" in name or "-RED_" in name or "_RED." in name or name.endswith("-RED")
