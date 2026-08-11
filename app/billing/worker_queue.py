@@ -106,22 +106,8 @@ def _worker_process(worker_id):
             filename = file_path.name
             logger.info(f"Worker {worker_id} processing {filename}")
 
-            # Check for sidecar JSON metadata (offset & limit) written by generate-batch endpoint
-            meta_path = incoming_dir / f"{filename}.meta.json"
-            offset = 0
-            limit = None
-            if meta_path.exists():
-                try:
-                    with open(meta_path, "r", encoding="utf-8") as meta_f:
-                        meta_data = json.load(meta_f)
-                        offset = meta_data.get("offset", 0)
-                        limit = meta_data.get("limit")
-                    _robust_file_op(os.remove, meta_path)
-                except Exception as meta_err:
-                    logger.warning(f"Could not read meta JSON for {filename}: {meta_err}")
-            
             # Read sidecar JSON metadata if provided by generate-batch API
-            meta_file = settings.queue_incoming_dir / f"{filename}.meta.json"
+            meta_file = incoming_dir / f"{filename}.meta.json"
             meta_data = {}
             if meta_file.exists():
                 try:
@@ -132,6 +118,8 @@ def _worker_process(worker_id):
                     logger.warning(f"Could not read meta file {meta_file}: {e}")
 
             meta_upload_id = meta_data.get("upload_id")
+            offset = meta_data.get("offset", 0)
+            limit = meta_data.get("limit")
 
             # DB lookup to get cycle and template ID (with up to 3 retry attempts for delayed transaction commits)
             upload = None
@@ -272,79 +260,9 @@ def _worker_process(worker_id):
                 except Exception as create_run_err:
                     logger.warning(f"Could not create BillingRun for {filename}: {create_run_err}")
 
-            from core.gmf_splitter import split_gmf_documents
-            doc_paths = split_gmf_documents(str(working_path), offset=offset, limit=limit, original_filename=filename)
-
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            folder_name = cycle_label if cycle_label in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter") else TEMPLATE_FOLDER_MAP.get(str(template_id), str(template_id))
-            cycle_base_dir = settings.output_dir / today_str / folder_name
-            cycle_base_dir.mkdir(parents=True, exist_ok=True)
-
-            def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
-                b_num = 1
-                while True:
-                    b_dir = base_dir / f"Batch_{b_num}"
-                    b_dir.mkdir(parents=True, exist_ok=True)
-                    pdf_count = len([f for f in b_dir.iterdir() if f.is_file() and f.name.lower().endswith(".pdf")])
-                    if pdf_count < max_per_batch:
-                        return b_dir
-                    b_num += 1
-
-            # Fetch set of currently APPROVED templates in DB for strict selective filtering (Option 2)
-            approved_templates = set()
-            try:
-                with SessionLocal() as db:
-                    app_tmpls = db.query(InvoiceTemplate).filter(InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED).all()
-                    approved_templates = {t.template_code for t in app_tmpls}
-            except Exception as e:
-                logger.warning(f"Could not load approved templates: {e}")
-
-            generated_count = 0
-            for doc_p in doc_paths:
-                try:
-                    doc_res = identify_template(doc_p, original_filename=filename)
-                    doc_tid = doc_res.template_id if (doc_res and doc_res.is_supported) else template_id
-
-                    # Option 2 Strict Selective Filtering: Only generate PDFs for templates approved by Admin
-                    if approved_templates and doc_tid not in approved_templates:
-                        logger.info(f"Selective Filtering: Skipping sub-document in {filename} because template '{doc_tid}' is not yet APPROVED by Admin.")
-                        continue
-
-                    doc_parser = get_parser(doc_tid)
-                    doc_renderer_cls = get_renderer(doc_tid)
-
-                    sig = inspect.signature(doc_parser)
-                    if "offset" in sig.parameters and "limit" in sig.parameters and len(doc_paths) == 1:
-                        doc_data = doc_parser(doc_p, offset=offset, limit=limit)
-                    else:
-                        doc_data = doc_parser(doc_p)
-
-                    doc_renderer = doc_renderer_cls()
-                    doc_renderer.render(doc_data)
-
-                    if hasattr(doc_renderer, "generated_pdfs") and doc_renderer.generated_pdfs:
-                        for fname, pdf_bytes, _ in doc_renderer.generated_pdfs:
-                            target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
-                            output_pdf_path = target_dir / fname
-                            with open(output_pdf_path, "wb") as f:
-                                f.write(pdf_bytes)
-                        generated_count += len(doc_renderer.generated_pdfs)
-                    else:
-                        acc_num = str(doc_data.get("account_number", "unknown")).replace(" ", "")
-                        name_pattern = OUTPUT_PDF_NAMES.get(str(doc_tid), OUTPUT_PDF_NAME_DEFAULT)
-                        output_name = name_pattern.format(account_number=acc_num, template_id=doc_tid)
-                        target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
-                        output_pdf_path = target_dir / output_name
-                        doc_renderer.save(str(output_pdf_path))
-                        generated_count += 1
-                except Exception as doc_err:
-                    logger.error(f"Error processing sub-document in {filename}: {doc_err}")
-                finally:
-                    if doc_p != str(working_path) and os.path.exists(doc_p):
-                        try:
-                            os.remove(doc_p)
-                        except OSError:
-                            pass
+            # Organize generated PDFs into batch folders
+            from processing.output_manager import create_output_batches
+            create_output_batches(str(cycle_base_dir), cycle_label=folder_name)
             
             # Move source GMF to Processed/Staged folder and update DB
             try:

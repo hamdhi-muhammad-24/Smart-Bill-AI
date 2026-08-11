@@ -50,7 +50,7 @@ def process_single_file(args):
     source_filename = os.path.basename(file_path)
 
     try:
-        documents = split_gmf_documents(file_path, original_filename=source_filename)
+        documents = split_gmf_documents(file_path, offset=offset, limit=limit, original_filename=source_filename)
 
         if not documents:
             results.append(ProcessingResult(
@@ -142,13 +142,15 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
         os.makedirs(temp_pdf_dir, exist_ok=True)
 
         if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
-            fname, pdf_bytes, _ = renderer.generated_pdfs[0]
-            output_path = os.path.join(temp_pdf_dir, fname)
-            with open(output_path, "wb") as f:
-                f.write(pdf_bytes)
-            result.output_pdf = output_path
-            gen_count = len(getattr(renderer, "generated_pdfs", []))
-            result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
+            last_path = None
+            for fname, pdf_bytes, _ in renderer.generated_pdfs:
+                output_path = os.path.join(temp_pdf_dir, fname)
+                with open(output_path, "wb") as f:
+                    f.write(pdf_bytes)
+                last_path = output_path
+            result.output_pdf = last_path
+            gen_count = len(renderer.generated_pdfs)
+            result.output_pdf_count = max(1, gen_count)
             result.success = True
         else:
             account_number = "unknown"
