@@ -30,6 +30,8 @@ def seed_admin(session: Session) -> None:
         session.add(admin)
     else:
         log.info(f"Admin user {admin_email} already exists.")
+        admin.role = UserRole.ADMIN
+        admin.is_active = True
 
     gmf_email = "gmf@slt.lk"
     gmf = session.query(User).filter(User.email == gmf_email).first()
@@ -43,6 +45,8 @@ def seed_admin(session: Session) -> None:
         session.add(gmf)
     else:
         log.info(f"GMF Handler user {gmf_email} already exists.")
+        gmf.role = UserRole.GMF_HANDLER
+        gmf.is_active = True
 
     manager_email = "manager@slt.lk"
     manager = session.query(User).filter(User.email == manager_email).first()
@@ -56,6 +60,23 @@ def seed_admin(session: Session) -> None:
         session.add(manager)
     else:
         log.info(f"Manager user {manager_email} already exists.")
+        manager.role = UserRole.MANAGER
+        manager.is_active = True
+
+    envelope_email = "envelope@slt.lk"
+    envelope = session.query(User).filter(User.email == envelope_email).first()
+    if not envelope:
+        log.info(f"Creating default Envelope Handler user: {envelope_email}")
+        envelope = User(
+            email=envelope_email,
+            role=UserRole.ENVELOPE_HANDLER,
+            is_active=True,
+        )
+        session.add(envelope)
+    else:
+        log.info(f"Envelope Handler user {envelope_email} already exists.")
+        envelope.role = UserRole.ENVELOPE_HANDLER
+        envelope.is_active = True
         
     session.commit()
 

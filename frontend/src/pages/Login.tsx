@@ -11,13 +11,13 @@ import {
 } from 'lucide-react'
 import { useTheme } from 'next-themes'
 import { useAuth } from '../auth/AuthProvider'
-import { authMe, setToken, clearToken } from '../lib/api'
+import { setToken } from '../lib/api'
 import Brand from '../components/Brand'
 import { Button } from '@/components/ui/button'
 import { useMsal } from '@azure/msal-react'
 import { loginRequest } from '../auth/msalConfig'
 
-const ROLE_HOME = { admin: '/admin', gmf_handler: '/gmf-handler', envelope_handler: '/envelope-handler', manager: '/manager', customer: '/app' } as const
+// Remove ROLE_HOME
 
 export default function Login() {
   const { session, isChecking, login } = useAuth()
@@ -28,38 +28,24 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
 
   if (isChecking) return null
-  if (session) return <Navigate to={ROLE_HOME[session.role]} replace />
+  if (session) {
+    if (session.isNewUser) return <Navigate to="/request-access" replace />
+    return <Navigate to="/role-select" replace />
+  }
 
   async function handleMicrosoftLogin() {
     setError(null)
     setLoading(true)
     try {
-      const response = await instance.loginPopup(loginRequest)
-      if (response && response.accessToken) {
-        setToken(response.accessToken)
-        const me = await authMe()
-        const r = me.role.toUpperCase()
-
-        let role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'customer' = 'customer'
-        if (r === 'ADMIN') role = 'admin'
-        else if (r === 'MANAGER') role = 'manager'
-        else if (r === 'GMF_HANDLER' || r === 'ADMIN1') role = 'gmf_handler'
-        else if (r === 'ENVELOPE_HANDLER') role = 'envelope_handler'
-
-        if (role === 'customer') {
-          clearToken()
-          setError('These credentials are not authorised for staff access.')
-          return
-        }
-
-        const nextSession = { role }
-        login(nextSession)
-        navigate(ROLE_HOME[role], { replace: true })
-      }
+      // Use redirect (not popup) so auth happens in the main window.
+      // After redirect, MSAL returns to the app and AuthProvider handles the token.
+      sessionStorage.setItem('msal-post-login', 'pending')
+      await instance.loginRedirect(loginRequest)
+      // loginRedirect navigates away — code below never runs
     } catch (err: any) {
-      console.error("MSAL Login error:", err)
+      console.error('MSAL Login error:', err)
+      sessionStorage.removeItem('msal-post-login')
       setError(err?.message || 'Authentication failed or was cancelled.')
-    } finally {
       setLoading(false)
     }
   }
@@ -67,8 +53,16 @@ export default function Login() {
   function handleDevLogin(targetRole: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager') {
     const devToken = `dev-${targetRole}-token`
     setToken(devToken)
-    login({ role: targetRole })
-    navigate(ROLE_HOME[targetRole], { replace: true })
+    // For dev, grant all roles to admin, otherwise just the target role
+    const devRoles = targetRole === 'admin'
+      ? ['ADMIN', 'GMF_HANDLER', 'ENVELOPE_HANDLER', 'MANAGER']
+      : [targetRole.toUpperCase().replace('GMF_HANDLER', 'GMF_HANDLER')]
+    login({
+      role: targetRole,
+      roles: devRoles,
+      email: `${targetRole}@slt.lk`,
+    })
+    navigate('/role-select', { replace: true })
   }
 
   return (

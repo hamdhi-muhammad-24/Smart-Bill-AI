@@ -1214,6 +1214,7 @@ def update_template_status(
     target_ids = [t.strip() for t in template_id.split(",") if t.strip()]
     if not target_ids:
         target_ids = [template_id]
+    target_ids_set = set(target_ids)
 
     for t_code in target_ids:
         t = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == t_code).first()
@@ -1622,9 +1623,10 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     registered_count += 1
                     continue
 
-                from core.gmf_splitter import count_documents_with_breakdown
-                total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
+            from core.gmf_splitter import count_documents_with_breakdown
+            total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
 
+            if existing:
                 existing.file_path = str(final_path)
                 existing.status = final_status
                 existing.error_message = None

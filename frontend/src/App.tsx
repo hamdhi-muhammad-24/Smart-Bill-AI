@@ -6,6 +6,8 @@ import Admin1Layout from './components/Admin1Layout'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
 import PublicPortal from './pages/PublicPortal'
+import RoleSelector from './pages/RoleSelector'
+import RequestAccess from './pages/RequestAccess'
 import Dashboard from './pages/admin/Dashboard'
 import GmfMonitor from './pages/admin/GmfMonitor'
 import InvoicePreview from './pages/admin/InvoicePreview'
@@ -22,6 +24,21 @@ import EnvelopeDashboard from './pages/envelope/EnvelopeDashboard'
 import EnvelopeManager from './pages/envelope/EnvelopeManager'
 import SavedArtworkGallery from './pages/envelope/SavedArtworkGallery'
 import { ThemeProvider } from './components/ThemeProvider'
+import { useAuth } from './auth/AuthProvider'
+import { Navigate } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
+
+/** Guard: must have a valid Microsoft token (session exists), new users included */
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { session, isChecking } = useAuth()
+  if (isChecking) return (
+    <div className="flex h-svh items-center justify-center bg-background">
+      <Loader2 className="size-8 animate-spin text-primary" />
+    </div>
+  )
+  if (!session) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
 
 export default function App() {
   return (
@@ -29,6 +46,16 @@ export default function App() {
       <Routes>
         <Route index element={<PublicPortal />} />
         <Route path="/login" element={<Login />} />
+
+        {/* Role selector — shown after Microsoft login, requires auth token */}
+        <Route path="/role-select" element={
+          <RequireAuth><RoleSelector /></RequireAuth>
+        } />
+
+        {/* Request access — for new users not yet in DB */}
+        <Route path="/request-access" element={
+          <RequireAuth><RequestAccess /></RequireAuth>
+        } />
 
         {/* System Administration Console */}
         <Route element={<RequireRole role="admin" />}>

@@ -27,6 +27,11 @@ class UserRole(enum.Enum):
     MANAGER = "MANAGER"
     CUSTOMER = "CUSTOMER"
 
+class PermissionRequestStatus(enum.Enum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
 class TemplateCategory(enum.Enum):
     CLASSIC = "CLASSIC"
     MODERN = "MODERN"
@@ -96,6 +101,8 @@ class User(Base):
     role          = Column(Enum(UserRole, name="user_role"), nullable=False, default=UserRole.CUSTOMER)
     is_active     = Column(Boolean, nullable=False, default=True)
     created_at    = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    role_grants   = relationship("UserRoleGrant", foreign_keys="UserRoleGrant.user_id", back_populates="user", cascade="all, delete-orphan")
 
 class InvoiceTemplate(Base):
     __tablename__ = "invoice_templates"
@@ -350,3 +357,43 @@ class EnvelopeArtwork(Base):
     replaced_at           = Column(DateTime(timezone=True), nullable=True)
 
     template = relationship("EnvelopeTemplate", back_populates="artworks")
+
+
+# ── Access Control Models ─────────────────────────────────────────────────
+
+class UserRoleGrant(Base):
+    """Junction table: a user can hold multiple portal roles."""
+    __tablename__ = "user_role_grants"
+    __table_args__ = (
+        UniqueConstraint("user_id", "role", name="uq_user_role_grant"),
+    )
+
+    id         = Column(BigInteger, Identity(always=True), primary_key=True)
+    user_id    = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role       = Column(Enum(UserRole, name="user_role"), nullable=False)
+    granted_by = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    granted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user       = relationship("User", foreign_keys=[user_id], back_populates="role_grants")
+    granter    = relationship("User", foreign_keys=[granted_by])
+
+
+class PermissionRequest(Base):
+    """A request by a user (new or existing) to gain access to one or more portal roles."""
+    __tablename__ = "permission_requests"
+
+    id           = Column(BigInteger, Identity(always=True), primary_key=True)
+    email        = Column(Text, nullable=False)        # requester email (from Microsoft)
+    requested_roles = Column(Text, nullable=False)     # JSON array of role names
+    reason       = Column(Text, nullable=True)
+    status       = Column(
+        Enum(PermissionRequestStatus, name="permission_request_status"),
+        nullable=False,
+        default=PermissionRequestStatus.PENDING,
+    )
+    reviewed_by  = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at  = Column(DateTime(timezone=True), nullable=True)
+    rejection_note = Column(Text, nullable=True)
+    created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    reviewer = relationship("User", foreign_keys=[reviewed_by])

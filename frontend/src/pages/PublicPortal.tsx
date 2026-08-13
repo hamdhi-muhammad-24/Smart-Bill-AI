@@ -126,13 +126,9 @@ export default function PublicPortal() {
   const { theme, setTheme } = useTheme()
   const signInPath = !session
     ? '/login'
-    : session.role === 'admin'
-    ? '/admin'
-    : session.role === 'manager'
-    ? '/manager'
-    : session.role === 'gmf_handler'
-    ? '/gmf-handler'
-    : '/app'
+    : session.isNewUser
+    ? '/request-access'
+    : '/role-select'
 
   function resolveActionPath(action: (typeof actionCards)[number]): string {
     if (action.path === 'signin') return signInPath

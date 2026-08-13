@@ -44,7 +44,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401) {
     clearToken()
     localStorage.removeItem('slt-auth')
-    window.location.href = '/login'
+    
+    // TEMPORARY DEBUGGING: Show a red screen instead of redirecting to /login
+    document.body.innerHTML = `
+      <div style="padding: 40px; text-align: center; font-family: sans-serif;">
+        <h1 style="color: red;">401 Unauthorized Error Caught!</h1>
+        <p>The backend rejected a request to: <strong>${path}</strong></p>
+        <p>This would normally cause a silent redirect to /login.</p>
+        <button onclick="window.location.href='/login'" style="padding: 10px 20px; margin-top: 20px;">Go to Login</button>
+      </div>
+    `
+    
     throw new ApiError(401, 'Session expired - please log in again.')
   }
 
@@ -71,7 +81,9 @@ export interface LoginResponse {
 export interface MeResponse {
   id: number
   email: string
-  role: 'ADMIN' | 'GMF_HANDLER' | 'MANAGER' | 'CUSTOMER' | 'ADMIN1'
+  role: 'ADMIN' | 'GMF_HANDLER' | 'MANAGER' | 'CUSTOMER' | 'ADMIN1' | 'ENVELOPE_HANDLER'
+  roles: string[]          // all granted portal roles
+  is_new_user: boolean     // true if email not found in DB
   customer_id: number | null
 }
 
@@ -85,7 +97,8 @@ export function authMe(): Promise<MeResponse> {
 export interface UserOut {
   id: number
   email: string
-  role: 'ADMIN' | 'GMF_HANDLER' | 'MANAGER' | 'CUSTOMER'
+  role: 'ADMIN' | 'GMF_HANDLER' | 'MANAGER' | 'CUSTOMER' | 'ENVELOPE_HANDLER'
+  roles: string[]           // all granted portal roles
   is_active: boolean
   created_at?: string
 }
@@ -94,7 +107,7 @@ export function getUsers(): Promise<UserOut[]> {
   return request('/users')
 }
 
-export function createUser(data: { email: string; role: string; is_active?: boolean }): Promise<UserOut> {
+export function createUser(data: { email: string; role: string; roles?: string[]; is_active?: boolean }): Promise<UserOut> {
   return request('/users', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -104,6 +117,61 @@ export function createUser(data: { email: string; role: string; is_active?: bool
 export function deleteUser(id: number): Promise<void> {
   return request(`/users/${id}`, {
     method: 'DELETE',
+  })
+}
+
+export function updateUserRoles(userId: number, roles: string[]): Promise<UserOut> {
+  return request(`/users/${userId}/roles`, {
+    method: 'PATCH',
+    body: JSON.stringify({ roles }),
+  })
+}
+
+export function getUserActivity(userId: number): Promise<{
+  user_id: number
+  email: string
+  role_grants: { role: string; granted_at: string }[]
+  approved_requests: { requested_roles: string[]; reason: string; approved_at: string }[]
+}> {
+  return request(`/users/${userId}/activity`)
+}
+
+// --- Permission Requests ---
+
+export interface PermissionRequestOut {
+  id: number
+  email: string
+  requested_roles: string[]
+  reason: string | null
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  reviewed_at: string | null
+  rejection_note: string | null
+  created_at: string
+}
+
+export function requestAccess(data: {
+  email: string
+  requested_roles: string[]
+  reason?: string
+}): Promise<{ id: number; message: string }> {
+  return request('/users/request-access', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function getPermissionRequests(): Promise<PermissionRequestOut[]> {
+  return request('/users/permission-requests')
+}
+
+export function approvePermissionRequest(id: number): Promise<PermissionRequestOut> {
+  return request(`/users/permission-requests/${id}/approve`, { method: 'PATCH' })
+}
+
+export function rejectPermissionRequest(id: number, note?: string): Promise<PermissionRequestOut> {
+  return request(`/users/permission-requests/${id}/reject`, {
+    method: 'PATCH',
+    body: JSON.stringify({ note: note || null }),
   })
 }
 
