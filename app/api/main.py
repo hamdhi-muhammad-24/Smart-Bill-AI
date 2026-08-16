@@ -6,7 +6,12 @@ from app.api.errors import register_exception_handlers
 from app.api.routers import billing, health, users, envelope
 from app.auth.router import router as auth_router
 from app.billing_scheduler import start_scheduler
+import logging
 
+# Suppress noisy warnings from fastapi_azure_auth when it fails to validate a Graph API token
+logging.getLogger("fastapi_azure_auth").setLevel(logging.ERROR)
+# Suppress noisy uvicorn access logs (200 OK) from constant frontend polling
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 def create_app() -> FastAPI:
     application = FastAPI(

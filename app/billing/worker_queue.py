@@ -6,6 +6,7 @@ import multiprocessing
 import sys
 import json
 import inspect
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -15,10 +16,11 @@ if _smartai_path not in sys.path:
     sys.path.insert(0, _smartai_path)
 
 from app.db.base import SessionLocal
-from app.db.models import GmfUpload, GmfUploadStatus
+from app.db.models import GmfUpload, GmfUploadStatus, InvoiceTemplate, TemplateApprovalStatus, BillingRun, BillingRunFailure, RunStatus
 from app.core.config import settings
 from processing.output_manager import create_output_batches
 from config import OUTPUT_PDF_NAMES, OUTPUT_PDF_NAME_DEFAULT
+from sqlalchemy import update as sql_update, or_
 
 logger = logging.getLogger("worker_queue")
 logger.setLevel(logging.INFO)
@@ -54,6 +56,242 @@ def _robust_file_op(func, *args, max_retries=5, delay=0.5):
             time.sleep(delay)
     raise last_err
 
+def _get_approved_templates():
+    """Fetch set of currently APPROVED templates from DB."""
+    approved_templates = set()
+    try:
+        with SessionLocal() as db:
+            app_tmpls = db.query(InvoiceTemplate).filter(
+                InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED
+            ).all()
+            approved_templates = {t.template_code for t in app_tmpls}
+    except Exception as e:
+        logger.warning(f"Could not load approved templates: {e}")
+    return approved_templates
+
+def _get_active_templates():
+    """Get active templates from DB including system defaults unless rejected."""
+    with SessionLocal() as db:
+        db_templates = db.query(InvoiceTemplate).filter(
+            or_(InvoiceTemplate.is_active == True, 
+                InvoiceTemplate.approval_status != TemplateApprovalStatus.REJECTED)
+        ).all()
+        active_templates = set(t.template_code for t in db_templates)
+        # Include standard system templates by default unless explicitly rejected
+        for sys_tid in ("lod", "vat_confirmation", "nonvat_home", "nonvat_enterprise", "vat_enterprise", "vat_home"):
+            t_obj = next((t for t in db_templates if t.template_code == sys_tid), None)
+            if not t_obj or t_obj.approval_status != TemplateApprovalStatus.REJECTED:
+                active_templates.add(sys_tid)
+    return active_templates
+
+def _resolve_cycle_folder(upload):
+    """Resolve cycle folder name from upload record."""
+    cycle_num = getattr(upload, "cycle_number", None)
+    f_type = str(getattr(upload, "folder_type", None) or "").strip()
+
+    if cycle_num and isinstance(cycle_num, int) and 1 <= cycle_num <= 4:
+        return f"Cycle_{cycle_num}"
+    elif f_type in ("LOD", "VAT_Confirmation", "Test_GMFs"):
+        return f_type
+    elif "cycle" in f_type.lower():
+        import re
+        match = re.search(r'(\d+)', f_type)
+        return f"Cycle_{match.group(1)}" if match else f_type.replace(" ", "_")
+    else:
+        return f_type.replace(" ", "_") if f_type else "Cycle_1"
+
+def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
+    """Get next available batch folder with space for more PDFs."""
+    b_num = 1
+    while True:
+        b_dir = base_dir / f"Batch_{b_num}"
+        b_dir.mkdir(parents=True, exist_ok=True)
+        pdf_count = len([f for f in b_dir.iterdir() if f.is_file() and f.name.lower().endswith(".pdf")])
+        if pdf_count < max_per_batch:
+            return b_dir
+        b_num += 1
+
+def _read_metadata_file(incoming_dir, filename):
+    """Read and parse metadata JSON file if it exists."""
+    meta_file = incoming_dir / f"{filename}.meta.json"
+    meta_data = {}
+    if meta_file.exists():
+        try:
+            with open(meta_file, "r", encoding="utf-8") as mf:
+                meta_data = json.load(mf)
+            _robust_file_op(meta_file.unlink)
+        except Exception as e:
+            logger.warning(f"Could not read meta file {meta_file}: {e}")
+    return meta_data
+
+def _lookup_upload_record(filename, meta_upload_id=None, run_id=None):
+    """Look up GmfUpload record with retries for delayed transaction commits."""
+    upload = None
+    for retry in range(3):
+        with SessionLocal() as db:
+            if meta_upload_id:
+                upload = db.query(GmfUpload).filter(GmfUpload.id == meta_upload_id).first()
+            if not upload:
+                query = db.query(GmfUpload).filter(
+                    GmfUpload.filename == filename,
+                    GmfUpload.folder_type != "Test_GMFs"
+                )
+                if run_id:
+                    query = query.filter(GmfUpload.billing_run_id == run_id)
+                upload = query.first()
+        if upload:
+            break
+        time.sleep(1)
+    return upload
+
+def _update_billing_run(db, run_id, generated_count, cycle_base_dir=None):
+    """Update BillingRun with generated count and check completion status."""
+    if not run_id:
+        return
+    
+    db.execute(
+        sql_update(BillingRun)
+        .where(BillingRun.id == run_id)
+        .values(succeeded=BillingRun.succeeded + generated_count)
+    )
+    db.flush()
+    
+    run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
+    if run:
+        if cycle_base_dir:
+            run.output_path = str(cycle_base_dir)
+        if run.succeeded + run.failed >= run.total_accounts:
+            run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
+            run.finished_at = datetime.now()
+
+def _create_billing_run(db, upload, filename, offset, limit):
+    """Create a new BillingRun for the upload."""
+    tot_acc = (upload.total_records_count or 1) - (offset or 0)
+    if limit:
+        tot_acc = min(tot_acc, limit)
+    tot_acc = max(1, tot_acc)
+    
+    run = BillingRun(
+        batch_name=f"Auto Gen {filename} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        cycle_number=upload.cycle_number,
+        period_start=datetime.now().date(),
+        period_end=datetime.now().date(),
+        status=RunStatus.RUNNING,
+        total_accounts=tot_acc,
+        succeeded=0,
+        failed=0,
+        started_at=datetime.now()
+    )
+    db.add(run)
+    db.flush()
+    upload.billing_run_id = run.id
+    db.commit()
+    return run.id
+
+def _handle_failed_upload(filename, working_path, upload_id, run_id, error_message):
+    """Handle failed upload by moving to Failed folder and updating DB."""
+    try:
+        # Get cycle_label from DB
+        cycle_label = "unknown"
+        local_run_id = run_id
+        
+        with SessionLocal() as db:
+            upload = None
+            if upload_id:
+                upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+            if not upload and local_run_id:
+                upload = db.query(GmfUpload).filter(
+                    GmfUpload.filename == filename,
+                    GmfUpload.billing_run_id == local_run_id,
+                    GmfUpload.folder_type != "Test_GMFs"
+                ).first()
+            if not upload:
+                upload = db.query(GmfUpload).filter(
+                    GmfUpload.filename == filename,
+                    GmfUpload.status == GmfUploadStatus.APPROVED,
+                    GmfUpload.folder_type != "Test_GMFs"
+                ).first()
+            if upload:
+                cycle_label = upload.folder_type
+                local_run_id = upload.billing_run_id
+                upload_id = upload.id
+                
+        failed_dest = settings.gmf_drive_path / "Failed" / (cycle_label or "unknown")
+        failed_dest.mkdir(parents=True, exist_ok=True)
+        dest_file_path = failed_dest / filename
+        if dest_file_path.exists():
+            try:
+                _robust_file_op(dest_file_path.unlink)
+            except Exception as rm_err:
+                logger.warning(f"Could not remove existing failed GMF file {dest_file_path}: {rm_err}")
+        
+        # Move to failed queue
+        if os.path.exists(working_path):
+            _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
+        
+        # Delete from remote Google Drive Cycle folder
+        try:
+            if shutil.which("rclone"):
+                subprocess.Popen(["rclone", "deletefile", f"gdrive:SLT_GMF_Uploads/{cycle_label}/{filename}"])
+            else:
+                logger.info("rclone not available in container; host sync service will clean remote GMF %s", filename)
+        except Exception as delete_err:
+            logger.error(f"Failed to launch rclone delete for {filename}: {delete_err}")
+            
+        with SessionLocal() as db:
+            upload = None
+            if upload_id:
+                upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+            if not upload and local_run_id:
+                upload = db.query(GmfUpload).filter(
+                    GmfUpload.filename == filename,
+                    GmfUpload.billing_run_id == local_run_id,
+                    GmfUpload.folder_type != "Test_GMFs"
+                ).first()
+            if not upload:
+                upload = db.query(GmfUpload).filter(
+                    GmfUpload.filename == filename,
+                    GmfUpload.status == GmfUploadStatus.APPROVED,
+                    GmfUpload.folder_type != "Test_GMFs"
+                ).first()
+                
+            if upload:
+                upload.status = GmfUploadStatus.FAILED
+                upload.error_message = error_message
+                upload.file_path = str(dest_file_path)
+                
+                if upload.billing_run_id:
+                    db.execute(
+                        sql_update(BillingRun)
+                        .where(BillingRun.id == upload.billing_run_id)
+                        .values(failed=BillingRun.failed + 1)
+                    )
+                    db.add(BillingRunFailure(
+                        billing_run_id=upload.billing_run_id,
+                        account_number=filename,
+                        error_message=error_message
+                    ))
+                    db.flush()
+                    
+                    run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
+                    if run and run.succeeded + run.failed >= run.total_accounts:
+                        run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
+                        run.finished_at = datetime.now()
+            db.commit()
+    except Exception as inner_err:
+        logger.error(f"Failed to record failure details: {inner_err}")
+
+def _delete_from_remote(cycle_label, filename):
+    """Delete file from remote Google Drive using rclone."""
+    try:
+        import subprocess
+        if shutil.which("rclone"):
+            subprocess.Popen(["rclone", "deletefile", f"gdrive:SLT_GMF_Uploads/{cycle_label}/{filename}"])
+        else:
+            logger.info("rclone not available in container; host sync service will clean remote GMF %s", filename)
+    except Exception as delete_err:
+        logger.error(f"Failed to launch rclone delete for {filename}: {delete_err}")
+
 def _worker_process(worker_id):
     """
     Parallel worker process that generates PDFs from GMFs in the incoming queue.
@@ -61,6 +299,8 @@ def _worker_process(worker_id):
     # Imports must be inside the process to avoid multiprocessing pickling issues
     from core.template_identifier import identify_template
     from templates.registry import get_renderer, get_parser
+    from core.gmf_splitter import split_gmf_documents, count_documents
+    from processing.batch_processor import process_single_file
     
     logger.info(f"Worker {worker_id} started")
     COMPLETED_TEMP.mkdir(parents=True, exist_ok=True)
@@ -71,7 +311,6 @@ def _worker_process(worker_id):
         upload_id = None
         run_id = None
         try:
-            # Throttle 5 per sec = 0.2s sleep per iteration minimum
             start_time = time.time()
             
             incoming_dir = settings.queue_incoming_dir
@@ -99,55 +338,20 @@ def _worker_process(worker_id):
             try:
                 _robust_file_op(os.rename, file_path, working_path, max_retries=3, delay=0.2)
             except OSError:
-                # Another worker grabbed it, or it's persistently locked
                 time.sleep(0.1)
                 continue
 
             filename = file_path.name
             logger.info(f"Worker {worker_id} processing {filename}")
 
-            # Check for sidecar JSON metadata (offset & limit) written by generate-batch endpoint
-            meta_path = incoming_dir / f"{filename}.meta.json"
-            offset = 0
-            limit = None
-            if meta_path.exists():
-                try:
-                    with open(meta_path, "r", encoding="utf-8") as meta_f:
-                        meta_data = json.load(meta_f)
-                        offset = meta_data.get("offset", 0)
-                        limit = meta_data.get("limit")
-                    _robust_file_op(os.remove, meta_path)
-                except Exception as meta_err:
-                    logger.warning(f"Could not read meta JSON for {filename}: {meta_err}")
-            
-            # Read sidecar JSON metadata if provided by generate-batch API
-            meta_file = settings.queue_incoming_dir / f"{filename}.meta.json"
-            meta_data = {}
-            if meta_file.exists():
-                try:
-                    with open(meta_file, "r", encoding="utf-8") as mf:
-                        meta_data = json.load(mf)
-                    _robust_file_op(meta_file.unlink)
-                except Exception as e:
-                    logger.warning(f"Could not read meta file {meta_file}: {e}")
-
+            # Read metadata file
+            meta_data = _read_metadata_file(incoming_dir, filename)
             meta_upload_id = meta_data.get("upload_id")
+            offset = meta_data.get("offset", 0)
+            limit = meta_data.get("limit")
 
-            # DB lookup to get cycle and template ID (with up to 3 retry attempts for delayed transaction commits)
-            upload = None
-            for retry in range(3):
-                with SessionLocal() as db:
-                    if meta_upload_id:
-                        upload = db.query(GmfUpload).filter(GmfUpload.id == meta_upload_id).first()
-                    if not upload:
-                        upload = db.query(GmfUpload).filter(
-                            GmfUpload.filename == filename,
-                            GmfUpload.folder_type != "Test_GMFs"
-                        ).first()
-                if upload:
-                    break
-                time.sleep(1)
-                
+            # DB lookup
+            upload = _lookup_upload_record(filename, meta_upload_id)
             if not upload:
                 logger.warning(f"No DB record for {filename} after retries, deleting orphan file")
                 if os.path.exists(working_path):
@@ -162,9 +366,6 @@ def _worker_process(worker_id):
             template_id = upload.template_detected
             run_id = upload.billing_run_id or meta_data.get("billing_run_id")
 
-            offset = meta_data.get("offset", 0)
-            limit = meta_data.get("limit")
-                
             if not template_id:
                 logger.error(f"Cannot process {filename}: template unknown")
                 try:
@@ -182,14 +383,16 @@ def _worker_process(worker_id):
                         upload.error_message = "Template unknown"
                         
                         if upload.billing_run_id:
-                            from app.db.models import BillingRun, BillingRunFailure, RunStatus
-                            from sqlalchemy import update as sql_update
                             db.execute(
                                 sql_update(BillingRun)
                                 .where(BillingRun.id == upload.billing_run_id)
                                 .values(failed=BillingRun.failed + 1)
                             )
-                            db.add(BillingRunFailure(billing_run_id=upload.billing_run_id, account_number=filename, error_message="Template unknown"))
+                            db.add(BillingRunFailure(
+                                billing_run_id=upload.billing_run_id, 
+                                account_number=filename, 
+                                error_message="Template unknown"
+                            ))
                             db.flush()
                             run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
                             if run and run.succeeded + run.failed >= run.total_accounts:
@@ -198,153 +401,42 @@ def _worker_process(worker_id):
                         db.commit()
                 continue
                 
-            # Resolve cycle folder name for Output Archive (Cycle_1, Cycle_2, etc.)
-            cycle_num = getattr(upload, "cycle_number", None)
-            f_type = str(getattr(upload, "folder_type", None) or "").strip()
-
-            if cycle_num and isinstance(cycle_num, int) and 1 <= cycle_num <= 4:
-                folder_name = f"Cycle_{cycle_num}"
-            elif f_type in ("LOD", "VAT_Confirmation", "Test_GMFs"):
-                folder_name = f_type
-            elif "cycle" in f_type.lower():
-                import re
-                match = re.search(r'(\d+)', f_type)
-                folder_name = f"Cycle_{match.group(1)}" if match else f_type.replace(" ", "_")
-            else:
-                folder_name = f_type.replace(" ", "_") if f_type else "Cycle_1"
-
+            # Resolve cycle folder name
+            folder_name = _resolve_cycle_folder(upload)
             cycle_label = folder_name
 
-            # Query active approved templates
-            with SessionLocal() as db:
-                from app.db.models import InvoiceTemplate, TemplateApprovalStatus
-                from sqlalchemy import or_
-                db_templates = db.query(InvoiceTemplate).filter(
-                    or_(InvoiceTemplate.is_active == True, InvoiceTemplate.approval_status != TemplateApprovalStatus.REJECTED)
-                ).all()
-                active_templates = set(t.template_code for t in db_templates)
-                # Include standard system templates by default unless explicitly rejected
-                for sys_tid in ("lod", "vat_confirmation", "nonvat_home", "nonvat_enterprise", "vat_enterprise", "vat_home"):
-                    t_obj = next((t for t in db_templates if t.template_code == sys_tid), None)
-                    if not t_obj or t_obj.approval_status != TemplateApprovalStatus.REJECTED:
-                        active_templates.add(sys_tid)
+            # Get active and approved templates
+            active_templates = _get_active_templates()
+            approved_templates = _get_approved_templates()
 
-            # Construct output folder: output/<YYYY-MM-DD>/<Cycle_N|LOD|VAT_Confirmation>/Batch_1/
+            # Setup output directory
             today_str = datetime.now().strftime("%Y-%m-%d")
-            cycle_base_dir = settings.output_dir / today_str / folder_name / "Batch_1"
+            cycle_base_dir = settings.output_dir / today_str / folder_name
             cycle_base_dir.mkdir(parents=True, exist_ok=True)
 
-            from processing.batch_processor import process_single_file
-            args = (str(working_path), str(cycle_base_dir), 1, False, active_templates, offset, limit)
-            results = process_single_file(args)
-
-            generated_count = sum(getattr(r, "output_pdf_count", 1) for r in results if r.success)
-            total_count = len(results)
-            
+            # Create BillingRun if needed
             if not run_id:
                 try:
                     with SessionLocal() as db:
                         u_rec = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
                         if u_rec:
-                            tot_acc = (u_rec.total_records_count or 1) - (offset or 0)
-                            if limit:
-                                tot_acc = min(tot_acc, limit)
-                            tot_acc = max(1, tot_acc)
-
-                            from app.db.models import BillingRun, RunStatus
-                            from datetime import date
-                            run = BillingRun(
-                                batch_name=f"Auto Gen {filename} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                                cycle_number=u_rec.cycle_number,
-                                period_start=date.today(),
-                                period_end=date.today(),
-                                status=RunStatus.RUNNING,
-                                total_accounts=tot_acc,
-                                succeeded=0,
-                                failed=0,
-                                started_at=datetime.now()
-                            )
-                            db.add(run)
-                            db.flush()
-                            u_rec.billing_run_id = run.id
-                            run_id = run.id
-                            db.commit()
+                            run_id = _create_billing_run(db, u_rec, filename, offset, limit)
                 except Exception as create_run_err:
                     logger.warning(f"Could not create BillingRun for {filename}: {create_run_err}")
 
-            from core.gmf_splitter import split_gmf_documents
-            doc_paths = split_gmf_documents(str(working_path), offset=offset, limit=limit)
-
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            folder_name = cycle_label if cycle_label in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter") else TEMPLATE_FOLDER_MAP.get(str(template_id), str(template_id))
-            cycle_base_dir = settings.output_dir / today_str / folder_name
-            cycle_base_dir.mkdir(parents=True, exist_ok=True)
-
-            def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
-                b_num = 1
-                while True:
-                    b_dir = base_dir / f"Batch_{b_num}"
-                    b_dir.mkdir(parents=True, exist_ok=True)
-                    pdf_count = len([f for f in b_dir.iterdir() if f.is_file() and f.name.lower().endswith(".pdf")])
-                    if pdf_count < max_per_batch:
-                        return b_dir
-                    b_num += 1
-
-            # Fetch set of currently APPROVED templates in DB for strict selective filtering (Option 2)
-            approved_templates = set()
-            try:
-                with SessionLocal() as db:
-                    app_tmpls = db.query(InvoiceTemplate).filter(InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED).all()
-                    approved_templates = {t.template_code for t in app_tmpls}
-            except Exception as e:
-                logger.warning(f"Could not load approved templates: {e}")
-
-            generated_count = 0
-            for doc_p in doc_paths:
-                try:
-                    doc_res = identify_template(doc_p)
-                    doc_tid = doc_res.template_id if (doc_res and doc_res.is_supported) else template_id
-
-                    # Option 2 Strict Selective Filtering: Only generate PDFs for templates approved by Admin
-                    if approved_templates and doc_tid not in approved_templates:
-                        logger.info(f"Selective Filtering: Skipping sub-document in {filename} because template '{doc_tid}' is not yet APPROVED by Admin.")
-                        continue
-
-                    doc_parser = get_parser(doc_tid)
-                    doc_renderer_cls = get_renderer(doc_tid)
-
-                    sig = inspect.signature(doc_parser)
-                    if "offset" in sig.parameters and "limit" in sig.parameters and len(doc_paths) == 1:
-                        doc_data = doc_parser(doc_p, offset=offset, limit=limit)
-                    else:
-                        doc_data = doc_parser(doc_p)
-
-                    doc_renderer = doc_renderer_cls()
-                    doc_renderer.render(doc_data)
-
-                    if hasattr(doc_renderer, "generated_pdfs") and doc_renderer.generated_pdfs:
-                        for fname, pdf_bytes, _ in doc_renderer.generated_pdfs:
-                            target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
-                            output_pdf_path = target_dir / fname
-                            with open(output_pdf_path, "wb") as f:
-                                f.write(pdf_bytes)
-                        generated_count += len(doc_renderer.generated_pdfs)
-                    else:
-                        acc_num = str(doc_data.get("account_number", "unknown")).replace(" ", "")
-                        name_pattern = OUTPUT_PDF_NAMES.get(str(doc_tid), OUTPUT_PDF_NAME_DEFAULT)
-                        output_name = name_pattern.format(account_number=acc_num, template_id=doc_tid)
-                        target_dir = _get_batch_folder(cycle_base_dir, max_per_batch=10)
-                        output_pdf_path = target_dir / output_name
-                        doc_renderer.save(str(output_pdf_path))
-                        generated_count += 1
-                except Exception as doc_err:
-                    logger.error(f"Error processing sub-document in {filename}: {doc_err}")
-                finally:
-                    if doc_p != str(working_path) and os.path.exists(doc_p):
-                        try:
-                            os.remove(doc_p)
-                        except OSError:
-                            pass
+            # Process the GMF file
+            import tempfile
+            import shutil
+            with tempfile.TemporaryDirectory(prefix="gmf_pdf_gen_") as temp_pdf_dir:
+                args = (str(working_path), temp_pdf_dir, 1, False, active_templates, offset, limit)
+                results = process_single_file(args)
+                
+                # Copy generated files to output folder
+                for file_path in Path(temp_pdf_dir).glob("*.pdf"):
+                    shutil.copy2(file_path, cycle_base_dir / file_path.name)
+                
+                generated_count = sum(getattr(r, "output_pdf_count", 1) for r in results if r.success)
+                total_count = len(results)
             
             # Move source GMF to Processed/Staged folder and update DB
             try:
@@ -354,7 +446,6 @@ def _worker_process(worker_id):
                         upload.processed_records_count = (upload.processed_records_count or 0) + generated_count
                         if not upload.total_records_count or upload.total_records_count <= 1:
                             try:
-                                from core.gmf_splitter import count_documents
                                 real_total = count_documents(str(working_path))
                                 upload.total_records_count = max(real_total, total_count)
                             except Exception:
@@ -365,10 +456,16 @@ def _worker_process(worker_id):
                             processed_dest.mkdir(parents=True, exist_ok=True)
                             dest_file_path = processed_dest / filename
                             if dest_file_path.exists():
-                                _robust_file_op(dest_file_path.unlink)
+                                try:
+                                    dest_file_path.unlink()
+                                except Exception:
+                                    pass
                             if os.path.exists(working_path):
-                                _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
-                                upload.file_path = str(dest_file_path)
+                                try:
+                                    shutil.move(str(working_path), str(dest_file_path))
+                                    upload.file_path = str(dest_file_path)
+                                except Exception as mv_err:
+                                    logger.warning(f"Could not move file {working_path} to {dest_file_path}: {mv_err}")
 
                             upload.status = GmfUploadStatus.COMPLETED
                             upload.billing_run_id = None
@@ -378,9 +475,15 @@ def _worker_process(worker_id):
                             dest_file_path = staged_dest / filename
                             if str(working_path) != str(dest_file_path):
                                 if dest_file_path.exists():
-                                    _robust_file_op(dest_file_path.unlink)
+                                    try:
+                                        dest_file_path.unlink()
+                                    except Exception:
+                                        pass
                                 if os.path.exists(working_path):
-                                    _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
+                                    try:
+                                        shutil.move(str(working_path), str(dest_file_path))
+                                    except Exception as mv_err:
+                                        logger.warning(f"Could not move file {working_path} to {dest_file_path}: {mv_err}")
 
                             upload.status = GmfUploadStatus.PARTIALLY_PROCESSED if upload.processed_records_count > 0 else GmfUploadStatus.APPROVED
                             upload.file_path = str(dest_file_path)
@@ -390,21 +493,8 @@ def _worker_process(worker_id):
                         
                         run_id_to_update = upload.billing_run_id or run_id
                         if run_id_to_update:
-                            from app.db.models import BillingRun, RunStatus
-                            from sqlalchemy import update
-                            # Atomic SQL increment — add generated_count
-                            db.execute(
-                                update(BillingRun)
-                                .where(BillingRun.id == run_id_to_update)
-                                .values(succeeded=BillingRun.succeeded + generated_count)
-                            )
-                            db.flush()
-                            # Re-read to check completion
-                            run = db.query(BillingRun).filter(BillingRun.id == run_id_to_update).first()
-                            if run:
-                                run.output_path = str(cycle_base_dir)
-                                run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
-                                run.finished_at = datetime.now()
+                            _update_billing_run(db, run_id_to_update, generated_count, cycle_base_dir)
+                        
                         db.commit()
             except Exception as move_err:
                 logger.error(f"Failed to move completed GMF {filename} to Processed: {move_err}")
@@ -414,15 +504,8 @@ def _worker_process(worker_id):
                     except OSError as err:
                         logger.error(f"Could not remove {working_path} after move failure: {err}")
             
-            # Delete from remote Google Drive Cycle folder
-            try:
-                import subprocess
-                if shutil.which("rclone"):
-                    subprocess.Popen(["rclone", "deletefile", f"gdrive:SLT_GMF_Uploads/{cycle_label}/{filename}"])
-                else:
-                    logger.info("rclone not available in container; host sync service will clean remote GMF %s", filename)
-            except Exception as delete_err:
-                logger.error(f"Failed to launch rclone delete for {filename}: {delete_err}")
+            # Delete from remote
+            _delete_from_remote(cycle_label, filename)
                 
             logger.info(f"Worker {worker_id} successfully generated {generated_count} PDF(s) for {filename}")
             
@@ -434,101 +517,7 @@ def _worker_process(worker_id):
         except Exception as e:
             logger.error(f"Worker {worker_id} error: {e}", exc_info=True)
             if filename and working_path is not None and working_path.exists():
-                try:
-                    # Get cycle_label and run_id from DB
-                    cycle_label = "unknown"
-                    local_run_id = None
-                    if 'run_id' in locals():
-                        local_run_id = locals()['run_id']
-                        
-                    with SessionLocal() as db:
-                        upload = None
-                        if upload_id:
-                            upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
-                        if not upload and local_run_id:
-                            upload = db.query(GmfUpload).filter(
-                                GmfUpload.filename == filename,
-                                GmfUpload.billing_run_id == local_run_id,
-                                GmfUpload.folder_type != "Test_GMFs"
-                            ).first()
-                        if not upload:
-                            upload = db.query(GmfUpload).filter(
-                                GmfUpload.filename == filename,
-                                GmfUpload.status == GmfUploadStatus.APPROVED,
-                                GmfUpload.folder_type != "Test_GMFs"
-                            ).first()
-                        if upload:
-                            cycle_label = upload.folder_type
-                            local_run_id = upload.billing_run_id
-                            upload_id = upload.id
-                            
-                    failed_dest = settings.gmf_drive_path / "Failed" / (cycle_label or "unknown")
-                    failed_dest.mkdir(parents=True, exist_ok=True)
-                    dest_file_path = failed_dest / filename
-                    if dest_file_path.exists():
-                        try:
-                            _robust_file_op(dest_file_path.unlink)
-                        except Exception as rm_err:
-                            logger.warning(f"Could not remove existing failed GMF file {dest_file_path}: {rm_err}")
-                    
-                    # Move to failed queue
-                    _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
-                    
-                    # Delete from remote Google Drive Cycle folder
-                    try:
-                        import subprocess
-                        if shutil.which("rclone"):
-                            subprocess.Popen(["rclone", "deletefile", f"gdrive:SLT_GMF_Uploads/{cycle_label}/{filename}"])
-                        else:
-                            logger.info("rclone not available in container; host sync service will clean remote GMF %s", filename)
-                    except Exception as delete_err:
-                        logger.error(f"Failed to launch rclone delete for {filename}: {delete_err}")
-                        
-                    with SessionLocal() as db:
-                        upload = None
-                        if upload_id:
-                            upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
-                        if not upload and local_run_id:
-                            upload = db.query(GmfUpload).filter(
-                                GmfUpload.filename == filename,
-                                GmfUpload.billing_run_id == local_run_id,
-                                GmfUpload.folder_type != "Test_GMFs"
-                            ).first()
-                        if not upload:
-                            upload = db.query(GmfUpload).filter(
-                                GmfUpload.filename == filename,
-                                GmfUpload.status == GmfUploadStatus.APPROVED,
-                                GmfUpload.folder_type != "Test_GMFs"
-                            ).first()
-                            
-                        if upload:
-                            upload.status = GmfUploadStatus.FAILED
-                            upload.error_message = str(e)
-                            upload.file_path = str(dest_file_path)
-                            
-                            if upload.billing_run_id:
-                                from app.db.models import BillingRun, BillingRunFailure, RunStatus
-                                from sqlalchemy import update as sql_update
-                                # Atomic SQL increment for failed counter
-                                db.execute(
-                                    sql_update(BillingRun)
-                                    .where(BillingRun.id == upload.billing_run_id)
-                                    .values(failed=BillingRun.failed + 1)
-                                )
-                                db.add(BillingRunFailure(
-                                    billing_run_id=upload.billing_run_id,
-                                    account_number=filename,
-                                    error_message=str(e)
-                                ))
-                                db.flush()
-                                # Re-read to check completion
-                                run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
-                                if run and run.succeeded + run.failed >= run.total_accounts:
-                                    run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
-                                    run.finished_at = datetime.now()
-                        db.commit()
-                except Exception as inner_err:
-                    logger.error(f"Failed to record failure details: {inner_err}")
+                _handle_failed_upload(filename, str(working_path), upload_id, run_id, str(e))
             time.sleep(1)
 
 
@@ -542,15 +531,12 @@ def _archiver_process():
             if COMPLETED_TEMP.exists():
                 for cycle_dir in COMPLETED_TEMP.iterdir():
                     if cycle_dir.is_dir() and any(f.name.endswith(".pdf") for f in cycle_dir.iterdir()):
-                        # We have PDFs for this cycle, batch them into the final output dir
                         create_output_batches(str(cycle_dir), cycle_label=cycle_dir.name)
             time.sleep(2)
         except Exception as e:
             logger.error(f"Archiver error: {e}", exc_info=True)
             time.sleep(5)
 
-
-import threading
 
 def start_worker_threads(num_workers=4):
     """

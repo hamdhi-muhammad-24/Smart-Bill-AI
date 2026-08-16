@@ -11,15 +11,24 @@ import os
 import threading
 import sys
 import time
+import json
+import shutil
 from pathlib import Path
 
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from sqlalchemy.orm import Session
-import shutil
 
 from app.db.base import SessionLocal
-from app.db.models import GmfUpload, GmfUploadStatus, NotificationEvent, NotificationEventType, InvoiceTemplate, TemplateApprovalStatus
+from app.db.models import (
+    GmfUpload, 
+    GmfUploadStatus, 
+    NotificationEvent, 
+    NotificationEventType, 
+    InvoiceTemplate, 
+    TemplateApprovalStatus,
+    SystemSetting
+)
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -46,7 +55,14 @@ VAT_CONF_FOLDER = "VAT_Confirmation"
 FINAL_NOTICE_FOLDER = "Final_Notice"
 CUSTOMER_LETTER_FOLDER = "Customer_Letter"
 CUSTOMER_LETTER_ALT_FOLDER = "Customer_Letter_Logo_V1Print"
-VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {TEST_FOLDER, LOD_FOLDER, VAT_CONF_FOLDER, FINAL_NOTICE_FOLDER, CUSTOMER_LETTER_FOLDER, CUSTOMER_LETTER_ALT_FOLDER}
+VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {
+    TEST_FOLDER, 
+    LOD_FOLDER, 
+    VAT_CONF_FOLDER, 
+    FINAL_NOTICE_FOLDER, 
+    CUSTOMER_LETTER_FOLDER, 
+    CUSTOMER_LETTER_ALT_FOLDER
+}
 
 # Files to skip (system/temp files)
 SKIP_PREFIXES = (".", "~", "__")
@@ -84,7 +100,6 @@ def _detect_template(file_path: str) -> tuple[str | None, int]:
         return None, 1
 
 
-
 def _get_cycle(folder_name: str) -> int | None:
     """Return cycle number (1-4) from folder name, or None for Test_GMFs."""
     return CYCLE_FOLDERS.get(folder_name)
@@ -93,7 +108,6 @@ def _get_cycle(folder_name: str) -> int | None:
 def _get_billing_mode() -> str:
     """Query active billing mode from system settings."""
     try:
-        from app.db.models import SystemSetting
         with SessionLocal() as db:
             setting = db.query(SystemSetting).filter(SystemSetting.key == "billing_mode").first()
             return setting.value if setting else "auto"
@@ -181,7 +195,6 @@ class GmfFolderHandler(FileSystemEventHandler):
         template_detected, total_records_count = _detect_template(str(filepath))
         logger.info(f"Templates identified: {template_detected} (Total docs: {total_records_count})")
 
-
         with _process_lock:
             with SessionLocal() as db:
                 try:
@@ -190,6 +203,7 @@ class GmfFolderHandler(FileSystemEventHandler):
                         GmfUpload.filename == filename,
                         GmfUpload.folder_type == folder_name
                     ).first()
+                    
                     if existing:
                         if existing.status == GmfUploadStatus.COMPLETED:
                             logger.info(f"GMF {filename} in {folder_name} is already COMPLETED. Skipping duplicate watcher registration.")
@@ -223,7 +237,6 @@ class GmfFolderHandler(FileSystemEventHandler):
                                 is_approved = bool(detected_list) and any(t in approved_set for t in detected_list)
                                 is_rejected = bool(detected_list) and any(t in rejected_set for t in detected_list)
 
-                                
                                 settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
                                 settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
                                 
@@ -298,11 +311,11 @@ class GmfFolderHandler(FileSystemEventHandler):
                     is_approved = bool(detected_list) and any(t in approved_set for t in detected_list)
                     is_rejected = bool(detected_list) and any(t in rejected_set for t in detected_list)
 
-
                     if is_test:
                         new_filepath = filepath
                         final_status = GmfUploadStatus.PENDING_APPROVAL
                         if template_detected:
+                            template_obj = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == template_detected).first()
                             if not template_obj:
                                 template_obj = InvoiceTemplate(template_code=template_detected, name=template_detected, is_system_template=True)
                                 db.add(template_obj)
@@ -343,7 +356,6 @@ class GmfFolderHandler(FileSystemEventHandler):
                             return
 
                     from core.gmf_splitter import count_documents_with_breakdown
-                    import json
                     total_cnt, breakdown = count_documents_with_breakdown(str(new_filepath))
                     upload = GmfUpload(
                         filename=filename,
@@ -351,7 +363,7 @@ class GmfFolderHandler(FileSystemEventHandler):
                         folder_type=folder_name,
                         cycle_number=cycle_number,
                         template_detected=template_detected,
-                        total_records_count=total_records_count,
+                        total_records_count=total_records_count,  # Using the parameter value, NOT the count from breakdown
                         status=final_status,
                         template_breakdown=json.dumps(breakdown) if breakdown else None,
                     )
@@ -371,7 +383,6 @@ class GmfFolderHandler(FileSystemEventHandler):
                             upload_id=upload.id,
                         )
                     else:
-                        notif_event_type = NotificationEventType.GMF_DETECTED
                         if is_approved:
                             notif_title = f"GMF Auto-Approved — Cycle {cycle_number}"
                             notif_msg = f"New GMF file '{filename}' (Template: {template_detected}) was auto-approved and queued for generation."
@@ -380,7 +391,7 @@ class GmfFolderHandler(FileSystemEventHandler):
                             notif_msg = f"New GMF file '{filename}' (Template: {template_detected or 'Unknown'}) awaiting template approval."
                             
                         notif = NotificationEvent(
-                            event_type=notif_event_type,
+                            event_type=NotificationEventType.GMF_DETECTED,
                             title=notif_title,
                             message=notif_msg,
                             upload_id=upload.id,

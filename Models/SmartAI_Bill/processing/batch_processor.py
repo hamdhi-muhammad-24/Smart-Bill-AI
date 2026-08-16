@@ -50,7 +50,7 @@ def process_single_file(args):
     source_filename = os.path.basename(file_path)
 
     try:
-        documents = split_gmf_documents(file_path)
+        documents = split_gmf_documents(file_path, offset=offset, limit=limit, original_filename=source_filename)
 
         if not documents:
             results.append(ProcessingResult(
@@ -61,9 +61,9 @@ def process_single_file(args):
             return results
 
         with tempfile.TemporaryDirectory(prefix="gmf_split_") as split_dir:
-            for doc_index, doc_lines in enumerate(documents, start=1):
+            for doc_index, doc_path in enumerate(documents, start=1):
                 result = _process_one_document(
-                    doc_lines=doc_lines,
+                    doc_path=doc_path,
                     doc_index=doc_index,
                     source_file=file_path,
                     source_filename=source_filename,
@@ -87,7 +87,7 @@ def process_single_file(args):
     return results
 
 
-def _process_one_document(doc_lines, doc_index, source_file, source_filename,
+def _process_one_document(doc_path, doc_index, source_file, source_filename,
                            split_dir, temp_pdf_dir, attempt, is_preview=False,
                            approved_templates=None, offset=0, limit=None):
     """Process a single document block from a GMF file."""
@@ -99,12 +99,7 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
     )
 
     try:
-        # split_gmf_documents returns paths for text and spreadsheet inputs.
-        temp_gmf_path = doc_lines if isinstance(doc_lines, str) and os.path.exists(doc_lines) else write_doc_to_temp(
-            doc_lines, split_dir, source_filename, doc_index, original_file_path=source_file)
-
-
-        identification = identify_template(temp_gmf_path)
+        identification = identify_template(doc_path, original_filename=source_filename)
 
         if not identification.is_supported:
             result.error = f"Doc {doc_index}: Unsupported ({identification.template_id})"
@@ -123,9 +118,9 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
 
         if is_preview:
             try:
-                data = parser_func(temp_gmf_path, limit=1)
+                data = parser_func(doc_path, limit=1)
             except TypeError:
-                data = parser_func(temp_gmf_path)
+                data = parser_func(doc_path)
 
             if isinstance(data, list) and len(data) > 1:
                 data = data[:1]
@@ -137,9 +132,9 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
                         data[list_key] = data[list_key][:10]
         else:
             try:
-                data = parser_func(temp_gmf_path, limit=limit, offset=offset)
+                data = parser_func(doc_path, limit=limit, offset=offset)
             except TypeError:
-                data = parser_func(temp_gmf_path)
+                data = parser_func(doc_path)
 
         renderer = RendererClass()
         renderer.render(data)
@@ -147,13 +142,15 @@ def _process_one_document(doc_lines, doc_index, source_file, source_filename,
         os.makedirs(temp_pdf_dir, exist_ok=True)
 
         if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
-            fname, pdf_bytes, _ = renderer.generated_pdfs[0]
-            output_path = os.path.join(temp_pdf_dir, fname)
-            with open(output_path, "wb") as f:
-                f.write(pdf_bytes)
-            result.output_pdf = output_path
-            gen_count = len(getattr(renderer, "generated_pdfs", []))
-            result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
+            last_path = None
+            for fname, pdf_bytes, _ in renderer.generated_pdfs:
+                output_path = os.path.join(temp_pdf_dir, fname)
+                with open(output_path, "wb") as f:
+                    f.write(pdf_bytes)
+                last_path = output_path
+            result.output_pdf = last_path
+            gen_count = len(renderer.generated_pdfs)
+            result.output_pdf_count = max(1, gen_count)
             result.success = True
         else:
             account_number = "unknown"

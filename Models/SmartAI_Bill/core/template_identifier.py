@@ -34,18 +34,20 @@ class IdentificationResult:
                 f"badge={self.badge} supported={self.is_supported}>")
 
 
-def identify_template(gmf_file_path: str) -> IdentificationResult:
+def identify_template(gmf_file_path: str, original_filename: str = None) -> IdentificationResult:
     """Identify which template a GMF file needs."""
     result = IdentificationResult()
     
     from pathlib import Path
     path_obj = Path(gmf_file_path)
-    fname = path_obj.name.lower()
+    
+    fname = (original_filename or path_obj.name).lower()
+    
     if fname.endswith('.processing'):
         fname = fname[:-11]
 
     # Special spreadsheet template matching ONLY if filename matches and file is NOT a temp GMF document block
-    is_temp_gmf_block = fname.startswith("tmp") or fname.endswith(".gmf")
+    is_temp_gmf_block = not original_filename and fname.startswith("tmp")
 
     if not is_temp_gmf_block:
         if "lod" in fname or "letter of demand" in fname:

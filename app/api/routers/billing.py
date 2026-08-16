@@ -742,7 +742,8 @@ def generate_batch_endpoint(
     settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
     
     # Calculate expected total accounts for this batch run
-    expected_count = req.limit if req.limit else sum((u.total_records_count or 1) - (u.processed_records_count or 0) for u in uploads)
+    remaining_records = sum(max(0, (u.total_records_count or 1) - (u.processed_records_count or 0)) for u in uploads)
+    expected_count = min(req.limit, remaining_records) if req.limit else remaining_records
     total_accounts = max(1, expected_count)
 
     today_str = datetime.now().strftime("%Y-%m-%d")
