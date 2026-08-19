@@ -21,6 +21,7 @@ from app.core.config import settings
 from processing.output_manager import create_output_batches
 from config import OUTPUT_PDF_NAMES, OUTPUT_PDF_NAME_DEFAULT
 from sqlalchemy import update as sql_update, or_
+from core.self_seal_appender import get_approved_self_seal_pdf, apply_self_seal_to_directory
 
 logger = logging.getLogger("worker_queue")
 logger.setLevel(logging.INFO)
@@ -430,7 +431,21 @@ def _worker_process(worker_id):
             with tempfile.TemporaryDirectory(prefix="gmf_pdf_gen_") as temp_pdf_dir:
                 args = (str(working_path), temp_pdf_dir, 1, False, active_templates, offset, limit)
                 results = process_single_file(args)
-                
+
+                # ── Self-Seal envelope post-processing ─────────────────────
+                # If an approved Self-Seal artwork exists, append its composite
+                # PDF as page 2 to every 1-page bill in the temp directory.
+                # Excluded templates (LOD, VAT Confirmation, Final Notice,
+                # Customer Letter) are skipped automatically by the appender.
+                approved_self_seal_pdf = get_approved_self_seal_pdf()
+                if approved_self_seal_pdf:
+                    apply_self_seal_to_directory(
+                        temp_pdf_dir,
+                        template_id,
+                        approved_self_seal_pdf,
+                    )
+                # ───────────────────────────────────────────────────────────
+
                 # Copy generated files to output folder
                 for file_path in Path(temp_pdf_dir).glob("*.pdf"):
                     shutil.copy2(file_path, cycle_base_dir / file_path.name)

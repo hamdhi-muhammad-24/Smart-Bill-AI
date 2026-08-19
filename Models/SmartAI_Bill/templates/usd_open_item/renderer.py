@@ -146,7 +146,13 @@ class USDOpenItemRenderer(BaseRenderer):
         top_y = PAGE_H - 100
 
         timestamp = datetime.now().strftime("_%H:%M:%S%f")
-        file_info = data.get("file_info_string", "") + timestamp
+        
+        # Get the filename and clean off the random suffix (e.g., __sqg099w7_1.gmf)
+        file_info = data.get("file_info_string", "")
+        if "__" in file_info:
+            file_info = file_info.split("__")[0]
+            
+        file_info = file_info + timestamp
         self.text(top_x, top_y, file_info, size=7.5)
         self.text(top_x, top_y - 8, data.get("customer_segment", ""), size=7.5, bold=True)
 
@@ -290,9 +296,7 @@ class USDOpenItemRenderer(BaseRenderer):
         currency = (data.get("acc_currency_code") or "").strip()
         currency_bracket = f"({currency})" if currency else ""
         y = self._ensure_space(y, line_h * 2)
-        self.text(tbl["indent_l1"], y,
-                  "Details of Charges for the Period",
-                  size=font_size, bold=True)
+        
         if currency_bracket:
             self.text(tbl["amount_x"], y, currency_bracket,
                       size=font_size, bold=True, align="right")

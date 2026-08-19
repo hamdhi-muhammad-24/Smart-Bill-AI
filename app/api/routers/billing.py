@@ -45,6 +45,7 @@ from processing.batch_processor import process_single_file, process_batch
 from core.gmf_reader import is_red_notice
 from core.gmf_splitter import split_gmf_documents, write_doc_to_temp
 from core.template_identifier import identify_template
+from core.self_seal_appender import get_approved_self_seal_pdf, append_self_seal_if_needed
 
 from processing.output_manager import (
     create_output_batches,
@@ -441,6 +442,20 @@ def preview_invoice(
         total_docs = 1
 
     template_str = ", ".join(detected_templates) if detected_templates else (result.template_id or "unknown")
+
+    # ── Self-Seal envelope post-processing (preview) ───────────────────
+    # Apply the same envelope logic to the preview PDF so that admins can
+    # see the two-page result before approving a batch run.
+    if result.output_pdf and os.path.exists(result.output_pdf):
+        _preview_template_id = result.template_id or (detected_templates[0] if detected_templates else "")
+        _approved_self_seal_pdf = get_approved_self_seal_pdf()
+        if _approved_self_seal_pdf and _preview_template_id:
+            append_self_seal_if_needed(
+                result.output_pdf,
+                _preview_template_id,
+                _approved_self_seal_pdf,
+            )
+    # ───────────────────────────────────────────────────────────
 
     # Ensure InvoiceTemplate records exist in DB for all detected templates
     for t_code in detected_templates:

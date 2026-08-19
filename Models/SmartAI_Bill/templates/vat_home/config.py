@@ -21,15 +21,23 @@ PAGE_H = 842.25
 
 COORDS = {
     # Header fields (left column boxes) - from vat_enterprise COORDS, converted
-    "telephone_number": (172.0, 115.25),
-    "account_number":   (160.0, 138.25),
-    "invoice_number":   (155.0, 165.25),
-    "billing_date":     (160.0, 195.25),
-    "billing_period":   (140.0, 225.25),
+    # telephone_number corrected (fix pass 7) to (183.6, 112.8): x=183.6
+    # matches VAT_HOME.pdf golden's measured word position (183.6, 104.2)
+    # exactly, next to "Tax Invoice" - the y is NOT 104.2 directly, though:
+    # fitz's insert_text() takes a BASELINE y, while get_text('words') (used
+    # to measure golden) reports the glyph bbox TOP - confirmed a +8.6pt
+    # baseline-to-bboxtop gap for this exact font/size (FONTS["header"],
+    # helv 8) by rendering a probe at y=104.2 and re-measuring its own
+    # output bbox top (landed at 95.6, not 104.2). 104.2 + 8.6 = 112.8.
+    "telephone_number": (183.6, 114.8),
+    "account_number":   (160.0, 141.25),
+    "invoice_number":   (155.0, 169.25),
+    "billing_date":     (160.0, 199.25),
+    "billing_period":   (140.0, 227.25),
 
     # VAT registration lines
-    "slt_vat_reg":      (273.60, 98.25),
-    "customer_vat_reg": (273.60, 107.25),
+    "slt_vat_reg":      (273.60, 95.25),
+    "customer_vat_reg": (273.60, 105.25),
 
     # Customer address block (green rounded box)
     "customer_addr_x":      280.8,
@@ -41,7 +49,7 @@ COORDS = {
     # renderer.py, so it can never drift out of sync with the box (fix pass 6:
     # a stray unconverted y=618 here previously put "HOME" nowhere near the
     # cyan box at all).
-    "badge_text_x": 325.0,
+    "badge_text_x": 350,
 
     # Summary bubbles - x-centers only. The y is computed from
     # SUMMARY_VALUE_BOX's vertical center, same reasoning as the badge above
@@ -65,7 +73,7 @@ COORDS = {
     # scan at several x positions all agreed on this value); the previous
     # y=83.25 put the indicator's own text bbox (73.6-85.9) straddling that
     # edge, overlapping the banner. 95 clears it with a real margin.
-    "page_indicator": (536.0, 95.0),
+    "page_indicator": (510.0, 94.0),
 
     # Barcodes / QR (address section)
     "barcode":       (387.0, 177.85),
@@ -80,11 +88,23 @@ COORDS = {
     "slip_barcode":        (309.0, 707.25),
     "slip_barcode_width":  138.0,
     "slip_barcode_height": 25.0,
-    "slip_telephone": (157.68, 725.61),
-    "slip_invoice":   (157.68, 748.41),
-    "slip_customer":  (157.68, 771.21),
-    "slip_account":   (157.68, 794.01),
+    "slip_telephone": (157.68, 723.61),
+    "slip_invoice":   (157.68, 746.41),
+    "slip_customer":  (157.68, 770.21),
+    "slip_account":   (157.68, 795.01),
 }
+
+# RED-flagged bills use layout_RED.pdf as page 1's background instead of
+# layout_NONRED.pdf (see renderer.py's render()) - the arrears/credit-control
+# notice is baked directly into that artwork (not drawn by this code), sitting
+# just above the payment slip. RED_PAGE1_FLOOR is that notice box's measured
+# top edge (pixel-scanned off layout_RED.pdf, converted to this file's point
+# system: 638.3, with a small margin) - page 1's charges/usage content must
+# stop above this floor for RED bills instead of the usual CONTENT_FLOOR
+# (which assumes the NONRED background's empty space all the way to the
+# slip); whatever doesn't fit spills onto page 2+ via the normal overflow
+# path, same mechanism as any other page break.
+RED_PAGE1_FLOOR = 630.0
 
 # Cyan badge box and summary-bubble value area, measured directly off the
 # raster template (fix pass 6) via a pixel color-transition scan - not
@@ -110,14 +130,14 @@ SUMMARY_BUBBLE_MIN_SIZE = 7.0
 CAP_HEIGHT_RATIO = 0.718
 
 FONTS = {
-    "header":         {"size": 8,     "bold": False},
+    "header":         {"size": 9,     "bold": False},
     "customer_addr":  {"size": 9,     "bold": True},
     "badge":          {"size": 18,    "bold": True},
-    "summary_box":    {"size": 11.04, "bold": False},
-    "summary_total":  {"size": 11.04, "bold": True},
+    "summary_box":    {"size": 11, "bold": False},
+    "summary_total":  {"size": 11, "bold": True},
     "gen_id":         {"size": 7,     "bold": False},
     "page_indicator": {"size": 9,     "bold": False},
-    "slip":           {"size": 9.60,  "bold": False},
+    "slip":           {"size": 9,  "bold": False},
 }
 
 # Charge groups, adjustments/discounts, and Taxes & Levies (everything BEFORE
@@ -140,7 +160,7 @@ FLOW_COLUMNS = {
 # confirmed against the doc's own golden-derived estimate of y=370).
 # CONTENT_FLOOR is the y just above the legal disclaimer on page 1 ("This
 # electric form...", measured at y~=691.7).
-PAGE1_CONTENT_TOP = 370.0
+PAGE1_CONTENT_TOP = 395.0
 CONTENT_FLOOR = 685.0
 
 # Continuation pages (section 9.1, golden evidence from VAT_HOME.pdf page 197):

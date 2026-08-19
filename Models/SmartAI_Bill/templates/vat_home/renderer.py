@@ -212,11 +212,11 @@ class VATHomeRenderer:
         if data.get("slt_vat_reg"):
             self.text(*COORDS["slt_vat_reg"],
                       f"SLT VAT Registration Number: {data['slt_vat_reg']}",
-                      size=f["size"])
+                      size=8)
         if data.get("customer_vat_reg"):
             self.text(*COORDS["customer_vat_reg"],
                       f"Customer VAT Registration Number: {data['customer_vat_reg']}",
-                      size=f["size"])
+                      size=8)
 
     def _draw_customer(self, data):
         addr_lines = []
@@ -252,7 +252,13 @@ class VATHomeRenderer:
         except ValueError:
             due_mmddyy = ""
         ts = datetime.now().strftime("%H:%M:%S")
-        line = f'{data["source_filename"]}_{ts}_{due_mmddyy}'
+        
+        # Clean the source filename by removing the random suffix (e.g. __sqg099w7_1.gmf)
+        source_file = data.get("source_filename", "")
+        if "__" in source_file:
+            source_file = source_file.split("__")[0] + "_"
+
+        line = f'{source_file}_{ts}_{due_mmddyy}'
         self.text(*COORDS["gen_id_line"], line, size=f["size"])
         if data.get("customer_segment"):
             self.text(*COORDS["gen_id_line2"], data["customer_segment"], size=f["size"])
@@ -316,7 +322,7 @@ class VATHomeRenderer:
         if not code:
             return
         f = FONTS["header"]
-        self.text(FULL_WIDTH["amount_x"], 362.0, f"({code}.)",
+        self.text(FULL_WIDTH["amount_x"], 380.0, f"({code}.)",
                   size=f["size"], bold=True, align="right")
 
     def _draw_page_indicators(self, total_pages):
