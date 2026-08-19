@@ -944,13 +944,13 @@ def retry_failed_run(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/runs", response_model=List[BillingRunOut])
-def get_runs(db: Session = Depends(get_db), _: UserOut = Depends(require_admin)):
+def get_runs(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1_or_admin)):
     """List all billing run history."""
     return db.query(BillingRun).order_by(BillingRun.started_at.desc()).limit(100).all()
 
 
 @router.get("/runs/{run_id}", response_model=BillingRunOut)
-def get_run(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(require_admin)):
+def get_run(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(require_admin1_or_admin)):
     """Get a single billing run (used for live progress polling)."""
     run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
     if not run:
@@ -959,7 +959,7 @@ def get_run(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(req
 
 
 @router.get("/runs/{run_id}/results")
-def get_run_results(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(require_admin)):
+def get_run_results(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(require_admin1_or_admin)):
     """Get successes and failures for a specific run, used for Generation Hub summary."""
     run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
     if not run:
@@ -1035,7 +1035,7 @@ def get_run_results(run_id: int, db: Session = Depends(get_db), _: UserOut = Dep
 
 
 @router.delete("/runs/{run_id}")
-def delete_run(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(require_admin)):
+def delete_run(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(require_admin1_or_admin)):
     run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -1064,7 +1064,7 @@ def delete_run(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(
 
 
 @router.delete("/runs")
-def delete_all_runs(db: Session = Depends(get_db), _: UserOut = Depends(require_admin)):
+def delete_all_runs(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1_or_admin)):
     # Delete all runs that are not active
     inactive_runs = db.query(BillingRun).filter(
         BillingRun.status.notin_([RunStatus.RUNNING, RunStatus.PENDING])

@@ -217,52 +217,52 @@ def _worker_process(worker_id):
                     if not t_obj or t_obj.approval_status != TemplateApprovalStatus.REJECTED:
                         active_templates.add(sys_tid)
 
-            # Construct output folder: output/<YYYY-MM-DD>/<Cycle_N|LOD|VAT_Confirmation>/Batch_1/
             today_str = datetime.now().strftime("%Y-%m-%d")
-            cycle_base_dir = settings.output_dir / today_str / folder_name / "Batch_1"
-            cycle_base_dir.mkdir(parents=True, exist_ok=True)
-
-            from processing.batch_processor import process_single_file
-            args = (str(working_path), str(cycle_base_dir), 1, False, active_templates, offset, limit)
-            results = process_single_file(args)
-
-            generated_count = sum(getattr(r, "output_pdf_count", 1) for r in results if r.success)
-            total_count = len(results)
+            cycle_base_dir = settings.output_dir / today_str / folder_name
             
-            if not run_id:
-                try:
-                    with SessionLocal() as db:
-                        u_rec = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
-                        if u_rec:
-                            tot_acc = (u_rec.total_records_count or 1) - (offset or 0)
-                            if limit:
-                                tot_acc = min(tot_acc, limit)
-                            tot_acc = max(1, tot_acc)
+            import tempfile
+            with tempfile.TemporaryDirectory(prefix="gmf_pdf_gen_") as temp_pdf_dir:
+                from processing.batch_processor import process_single_file
+                args = (str(working_path), temp_pdf_dir, 1, False, active_templates, offset, limit)
+                results = process_single_file(args)
 
-                            from app.db.models import BillingRun, RunStatus
-                            from datetime import date
-                            run = BillingRun(
-                                batch_name=f"Auto Gen {filename} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                                cycle_number=u_rec.cycle_number,
-                                period_start=date.today(),
-                                period_end=date.today(),
-                                status=RunStatus.RUNNING,
-                                total_accounts=tot_acc,
-                                succeeded=0,
-                                failed=0,
-                                started_at=datetime.now()
-                            )
-                            db.add(run)
-                            db.flush()
-                            u_rec.billing_run_id = run.id
-                            run_id = run.id
-                            db.commit()
-                except Exception as create_run_err:
-                    logger.warning(f"Could not create BillingRun for {filename}: {create_run_err}")
+                generated_count = sum(getattr(r, "output_pdf_count", 1) for r in results if r.success)
+                total_count = len(results)
+                
+                if not run_id:
+                    try:
+                        with SessionLocal() as db:
+                            u_rec = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+                            if u_rec:
+                                tot_acc = (u_rec.total_records_count or 1) - (offset or 0)
+                                if limit:
+                                    tot_acc = min(tot_acc, limit)
+                                tot_acc = max(1, tot_acc)
 
-            # Organize generated PDFs into batch folders
-            from processing.output_manager import create_output_batches
-            create_output_batches(str(cycle_base_dir), cycle_label=folder_name)
+                                from app.db.models import BillingRun, RunStatus
+                                from datetime import date
+                                run = BillingRun(
+                                    batch_name=f"Auto Gen {filename} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                                    cycle_number=u_rec.cycle_number,
+                                    period_start=date.today(),
+                                    period_end=date.today(),
+                                    status=RunStatus.RUNNING,
+                                    total_accounts=tot_acc,
+                                    succeeded=0,
+                                    failed=0,
+                                    started_at=datetime.now()
+                                )
+                                db.add(run)
+                                db.flush()
+                                u_rec.billing_run_id = run.id
+                                run_id = run.id
+                                db.commit()
+                    except Exception as create_run_err:
+                        logger.warning(f"Could not create BillingRun for {filename}: {create_run_err}")
+
+                # Organize generated PDFs into batch folders from temporary staging directory
+                from processing.output_manager import create_output_batches
+                create_output_batches(temp_pdf_dir, cycle_label=folder_name)
             
             # Move source GMF to Processed/Staged folder and update DB
             try:
@@ -283,10 +283,16 @@ def _worker_process(worker_id):
                             processed_dest.mkdir(parents=True, exist_ok=True)
                             dest_file_path = processed_dest / filename
                             if dest_file_path.exists():
-                                _robust_file_op(dest_file_path.unlink)
+                                try:
+                                    dest_file_path.unlink()
+                                except Exception:
+                                    pass
                             if os.path.exists(working_path):
-                                _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
-                                upload.file_path = str(dest_file_path)
+                                try:
+                                    shutil.move(str(working_path), str(dest_file_path))
+                                    upload.file_path = str(dest_file_path)
+                                except Exception as mv_err:
+                                    logger.warning(f"Could not move file {working_path} to {dest_file_path}: {mv_err}")
 
                             upload.status = GmfUploadStatus.COMPLETED
                             upload.billing_run_id = None
@@ -296,9 +302,15 @@ def _worker_process(worker_id):
                             dest_file_path = staged_dest / filename
                             if str(working_path) != str(dest_file_path):
                                 if dest_file_path.exists():
-                                    _robust_file_op(dest_file_path.unlink)
+                                    try:
+                                        dest_file_path.unlink()
+                                    except Exception:
+                                        pass
                                 if os.path.exists(working_path):
-                                    _robust_file_op(shutil.move, str(working_path), str(dest_file_path))
+                                    try:
+                                        shutil.move(str(working_path), str(dest_file_path))
+                                    except Exception as mv_err:
+                                        logger.warning(f"Could not move file {working_path} to {dest_file_path}: {mv_err}")
 
                             upload.status = GmfUploadStatus.PARTIALLY_PROCESSED if upload.processed_records_count > 0 else GmfUploadStatus.APPROVED
                             upload.file_path = str(dest_file_path)
