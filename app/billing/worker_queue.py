@@ -32,6 +32,8 @@ TEMPLATE_FOLDER_MAP = {
     "vat_confirmation": "VAT_Confirmation",
     "final_notice": "Final_Notice",
     "customer_letter_logo_v1print": "Customer_Letter",
+    "customer_migration_letter": "Customer_Letter",
+    "customer_letter": "Customer_Letter",
     "vat_home": "VAT_Home",
     "nonvat_home": "NonVAT_Home",
     "vat_enterprise": "VAT_Enterprise",
@@ -65,6 +67,9 @@ def _get_approved_templates():
                 InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED
             ).all()
             approved_templates = {t.template_code for t in app_tmpls}
+            if "customer_letter_logo_v1print" in approved_templates:
+                approved_templates.add("customer_migration_letter")
+                approved_templates.add("customer_letter")
     except Exception as e:
         logger.warning(f"Could not load approved templates: {e}")
     return approved_templates
@@ -78,7 +83,14 @@ def _get_active_templates():
         ).all()
         active_templates = set(t.template_code for t in db_templates)
         # Include standard system templates by default unless explicitly rejected
-        for sys_tid in ("lod", "vat_confirmation", "nonvat_home", "nonvat_enterprise", "vat_enterprise", "vat_home"):
+        all_sys = (
+            "lod", "vat_confirmation", "final_notice",
+            "customer_letter_logo_v1print", "customer_migration_letter", "customer_letter",
+            "nonvat_home", "nonvat_enterprise", "vat_enterprise", "vat_home",
+            "product_label_grouping", "subscription_ref_grouping", "summary_statement",
+            "invoice_of_summary", "vat_creditnote", "nonvat_creditnote", "usd_open_item"
+        )
+        for sys_tid in all_sys:
             t_obj = next((t for t in db_templates if t.template_code == sys_tid), None)
             if not t_obj or t_obj.approval_status != TemplateApprovalStatus.REJECTED:
                 active_templates.add(sys_tid)
@@ -91,13 +103,18 @@ def _resolve_cycle_folder(upload):
 
     if cycle_num and isinstance(cycle_num, int) and 1 <= cycle_num <= 4:
         return f"Cycle_{cycle_num}"
-    elif f_type in ("LOD", "VAT_Confirmation", "Test_GMFs"):
+    elif f_type in ("LOD", "VAT_Confirmation", "Test_GMFs", "Final_Notice", "Customer_Letter"):
         return f_type
+    elif f_type in ("Customer_Letter_Logo_V1Print", "Customer_Migration_Letter", "customer_letter"):
+        return "Customer_Letter"
     elif "cycle" in f_type.lower():
         import re
         match = re.search(r'(\d+)', f_type)
         return f"Cycle_{match.group(1)}" if match else f_type.replace(" ", "_")
     else:
+        t_id = getattr(upload, "template_detected", None)
+        if t_id and t_id in TEMPLATE_FOLDER_MAP:
+            return TEMPLATE_FOLDER_MAP[t_id]
         return f_type.replace(" ", "_") if f_type else "Cycle_1"
 
 def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
@@ -161,6 +178,7 @@ def _update_billing_run(db, run_id, generated_count, cycle_base_dir=None):
         if cycle_base_dir:
             run.output_path = str(cycle_base_dir)
         if run.succeeded + run.failed >= run.total_accounts:
+            run.total_accounts = run.succeeded + run.failed
             run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
             run.finished_at = datetime.now()
 
@@ -347,8 +365,16 @@ def _worker_process(worker_id):
             # Read metadata file
             meta_data = _read_metadata_file(incoming_dir, filename)
             meta_upload_id = meta_data.get("upload_id")
-            offset = meta_data.get("offset", 0)
-            limit = meta_data.get("limit")
+            raw_offset = meta_data.get("offset", 0)
+            raw_limit = meta_data.get("limit")
+            try:
+                offset = int(raw_offset) if raw_offset is not None else 0
+            except (ValueError, TypeError):
+                offset = 0
+            try:
+                limit = int(raw_limit) if raw_limit is not None else None
+            except (ValueError, TypeError):
+                limit = None
 
             # DB lookup
             upload = _lookup_upload_record(filename, meta_upload_id)
@@ -407,7 +433,11 @@ def _worker_process(worker_id):
 
             # Get active and approved templates
             active_templates = _get_active_templates()
-            approved_templates = _get_approved_templates()
+            meta_approved = meta_data.get("approved_templates") if isinstance(meta_data, dict) else None
+            if meta_approved:
+                approved_templates = set(meta_approved)
+            else:
+                approved_templates = _get_approved_templates()
 
             # Setup output directory
             today_str = datetime.now().strftime("%Y-%m-%d")
@@ -428,14 +458,15 @@ def _worker_process(worker_id):
             import tempfile
             import shutil
             with tempfile.TemporaryDirectory(prefix="gmf_pdf_gen_") as temp_pdf_dir:
-                args = (str(working_path), temp_pdf_dir, 1, False, active_templates, offset, limit)
+                args = (str(working_path), temp_pdf_dir, 1, False, approved_templates, offset, limit)
                 results = process_single_file(args)
                 
                 # Copy generated files to output folder
-                for file_path in Path(temp_pdf_dir).glob("*.pdf"):
+                pdf_files = list(Path(temp_pdf_dir).glob("*.pdf"))
+                for file_path in pdf_files:
                     shutil.copy2(file_path, cycle_base_dir / file_path.name)
                 
-                generated_count = sum(getattr(r, "output_pdf_count", 1) for r in results if r.success)
+                generated_count = len(pdf_files)
                 total_count = len(results)
             
             # Move source GMF to Processed/Staged folder and update DB
@@ -491,7 +522,7 @@ def _worker_process(worker_id):
                             
                         upload.processed_at = datetime.now()
                         
-                        run_id_to_update = upload.billing_run_id or run_id
+                        run_id_to_update = run_id or upload.billing_run_id
                         if run_id_to_update:
                             _update_billing_run(db, run_id_to_update, generated_count, cycle_base_dir)
                         
