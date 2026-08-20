@@ -79,8 +79,14 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+_ENVELOPE_SEEDED = False
+
 def _ensure_envelope_templates_seeded(db: DbSession):
-    """Create or update the 3 envelope template DB records with exact box coords."""
+    """Create or update the 3 envelope template DB records with exact box coords (run once)."""
+    global _ENVELOPE_SEEDED
+    if _ENVELOPE_SEEDED:
+        return
+
     for etype, spec in ENVELOPE_SPECS.items():
         tmpl = db.query(EnvelopeTemplate).filter(
             EnvelopeTemplate.envelope_type == etype
@@ -108,6 +114,7 @@ def _ensure_envelope_templates_seeded(db: DbSession):
             tmpl.box_y1 = spec["box"][3]
             tmpl.base_pdf_path = str(settings.envelope_base_dir / spec["base_pdf"])
     db.commit()
+    _ENVELOPE_SEEDED = True
 
 
 def _render_pdf_page_as_png(pdf_path: str, dpi: int = 250) -> bytes:

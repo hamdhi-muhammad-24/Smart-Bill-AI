@@ -15,18 +15,19 @@ def count_documents(file_path: str) -> int:
 
     if ext in (".xlsx", ".xls"):
         try:
-            wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
-            ws = wb.active
-            count = 0
-            has_header = False
-            for row in ws.iter_rows(values_only=True):
-                if row and any(cell is not None and str(cell).strip() != "" for cell in row):
-                    if not has_header:
-                        has_header = True
-                    else:
-                        count += 1
-            wb.close()
-            return count
+            with open(file_path, "rb") as f:
+                wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+                ws = wb.active
+                count = 0
+                has_header = False
+                for row in ws.iter_rows(values_only=True):
+                    if row and any(cell is not None and str(cell).strip() != "" for cell in row):
+                        if not has_header:
+                            has_header = True
+                        else:
+                            count += 1
+                wb.close()
+                return count
         except Exception:
             return 0
     elif ext == ".csv":
@@ -40,18 +41,15 @@ def count_documents(file_path: str) -> int:
     else:
         # Standard GMF text file record counting: Count DOCSTART blocks
         docstart_count = 0
-        acc_count = 0
         try:
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 for line in f:
                     l = line.strip().upper()
                     if l.startswith("DOCSTART"):
                         docstart_count += 1
-                    elif l.startswith(("ACC_NO", "ACCOUNT", "BILLSTYLE", "1,")):
-                        acc_count += 1
             if docstart_count > 0:
                 return docstart_count
-            return max(1, acc_count)
+            return 1
         except Exception:
             return 1
 
@@ -120,10 +118,11 @@ def count_documents_with_breakdown(file_path: str) -> tuple[int, dict[str, int]]
         return total, breakdown
 
 
-def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, original_filename: str = None) -> list[str]:
+def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, original_filename: str = None, approved_templates: set = None) -> list[str]:
     """
     Splits a multi-document GMF text file into individual temporary document file paths.
     For spreadsheets/CSV files, returns [file_path].
+    When approved_templates is provided, filters for documents matching approved templates before slicing.
     """
     if not file_path or not os.path.exists(file_path):
         return []
@@ -159,6 +158,27 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
 
     if not doc_blocks:
         return [file_path]
+
+    # Filter for approved templates in multi-document bulk files
+    if approved_templates is not None and len(doc_blocks) > 1:
+        from core.template_identifier import identify_template
+        filtered_blocks = []
+        for block in doc_blocks:
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".gmf", encoding="utf-8") as tf:
+                tf.write(block)
+                tmp_name = tf.name
+            try:
+                res = identify_template(tmp_name)
+                tid = res.template_id
+                if tid and tid in approved_templates:
+                    filtered_blocks.append(block)
+            finally:
+                if os.path.exists(tmp_name):
+                    try:
+                        os.remove(tmp_name)
+                    except OSError:
+                        pass
+        doc_blocks = filtered_blocks
 
     if offset > 0:
         doc_blocks = doc_blocks[offset:]

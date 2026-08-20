@@ -72,6 +72,9 @@ def identify_template(gmf_file_path: str, original_filename: str = None) -> Iden
             return result
 
     path_str = str(gmf_file_path).lower()
+    if path_str.endswith('.processing'):
+        path_str = path_str[:-11]
+
     # Check Excel / CSV headers if extension is spreadsheet
     if path_str.endswith(('.xlsx', '.xls', '.csv')):
         try:
@@ -82,17 +85,18 @@ def identify_template(gmf_file_path: str, original_filename: str = None) -> Iden
                     first_row = [str(cell).upper() for cell in next(reader, [])]
             else:
                 import openpyxl
-                wb = openpyxl.load_workbook(gmf_file_path, read_only=True, data_only=True)
-                ws = wb.active
-                first_row = [str(cell).upper() for cell in next(ws.iter_rows(values_only=True), []) if cell is not None]
-                wb.close()
+                with open(gmf_file_path, 'rb') as f:
+                    wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+                    ws = wb.active
+                    first_row = [str(cell).upper() for cell in next(ws.iter_rows(values_only=True), []) if cell is not None]
+                    wb.close()
 
             if any("TOTAL_ARREARS" in h or "DUE DATE" in h for h in first_row):
                 result.template_id = "final_notice"
                 result.is_supported = True
                 result.reasons.append("Headers match Final Notice template")
                 return result
-            if any("ADDR_FULL" in h or "TELEPHONE_STATUS" in h for h in first_row):
+            if any("ADDR_FULL" in h or "TELEPHONE_STATUS" in h or "SERIAL_NUM" in h or "CUSTOMER_REF" in h for h in first_row):
                 result.template_id = "customer_letter_logo_v1print"
                 result.is_supported = True
                 result.reasons.append("Headers match Customer Letter template")

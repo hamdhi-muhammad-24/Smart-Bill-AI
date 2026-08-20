@@ -70,8 +70,6 @@ export default function ManagerDashboard() {
     { value: 'MANAGER',          label: 'USER MANAGER',     color: 'text-[#00e676]',  borderColor: 'border-[#00a651]/40', bg: 'bg-[#00a651]/10' },
   ] as const
 
-  type PortalValue = typeof PORTAL_OPTIONS[number]['value']
-
   // ── Queries ──────────────────────────────────────────────────────────────
 
   const { data: users = [], isLoading: usersLoading, refetch: refetchUsers } = useQuery({

@@ -59,7 +59,21 @@ TEMPLATE_REGISTRY = {
     },
     "customer_letter_logo_v1print": {
         "name": "Customer Migration Letter",
-        "description": "Customer Migration Letter (Logo V1 Print)",
+        "description": "Customer Migration Notice (MSAN Copper to Fibre / 4G LTE)",
+        "renderer": CustomerLetterRenderer,
+        "parser": parse_customer_letter,
+        "ready": True,
+    },
+    "customer_migration_letter": {
+        "name": "Customer Migration Letter",
+        "description": "Customer Migration Notice (MSAN Copper to Fibre / 4G LTE)",
+        "renderer": CustomerLetterRenderer,
+        "parser": parse_customer_letter,
+        "ready": True,
+    },
+    "customer_letter": {
+        "name": "Customer Migration Letter",
+        "description": "Customer Migration Notice (MSAN Copper to Fibre / 4G LTE)",
         "renderer": CustomerLetterRenderer,
         "parser": parse_customer_letter,
         "ready": True,

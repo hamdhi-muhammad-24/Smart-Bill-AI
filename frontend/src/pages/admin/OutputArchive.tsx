@@ -4,7 +4,7 @@ import { Folder, FolderOpen, FileText, ChevronRight, Download, Eye, Loader2 } fr
 import { getOutputDates, getOutputCycles, getOutputBatches, getOutputPdfs, fetchPdfBlobUrl } from '../../lib/api'
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
+import { cn, formatCycleDisplayName } from '@/lib/utils'
 
 export default function OutputArchive() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -70,7 +70,7 @@ export default function OutputArchive() {
             {selectedCycle && (
               <>
                 <ChevronRight size={14} className="text-muted-foreground" />
-                <span className="cursor-pointer hover:text-foreground" onClick={() => setSelectedBatch(null)}>{selectedCycle.replace('_', ' ')}</span>
+                <span className="cursor-pointer hover:text-foreground" onClick={() => setSelectedBatch(null)}>{formatCycleDisplayName(selectedCycle)}</span>
               </>
             )}
             {selectedBatch && (
@@ -99,7 +99,7 @@ export default function OutputArchive() {
               cyclesData?.cycles.map(cycle => (
                 <div key={cycle} onClick={() => setSelectedCycle(cycle)} className="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-muted text-sm">
                   <Folder size={16} className="text-amber-400 fill-amber-400/20" />
-                  <span className="font-medium">{cycle.replace('_', ' ')}</span>
+                  <span className="font-medium">{formatCycleDisplayName(cycle)}</span>
                 </div>
               ))
             ) : !selectedBatch ? (

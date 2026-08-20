@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, invalidate_user_cache
 from app.auth.schemas import UserOut
 from app.db.models import (
     PermissionRequest,
@@ -167,6 +167,7 @@ def create_user(
 
     db.commit()
     db.refresh(new_user)
+    invalidate_user_cache(new_user.email)
     return _to_user_response(db, new_user)
 
 
@@ -188,8 +189,10 @@ def delete_user(
             detail="Cannot delete your own account",
         )
 
+    target_email = user.email
     db.delete(user)
     db.commit()
+    invalidate_user_cache(target_email)
     return None
 
 
@@ -233,6 +236,7 @@ def update_user_roles(
 
     db.commit()
     db.refresh(user)
+    invalidate_user_cache(user.email)
     return _to_user_response(db, user)
 
 
@@ -427,6 +431,7 @@ def approve_permission_request(
     pr.reviewed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(pr)
+    invalidate_user_cache(pr.email)
 
     return PermissionRequestResponse(
         id=pr.id,

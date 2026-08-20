@@ -113,52 +113,83 @@ def load_customers(limit: Optional[int] = None) -> List[Customer]:
 
 def parse_customer_letter(file_path: str, limit: Optional[int] = None, offset: int = 0) -> List[Customer]:
     import os
+    import io
     if not os.path.exists(file_path):
         if os.path.exists(str(C.DATA_XLSX)):
             file_path = str(C.DATA_XLSX)
         else:
             raise FileNotFoundError(f"Customer Letter file not found: {file_path}")
 
-    import io
-    if str(file_path).lower().endswith(".processing") or not str(file_path).lower().endswith(('.xlsx', '.xlsm', '.xltx', '.xltm')):
-        with open(file_path, "rb") as f:
-            in_mem = io.BytesIO(f.read())
-        wb = openpyxl.load_workbook(in_mem, data_only=True)
-    else:
-        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+    # Safe offset and limit normalization
+    try:
+        offset_num = int(offset) if offset is not None else 0
+    except (ValueError, TypeError):
+        offset_num = 0
+    if offset_num < 0:
+        offset_num = 0
 
-    ws = wb[C.SHEET_NAME] if C.SHEET_NAME and C.SHEET_NAME in wb.sheetnames else wb.worksheets[0]
+    try:
+        limit_num = int(limit) if limit is not None else None
+    except (ValueError, TypeError):
+        limit_num = None
+    if limit_num is not None and limit_num <= 0:
+        return []
 
-    rows = ws.iter_rows(values_only=True)
-    header = None
-    for values in rows:
-        candidate = [str(h).strip() if h is not None else "" for h in values]
-        if C.COL_ACCOUNT in candidate or any("ACCOUNT" in str(c).upper() for c in candidate) or "ADDR_FULL" in candidate:
-            header = candidate
-            break
-
-    if header is None:
-        header = [f"col_{i}" for i in range(50)]
-
+    clean_path = file_path[:-11] if file_path.lower().endswith(".processing") else file_path
     customers: List[Customer] = []
-    for values in rows:
-        if values is None or all(v is None for v in values):
-            continue
-        row = dict(zip(header, values))
-        customers.append(
-            Customer(
-                name=_pick_name(row),
-                address_lines=_build_address_lines(row),
-                telephone=_resolve_phone(row),
-                raw=row,
-            )
-        )
-    wb.close()
+    current_idx = 0
+    target_max = (offset_num + limit_num) if limit_num is not None else None
 
-    if offset > 0:
-        customers = customers[offset:]
-    if limit is not None and limit > 0:
-        customers = customers[:limit]
+    with open(file_path, "rb") as f:
+        if str(file_path).lower().endswith(".processing") or not str(clean_path).lower().endswith(('.xlsx', '.xlsm', '.xltx', '.xltm')):
+            in_mem = io.BytesIO(f.read())
+            wb = openpyxl.load_workbook(in_mem, data_only=True)
+        else:
+            wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+
+        ws = wb[C.SHEET_NAME] if C.SHEET_NAME and C.SHEET_NAME in wb.sheetnames else wb.worksheets[0]
+
+        rows = ws.iter_rows(values_only=True)
+        header = None
+        for values in rows:
+            candidate = [str(h).strip() if h is not None else "" for h in values]
+            if (
+                C.COL_ACCOUNT in candidate 
+                or any("ACCOUNT" in str(c).upper() for c in candidate) 
+                or "ADDR_FULL" in candidate
+                or "SERIAL_NUM" in candidate
+                or "CUSTOMER_REF" in candidate
+            ):
+                header = candidate
+                break
+
+        if header is None:
+            header = [f"col_{i}" for i in range(50)]
+
+        for values in rows:
+            if values is None or all(v is None for v in values):
+                continue
+
+            if offset_num > 0 and current_idx < offset_num:
+                current_idx += 1
+                continue
+
+            if target_max is not None and current_idx >= target_max:
+                break
+
+            row = dict(zip(header, values))
+            customers.append(
+                Customer(
+                    name=_pick_name(row),
+                    address_lines=_build_address_lines(row),
+                    telephone=_resolve_phone(row),
+                    raw=row,
+                )
+            )
+            current_idx += 1
+
+        wb.close()
+
     return customers
 
 

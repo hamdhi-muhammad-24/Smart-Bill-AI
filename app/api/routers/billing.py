@@ -56,6 +56,7 @@ from processing.output_manager import (
     get_pdf_path,
 )
 from templates.registry import TEMPLATE_REGISTRY
+from app.billing.worker_queue import TEMPLATE_FOLDER_MAP
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -250,12 +251,22 @@ def get_stats(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1
         BillingSchedule.is_active == True
     ).scalar() or 0
 
-    # Per-cycle summary (including Test_GMFs)
+    # Per-cycle summary (including Test_GMFs) - single batch query
+    target_folders = ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs")
+    folder_uploads = db.query(GmfUpload.folder_type, GmfUpload.status).filter(
+        GmfUpload.folder_type.in_(target_folders)
+    ).all()
+
+    grouped_statuses: dict[str, list[str]] = {f: [] for f in target_folders}
+    for f_type, status in folder_uploads:
+        if f_type in grouped_statuses:
+            status_val = status.value if hasattr(status, "value") else str(status)
+            grouped_statuses[f_type].append(status_val)
+
     cycles = {}
-    for folder in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs"):
-        uploads = db.query(GmfUpload).filter(GmfUpload.folder_type == folder).all()
-        if uploads:
-            statuses = [u.status.value for u in uploads]
+    for folder in target_folders:
+        statuses = grouped_statuses[folder]
+        if statuses:
             if all(s == "COMPLETED" for s in statuses):
                 cycle_status = "completed"
             elif any(s == "GENERATING" for s in statuses):
@@ -268,7 +279,7 @@ def get_stats(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1
             cycle_status = "no_gmf"
 
         cycles[folder] = {
-            "received": len(uploads),
+            "received": len(statuses),
             "status": cycle_status,
         }
 
@@ -293,6 +304,77 @@ def get_stats(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1
 # GMF Uploads
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set) -> tuple:
+    """
+    Returns (approved_total_records, approved_remaining_records, is_fully_approved).
+    - approved_total_records: total customer records in this upload matching approved templates.
+    - approved_remaining_records: records still pending generation for approved templates.
+    - is_fully_approved: True if all detected templates in the upload are approved.
+    """
+    f_type = upload.folder_type or ""
+    processed = upload.processed_records_count or 0
+
+    # Case 1: Spreadsheets / Special cycle folders
+    if f_type in ("LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "Customer_Letter_Logo_V1Print", "Customer_Migration_Letter"):
+        mapped = {
+            "LOD": {"lod"},
+            "VAT_Confirmation": {"vat_confirmation"},
+            "Final_Notice": {"final_notice"},
+            "Customer_Letter": {"customer_letter_logo_v1print", "customer_migration_letter", "customer_letter"},
+            "Customer_Letter_Logo_V1Print": {"customer_letter_logo_v1print", "customer_migration_letter", "customer_letter"},
+            "Customer_Migration_Letter": {"customer_letter_logo_v1print", "customer_migration_letter", "customer_letter"},
+        }.get(f_type, set())
+        
+        is_app = bool(mapped.intersection(approved_templates))
+        tot = upload.total_records_count or 1
+        app_tot = tot if is_app else 0
+        app_rem = max(0, app_tot - processed)
+        return app_tot, app_rem, is_app
+
+    # Case 2: Single GMF file (1 document / 1 record)
+    tot = upload.total_records_count or 1
+    if tot <= 1:
+        t_id = (upload.template_detected or "").strip()
+        is_app = t_id in approved_templates if t_id else False
+        app_tot = 1 if is_app else 0
+        app_rem = max(0, app_tot - processed)
+        return app_tot, app_rem, is_app
+
+    # Case 3: Bulk Multi-Document GMF file
+    if upload.template_breakdown:
+        try:
+            bd = json.loads(upload.template_breakdown)
+            if isinstance(bd, dict) and bd:
+                tot_in_bd = sum(bd.values())
+                app_tot = sum(cnt for tid, cnt in bd.items() if tid in approved_templates)
+                is_fully = (app_tot == tot_in_bd) and (tot_in_bd > 0)
+                app_rem = max(0, app_tot - processed)
+                return app_tot, app_rem, is_fully
+        except Exception:
+            pass
+
+    # Fallback for bulk GMF without breakdown JSON
+    raw_detected = str(upload.template_detected or "")
+    for char in ['(', ')', "'", '"']:
+        raw_detected = raw_detected.replace(char, '')
+    detected_list = [t.strip() for t in raw_detected.split(",") if t.strip() and not t.strip().isdigit()]
+    
+    if not detected_list:
+        return 0, 0, False
+
+    matching = [t for t in detected_list if t in approved_templates]
+    is_fully = len(matching) == len(detected_list)
+    if is_fully:
+        app_tot = tot
+    elif matching:
+        app_tot = max(1, int(tot * (len(matching) / len(detected_list))))
+    else:
+        app_tot = 0
+
+    app_rem = max(0, app_tot - processed)
+    return app_tot, app_rem, is_fully
+
+
 @router.get("/pending-batches")
 def get_pending_batches(
     db: Session = Depends(get_db),
@@ -304,30 +386,42 @@ def get_pending_batches(
     if billing_mode == "auto":
         return []
 
+    # Get all active approved templates
+    app_tmpls = db.query(InvoiceTemplate).filter(
+        InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED,
+        InvoiceTemplate.is_active == True
+    ).all()
+    approved_templates = {t.template_code for t in app_tmpls}
+    if "customer_letter_logo_v1print" in approved_templates:
+        approved_templates.add("customer_migration_letter")
+        approved_templates.add("customer_letter")
+
     pending_uploads = db.query(GmfUpload).filter(
         GmfUpload.status.in_([GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED]),
         GmfUpload.folder_type != "Test_GMFs",
-        or_(
-            GmfUpload.billing_run_id.is_(None),
-            GmfUpload.total_records_count == 0,
-            GmfUpload.processed_records_count < GmfUpload.total_records_count
-        )
+        GmfUpload.billing_run_id.is_(None),
     ).order_by(GmfUpload.detected_at.asc()).all()
 
     cycles = {}
     dates = {}
     for upload in pending_uploads:
+        app_tot, app_rem, _ = _calculate_upload_approved_counts(upload, approved_templates)
+        # ONLY include uploads that have remaining approved records ready for generation
+        if app_rem <= 0:
+            continue
+
         c = upload.cycle_number or upload.folder_type
         if c not in cycles:
             cycles[c] = []
             dates[c] = upload.detected_at.strftime("%Y-%m-%d")
-        cycles[c].append(upload)
-        
+        cycles[c].append((upload, app_tot, app_rem))
+
     batches = []
-    for c, uploads_list in sorted(cycles.items(), key=lambda x: str(x[0])):
-        upload_ids = [u.id for u in uploads_list]
-        proc = sum(u.processed_records_count or 0 for u in uploads_list)
-        tot = sum(u.total_records_count or 0 for u in uploads_list)
+    for c, items_list in sorted(cycles.items(), key=lambda x: str(x[0])):
+        upload_ids = [u.id for u, _, _ in items_list]
+        proc = sum(u.processed_records_count or 0 for u, _, _ in items_list)
+        tot = sum(app_tot for _, app_tot, _ in items_list)
+        rem = sum(app_rem for _, _, app_rem in items_list)
         batches.append({
             "cycle_number": c,
             "date": dates[c],
@@ -336,7 +430,7 @@ def get_pending_batches(
             "upload_ids": upload_ids,
             "processed_records": proc,
             "total_records": tot,
-            "remaining_records": max(0, tot - proc) if tot > 0 else 0
+            "remaining_records": rem
         })
             
     return batches
@@ -529,70 +623,136 @@ def get_upload_summary(
     breakdown = []
     total_docs = upload.total_records_count or 1
     
-    # Locate existing file on disk with fallbacks
-    file_path = upload.file_path
-    if not os.path.exists(file_path):
-        fn = upload.filename
-        fallbacks = [
-            settings.queue_incoming_dir / fn,
-            settings.queue_pending_dir / fn,
-            settings.gmf_drive_path / "Processed" / (upload.folder_type or "unknown") / fn,
-            settings.gmf_drive_path / "Staged" / fn,
-            settings.gmf_drive_path / (upload.folder_type or "") / fn
-        ]
-        for fb in fallbacks:
-            if os.path.exists(fb):
-                file_path = str(fb)
-                break
+    app_tmpls = db.query(InvoiceTemplate).filter(
+        InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED,
+        InvoiceTemplate.is_active == True
+    ).all()
+    approved_templates = {t.template_code for t in app_tmpls}
+    if "customer_letter_logo_v1print" in approved_templates:
+        approved_templates.add("customer_migration_letter")
+        approved_templates.add("customer_letter")
 
-    active_templates = set(
-        t.template_code for t in db.query(InvoiceTemplate).filter(InvoiceTemplate.is_active == True).all()
-    )
+    rej_tmpls = db.query(InvoiceTemplate).filter(
+        InvoiceTemplate.approval_status == TemplateApprovalStatus.REJECTED
+    ).all()
+    rejected_templates = {t.template_code for t in rej_tmpls}
 
-    if os.path.exists(file_path):
+    processed = upload.processed_records_count or 0
+    if upload.status == GmfUploadStatus.COMPLETED:
+        processed = total_docs
+
+    def _fmt_tname(tid: str) -> str:
+        tid_lower = tid.lower()
+        if tid_lower in ("customer_letter_logo_v1print", "customer_letter", "customer_migration_letter"):
+            return "Customer Migration Letter"
+        if tid_lower == "lod":
+            return "Letter of Demand (LOD)"
+        if tid_lower == "vat_confirmation":
+            return "VAT Confirmation"
+        if tid_lower == "final_notice":
+            return "Final Notice"
+        return tid.replace("_", " ").title()
+
+    # 1. Use stored template_breakdown JSON if available
+    if upload.template_breakdown:
         try:
-            docs = split_gmf_documents(file_path)
-            if docs:
-                total_docs = len(docs)
-                with tempfile.TemporaryDirectory(prefix="gmf_summary_") as tmp:
-                    counts = {}
-                    for idx, doc_lines in enumerate(docs, start=1):
-                        tmp_path = write_doc_to_temp(doc_lines, tmp, upload.filename, idx)
-                        ident = identify_template(tmp_path)
-                        t_id = ident.template_id or "unknown"
-                        counts[t_id] = counts.get(t_id, 0) + 1
+            bd = json.loads(upload.template_breakdown)
+            if isinstance(bd, dict) and bd:
+                tot_bd = sum(bd.values())
+                acc_processed = processed
+                for t_id, count in bd.items():
+                    is_app = t_id in approved_templates
+                    is_rej = t_id in rejected_templates
+                    status_str = "APPROVED" if is_app else ("REJECTED" if is_rej else "PENDING_APPROVAL")
+                    
+                    # Estimate processed count for this specific template if file is in progress
+                    if is_app:
+                        t_proc = min(count, acc_processed)
+                        acc_processed = max(0, acc_processed - t_proc)
+                    else:
+                        t_proc = 0
 
-                    for t_id, count in counts.items():
-                        is_active = t_id in active_templates
-                        breakdown.append({
-                            "template_id": t_id,
-                            "template_name": t_id.replace("_", " ").title(),
-                            "count": count,
-                            "is_approved": is_active,
-                            "status": "APPROVED" if is_active else "PENDING_APPROVAL"
-                        })
+                    breakdown.append({
+                        "template_id": t_id,
+                        "template_name": _fmt_tname(t_id),
+                        "count": count,
+                        "processed_count": t_proc,
+                        "is_approved": is_app,
+                        "status": status_str,
+                    })
         except Exception:
             pass
 
-    # Fallback breakdown if file parsing was not possible
+    # 2. If no stored breakdown, parse from disk file
+    if not breakdown:
+        # Locate existing file on disk with fallbacks
+        file_path = upload.file_path
+        if not os.path.exists(file_path):
+            fn = upload.filename
+            fallbacks = [
+                settings.queue_incoming_dir / fn,
+                settings.queue_pending_dir / fn,
+                settings.gmf_drive_path / "Processed" / (upload.folder_type or "unknown") / fn,
+                settings.gmf_drive_path / "Staged" / fn,
+                settings.gmf_drive_path / (upload.folder_type or "") / fn
+            ]
+            for fb in fallbacks:
+                if os.path.exists(fb):
+                    file_path = str(fb)
+                    break
+
+        if os.path.exists(file_path):
+            try:
+                from core.gmf_splitter import count_documents_with_breakdown
+                tot_cnt, bd_dict = count_documents_with_breakdown(file_path)
+                if bd_dict:
+                    acc_processed = processed
+                    for t_id, count in bd_dict.items():
+                        is_app = t_id in approved_templates
+                        is_rej = t_id in rejected_templates
+                        status_str = "APPROVED" if is_app else ("REJECTED" if is_rej else "PENDING_APPROVAL")
+                        if is_app:
+                            t_proc = min(count, acc_processed)
+                            acc_processed = max(0, acc_processed - t_proc)
+                        else:
+                            t_proc = 0
+                        breakdown.append({
+                            "template_id": t_id,
+                            "template_name": _fmt_tname(t_id),
+                            "count": count,
+                            "processed_count": t_proc,
+                            "is_approved": is_app,
+                            "status": status_str,
+                        })
+            except Exception:
+                pass
+
+    # 3. Fallback breakdown if file parsing was not possible
     if not breakdown and upload.template_detected:
         raw = str(upload.template_detected)
         for char in ['(', ')', "'", '"']:
             raw = raw.replace(char, '')
         parts = [p.strip() for p in raw.split(',') if p.strip() and not p.strip().isdigit()]
+        acc_processed = processed
         for t_id in parts:
-            is_active = t_id in active_templates
+            is_app = t_id in approved_templates
+            is_rej = t_id in rejected_templates
+            status_str = "APPROVED" if is_app else ("REJECTED" if is_rej else "PENDING_APPROVAL")
+            cnt = total_docs if len(parts) == 1 else max(1, total_docs // len(parts))
+            if is_app:
+                t_proc = min(cnt, acc_processed)
+                acc_processed = max(0, acc_processed - t_proc)
+            else:
+                t_proc = 0
             breakdown.append({
                 "template_id": t_id,
-                "template_name": t_id.replace("_", " ").title(),
-                "count": total_docs if len(parts) == 1 else max(1, total_docs // len(parts)),
-                "is_approved": is_active,
-                "status": "APPROVED" if is_active else "PENDING_APPROVAL"
+                "template_name": _fmt_tname(t_id),
+                "count": cnt,
+                "processed_count": t_proc,
+                "is_approved": is_app,
+                "status": status_str,
             })
 
-    processed = upload.processed_records_count or 0
-    if upload.status == GmfUploadStatus.COMPLETED:
-        processed = total_docs
     remaining = max(0, total_docs - processed)
 
     return {
@@ -756,22 +916,67 @@ def generate_batch_endpoint(
 
     settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
     
-    # Calculate expected total accounts for this batch run
-    remaining_records = sum(max(0, (u.total_records_count or 1) - (u.processed_records_count or 0)) for u in uploads)
-    expected_count = min(req.limit, remaining_records) if req.limit else remaining_records
-    total_accounts = max(1, expected_count)
+    # Calculate expected total accounts for this batch run using ONLY approved remaining records
+    app_tmpls = db.query(InvoiceTemplate).filter(
+        InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED,
+        InvoiceTemplate.is_active == True
+    ).all()
+    approved_templates = {t.template_code for t in app_tmpls}
+    if "customer_letter_logo_v1print" in approved_templates:
+        approved_templates.add("customer_migration_letter")
+        approved_templates.add("customer_letter")
+
+    # Filter eligible uploads and allocate batch record limit across them
+    valid_uploads_with_limits = []
+    remaining_budget = req.limit if req.limit is not None else None
+    allocated_total = 0
+
+    for upload in uploads:
+        if upload.status == GmfUploadStatus.GENERATING:
+            continue
+        if upload.billing_run_id is not None:
+            active_run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
+            if active_run and active_run.status == RunStatus.RUNNING:
+                continue
+        if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.PARTIALLY_PROCESSED):
+            continue
+        if not os.path.exists(upload.file_path):
+            continue
+
+        app_tot, app_rem, _ = _calculate_upload_approved_counts(upload, approved_templates)
+        if app_rem <= 0:
+            continue
+
+        if remaining_budget is not None:
+            if remaining_budget <= 0:
+                break
+            file_limit = min(app_rem, remaining_budget)
+            remaining_budget -= file_limit
+        else:
+            file_limit = None
+
+        allocated_total += (file_limit if file_limit is not None else app_rem)
+        valid_uploads_with_limits.append((upload, file_limit))
+
+    if not valid_uploads_with_limits:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected batch is already actively generating or has no valid pending records. Please wait for the current run to finish."
+        )
+
+    total_accounts = max(1, allocated_total)
 
     today_str = datetime.now().strftime("%Y-%m-%d")
-    first_up = uploads[0] if uploads else None
+    first_up = valid_uploads_with_limits[0][0] if valid_uploads_with_limits else None
     f_type = first_up.folder_type if first_up else ""
     t_id = first_up.template_detected if first_up else ""
-    folder_name = f_type if f_type in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter") else TEMPLATE_FOLDER_MAP.get(str(t_id), str(t_id) or "output")
+    folder_name = f_type if f_type in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "Customer_Letter_Logo_V1Print", "Customer_Migration_Letter") else TEMPLATE_FOLDER_MAP.get(str(t_id), str(t_id) or "output")
     out_dir_path = str(settings.output_dir / today_str / folder_name)
 
     # Create BillingRun to track progress
     run = BillingRun(
         batch_name=f"Batch {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        cycle_number=uploads[0].cycle_number if (uploads and hasattr(uploads[0], "cycle_number")) else None,
+        cycle_number=first_up.cycle_number if (first_up and hasattr(first_up, "cycle_number")) else None,
         period_start=date.today(),
         period_end=date.today(),
         status=RunStatus.RUNNING,
@@ -785,48 +990,41 @@ def generate_batch_endpoint(
     db.flush()
     run_id = run.id
     
-    # First, mark uploads as approved and set billing_run_id in DB, and commit
-    valid_uploads = []
-    for upload in uploads:
-        if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.PARTIALLY_PROCESSED):
-            continue
-        if not os.path.exists(upload.file_path):
-            continue
-        upload.status = GmfUploadStatus.APPROVED
+    # Mark staged uploads as GENERATING
+    for upload, _ in valid_uploads_with_limits:
+        upload.status = GmfUploadStatus.GENERATING
         upload.billing_run_id = run.id
-        valid_uploads.append(upload)
         
     db.commit()
     
     # CRITICAL: After this commit, background workers may immediately start
     # processing files and incrementing run.succeeded / run.failed in the DB.
-    # We must NOT write stale cached values (succeeded=0, failed=0) back to the
-    # DB in the second commit below. Expire the run object so SQLAlchemy will
-    # re-read from DB if we access its attributes, and avoid setting succeeded/failed.
     db.expire(run)
     
     # Now, copy the files to incoming queue AFTER database transaction has committed
     success_count = 0
     staging_failures = 0
-    for upload in valid_uploads:
+    for upload, file_limit in valid_uploads_with_limits:
         filename = Path(upload.file_path).name
         try:
+            # 1. Write sidecar JSON metadata FIRST before placing the data file in the queue
+            meta_path = settings.queue_incoming_dir / f"{filename}.meta.json"
+            meta_data = {
+                "upload_id": upload.id,
+                "offset": upload.processed_records_count or 0,
+                "limit": file_limit,
+                "billing_run_id": run_id,
+                "approved_templates": list(approved_templates),
+            }
+            with open(meta_path, "w", encoding="utf-8") as meta_f:
+                json.dump(meta_data, meta_f)
+
+            # 2. Copy data file to queue
             new_path = settings.queue_incoming_dir / filename
             if os.path.exists(new_path):
                 os.remove(new_path)
             if str(Path(upload.file_path)) != str(new_path):
                 shutil.copy2(upload.file_path, str(new_path))
-
-            # Write sidecar JSON metadata for worker queue (offset & limit)
-            meta_path = settings.queue_incoming_dir / f"{filename}.meta.json"
-            meta_data = {
-                "upload_id": upload.id,
-                "offset": upload.processed_records_count or 0,
-                "limit": req.limit,
-                "billing_run_id": run_id,
-            }
-            with open(meta_path, "w", encoding="utf-8") as meta_f:
-                json.dump(meta_data, meta_f)
 
             success_count += 1
         except Exception as e:
@@ -1274,9 +1472,18 @@ def update_template_status(
     )
     db.add(hist)
     
+    app_tmpls = db.query(InvoiceTemplate).filter(
+        InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED,
+        InvoiceTemplate.is_active == True
+    ).all()
+    approved_templates = {t.template_code for t in app_tmpls}
+    if "customer_letter_logo_v1print" in approved_templates:
+        approved_templates.add("customer_migration_letter")
+        approved_templates.add("customer_letter")
+
     if new_status == TemplateApprovalStatus.APPROVED:
         all_pending = db.query(GmfUpload).filter(
-            GmfUpload.status.in_([GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.REJECTED])
+            GmfUpload.status.in_([GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.REJECTED, GmfUploadStatus.PARTIALLY_PROCESSED])
         ).all()
         
         candidate_uploads = []
@@ -1292,59 +1499,55 @@ def update_template_status(
                     pass
         non_test_uploads = []
         for upload in candidate_uploads:
-            raw_detected = str(upload.template_detected or "")
-            for char in ['(', ')', "'", '"']:
-                raw_detected = raw_detected.replace(char, '')
-            detected_list = [t.strip() for t in raw_detected.split(",") if t.strip() and not t.strip().isdigit()]
-
-            if detected_list and not any(t in target_ids_set for t in detected_list):
-                continue
-
-
-            if upload.folder_type != "Test_GMFs":
-                old_path = Path(upload.file_path)
-
-                if billing_mode == "auto":
-                    new_path = settings.queue_incoming_dir / upload.filename
-                    if old_path.exists():
-                        upload.status = GmfUploadStatus.APPROVED
-                        upload.rejection_reason = None
-                        try:
-                            settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
-                            if old_path != new_path:
-                                if new_path.exists():
-                                    new_path.unlink()
-                                shutil.move(str(old_path), str(new_path))
-                                upload.file_path = str(new_path)
-                            non_test_uploads.append(upload)
-                        except Exception as e:
-                            logger.error(f"Failed to move file {upload.filename} to incoming queue: {e}")
-                    else:
-                        upload.status = GmfUploadStatus.APPROVED
-                        upload.rejection_reason = None
-                        non_test_uploads.append(upload)
-                else:
-                    new_path = settings.queue_pending_dir / upload.filename
-                    if old_path.exists():
-                        upload.status = GmfUploadStatus.APPROVED
-                        upload.rejection_reason = None
-                        upload.billing_run_id = None
-                        try:
-                            settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
-                            if old_path != new_path:
-                                if new_path.exists():
-                                    new_path.unlink()
-                                shutil.move(str(old_path), str(new_path))
-                                upload.file_path = str(new_path)
-                        except Exception as e:
-                            logger.error(f"Failed to ensure file {upload.filename} in pending queue: {e}")
-                    else:
-                        upload.status = GmfUploadStatus.APPROVED
-                        upload.rejection_reason = None
-                        upload.billing_run_id = None
-            else:
+            if upload.folder_type == "Test_GMFs":
                 upload.status = GmfUploadStatus.APPROVED
                 upload.rejection_reason = None
+                continue
+
+            app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, approved_templates)
+            proc = upload.processed_records_count or 0
+
+            if is_fully:
+                target_status = GmfUploadStatus.APPROVED if proc == 0 else GmfUploadStatus.PARTIALLY_PROCESSED
+            elif app_tot > 0:
+                target_status = GmfUploadStatus.PARTIALLY_PROCESSED
+            else:
+                target_status = GmfUploadStatus.PENDING_APPROVAL
+
+            upload.status = target_status
+            upload.rejection_reason = None
+            old_path = Path(upload.file_path)
+
+            if billing_mode == "auto" and is_fully:
+                new_path = settings.queue_incoming_dir / upload.filename
+                if old_path.exists():
+                    try:
+                        settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
+                        if old_path != new_path:
+                            if new_path.exists():
+                                new_path.unlink()
+                            shutil.move(str(old_path), str(new_path))
+                            upload.file_path = str(new_path)
+                        non_test_uploads.append(upload)
+                    except Exception as e:
+                        logger.error(f"Failed to move file {upload.filename} to incoming queue: {e}")
+                else:
+                    non_test_uploads.append(upload)
+            else:
+                new_path = settings.queue_pending_dir / upload.filename
+                if old_path.exists():
+                    upload.billing_run_id = None
+                    try:
+                        settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
+                        if old_path != new_path:
+                            if new_path.exists():
+                                new_path.unlink()
+                            shutil.move(str(old_path), str(new_path))
+                            upload.file_path = str(new_path)
+                    except Exception as e:
+                        logger.error(f"Failed to ensure file {upload.filename} in pending queue: {e}")
+                else:
+                    upload.billing_run_id = None
 
         # In Auto Mode, automatically generate invoices immediately
         if billing_mode == "auto" and non_test_uploads:
@@ -1375,32 +1578,34 @@ def update_template_status(
 
     elif new_status == TemplateApprovalStatus.REJECTED:
         candidate_uploads = db.query(GmfUpload).filter(
-            GmfUpload.status.in_([GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.APPROVED])
+            GmfUpload.status.in_([GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED])
         ).all()
         for upload in candidate_uploads:
-            raw_detected = str(upload.template_detected or "")
-            for char in ['(', ')', "'", '"']:
-                raw_detected = raw_detected.replace(char, '')
-            detected_list = [t.strip() for t in raw_detected.split(",") if t.strip() and not t.strip().isdigit()]
-
-            if detected_list and not any(t in target_ids_set for t in detected_list):
+            if upload.folder_type == "Test_GMFs":
+                if upload.template_detected == template_id:
+                    upload.status = GmfUploadStatus.REJECTED
+                    upload.rejection_reason = body.reason
                 continue
 
+            app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, approved_templates)
+            if app_tot == 0:
+                upload.status = GmfUploadStatus.REJECTED
+                upload.rejection_reason = body.reason
+            elif not is_fully:
+                upload.status = GmfUploadStatus.PARTIALLY_PROCESSED
+                upload.rejection_reason = None
 
-            if upload.folder_type != "Test_GMFs":
-                old_path = Path(upload.file_path)
-                new_path = settings.queue_pending_dir / upload.filename
-                try:
-                    settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
-                    if old_path.exists() and old_path != new_path:
-                        if new_path.exists():
-                            new_path.unlink()
-                        shutil.move(str(old_path), str(new_path))
-                        upload.file_path = str(new_path)
-                except Exception as e:
-                    logger.error(f"Failed to move file {upload.filename} to pending queue: {e}")
-            upload.status = GmfUploadStatus.REJECTED
-            upload.rejection_reason = body.reason
+            old_path = Path(upload.file_path)
+            new_path = settings.queue_pending_dir / upload.filename
+            try:
+                settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
+                if old_path.exists() and old_path != new_path:
+                    if new_path.exists():
+                        new_path.unlink()
+                    shutil.move(str(old_path), str(new_path))
+                    upload.file_path = str(new_path)
+            except Exception as e:
+                logger.error(f"Failed to move file {upload.filename} to pending queue: {e}")
 
     db.commit()
     return {"message": "Status updated successfully", "status": new_status.value}

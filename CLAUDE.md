@@ -5,158 +5,160 @@
 # state of the project. Always read it before starting any task.
 # ============================================================
 
-## What We Have Built
+## System Overview
 
-A **fully deployed production telecom billing system** for SLT (Sri Lanka Telecom) that generates PDF e-bills from GMF (billing data files) in batch. The system is live on a production VM and also runs locally.
+The **SLT E-Bill System** is an enterprise-grade billing, demand notice, and envelope composition platform built for Sri Lanka Telecom (SLT). It ingests billing data files (GMF text formats, Excel `.xlsx`/`.xls`, CSV), identifies the appropriate invoice/notice template, renders pixel-perfect PDF bills and notices in bulk, and composes marketing artwork onto postal envelopes.
 
-**System is COMPLETE and DEPLOYED. All core phases are done. Current work is iterative improvements.**
+The system is deployed on a production Linux VM and also supports full local Windows development.
 
 ---
 
 ## Architecture Overview
 
 ```
-frontend/           React + Vite + Tailwind — Admin UI (port 8080 in prod, 5173 in dev)
+frontend/                 React 18 + Vite + Tailwind CSS + Lucide Icons + Shadcn UI
+  src/
+    auth/                 Microsoft MSAL config & AuthProvider (Azure AD + Graph API)
+    components/           AdminLayout, Admin1Layout, EnvelopeLayout, ManagerLayout, UI kit
+    lib/                  api.ts (REST client), uploadQueue.ts, utils
+    pages/
+      Login.tsx           Single Sign-On (Microsoft Entra ID) + Dev quick logins
+      RoleSelector.tsx    Portal selector for users holding multiple roles
+      RequestAccess.tsx   Self-service role permission request workflow
+      PublicPortal.tsx    Public facing landing page
+      admin/              System Admin Console (Dashboard, Monitor, Preview, Generation, Archive, Templates, Logs)
+      envelope/           Envelope Operations Portal (Dashboard, Manager Workspace, Saved Artwork Gallery)
 app/
-  api/routers/      FastAPI HTTP layer — thin, only validates + calls services
-  billing/          Core billing engine: worker_queue.py, gmf_core/, batch.py
-  uploads/          watcher.py — Watchdog-based filesystem watcher for incoming GMFs
-  db/               models.py, seed.py, base.py (PostgreSQL via SQLAlchemy)
-  auth/             JWT auth (admin / admin1 / customer roles)
-  core/             config.py (Settings via .env), logging, money
-  scheduler/        Celery + Redis for scheduled billing runs
-migrations/         Alembic migration versions
-Models/SmartAI_Bill/  The AI billing engine
-  templates/        template registry + per-template parser + renderer
-    nonvat_home/           ACTIVE
-    nonvat_enterprise/     ACTIVE
-    vat_home/              ACTIVE
-    vat_enterprise/        ACTIVE
-    product_label_grouping/ ACTIVE
-    subscription_ref_grouping/ ACTIVE
-    summary_statement/     ACTIVE
-    invoice_of_summary/    ACTIVE (recently enabled)
-    vat_creditnote/        ACTIVE
-    nonvat_creditnote/     ACTIVE
-docker-compose.prod.yml  Production Docker Compose
-docker-compose.yml       Dev Compose (only Redis + Mailpit)
+  api/
+    main.py               FastAPI application factory, CORS, auto-migrations, scheduler init
+    routers/
+      billing.py          Billing runs, GMF uploads, template approvals, stats, output archive
+      envelope.py         Envelope templates, artwork upload, PyMuPDF composite PDF generation
+      users.py            User role grants, access requests, user management API
+      health.py           Health check endpoint
+  auth/                   Azure AD JWT validation + MS Graph fallback + Dev token auth
+  billing/                Worker queue, scheduler, batch management, and GMF core pipeline
+    worker_queue.py       Async background queue with atomic DB increments & file-lock retries
+    gmf_core/             GMF parser, splitter, template identifier, QR/barcode generators
+  core/                   Settings (Pydantic), logging, money arithmetic
+  db/                     SQLAlchemy models (PostgreSQL), Base, SessionLocal, synthetic seed
+  uploads/                watcher.py (Watchdog filesystem watcher for incoming GMFs)
+  scheduler/              Celery + Redis scheduled billing tasks
+migrations/               Alembic migration version scripts
+Models/SmartAI_Bill/      Core billing, demand letter, and envelope rendering engine
+  core/                   GMF reader, splitter, template identifier
+  processing/             Batch processor, PDF compressor, output manager
+  templates/              15 template implementations + Envelope composition
+docker-compose.prod.yml   Production multi-container Docker Compose setup
+docker-compose.yml        Local dev support services (Redis, Mailpit)
+start.ps1                 One-command local development startup script
 ```
 
 ---
 
-## Two Deployments
+## Role-Based Portals & Access Control
+
+The platform uses a role-based access model with multi-role grants (`user_role_grants`) and self-service permission requests (`permission_requests`).
+
+| Role | Portal Route | Primary Capabilities |
+|---|---|---|
+| **ADMIN** | `/admin` | Full system control: billing runs, approvals, template toggles, output archive, activity logs |
+| **GMF_HANDLER** *(ADMIN1)* | `/gmf-handler` | Operations portal: GMF file uploads, format validation, pipeline monitoring |
+| **ENVELOPE_HANDLER** | `/envelope-handler` | Envelope workspace: artwork placement, coordinate mapping, composite generation, gallery |
+| **MANAGER** | `/manager` | User administration: review access requests, assign/revoke portal role grants |
+| **CUSTOMER** | `/` | Public view / awaiting access assignment |
+
+### Authentication Modes:
+1. **Microsoft Entra ID (Azure AD / MSAL):** Enterprise Single Sign-On using Microsoft corporate credentials (`User.Read` scope + Graph API fallback).
+2. **Superuser Account:** `testuser016@intranet.slt.com.lk` (always receives full cross-portal access).
+3. **Local Dev Tokens:** Fast switching via `Bearer dev-admin`, `Bearer dev-gmf`, `Bearer dev-manager`, `Bearer dev-envelope`.
+
+---
+
+## Template Registry (15 Core Bill & Notice Templates)
+
+All templates are registered in `Models/SmartAI_Bill/templates/registry.py`:
+
+| Template ID | Name / Description | Classification / Billstyle |
+|---|---|---|
+| `nonvat_home` | Non-VAT Home Invoice | Sheet 19 — Non-VAT, Home |
+| `nonvat_enterprise` | Non-VAT Enterprise Invoice | Sheet 19 — Non-VAT, Enterprise |
+| `vat_home` | VAT Home Invoice | Sheet 18 — BILLSTYLE=1, BILLTYPE=1, Home |
+| `vat_enterprise` | VAT Enterprise Invoice | Sheet 18 — BILLSTYLE=1, BILLTYPE=1, Enterprise |
+| `lod` | Letter of Demand & Termination | Certified Sinhala/Tamil Translation Notice |
+| `vat_confirmation` | VAT Number Confirmation | VAT Registration Verification Letter |
+| `final_notice` | Final Notice Demand Letter | LTE Final Notice (supports Excel/CSV) |
+| `customer_letter_logo_v1print` | Customer Migration Letter | Logo V1 Print Notice (Excel/CSV) |
+| `product_label_grouping` | Product Label Level Grouping | Sheet 22 — BILLSTYLE=19 |
+| `subscription_ref_grouping` | Subscription Ref Level Grouping | Sheet 23 — BILLSTYLE=20 |
+| `summary_statement` | Summary Statement | Sheet 7 — DOCTYPE=SUMMARYSTATEMENT |
+| `invoice_of_summary` | Invoice of Summary | BILLSTYLE=18 |
+| `vat_creditnote` | VAT Credit Note | BILLSTYLE=6 |
+| `nonvat_creditnote` | Non-VAT Credit Note | BILLSTYLE=16 |
+| `usd_open_item` | USD Open Item | BILLSTYLE=21 (Foreign currency) |
+
+### Envelope Templates (PyMuPDF Compositor):
+- **SLT Large Envelope** (`05717-SLT Large Envelope.pdf` — 1350x1139 pt, aspect 0.70–1.40)
+- **SLT Medium Envelope** (`05717-SLT Medium Envelope.pdf` — 763x981 pt, aspect 1.50–2.50)
+- **SLT Self-Seal A4 Envelope** (`05717-SLT Self Seal-01.pdf` — 589x842 pt, aspect 2.50–4.50)
+
+---
+
+## Deployments & Environments
 
 ### 1. Local Development (Windows)
-- **Start command:** `.\start.ps1`
+- **Start command:** `.\start.ps1` (or `.\start.ps1 --setup` to run migrations + seed)
 - **Frontend:** `http://localhost:5173`
-- **Backend API:** `http://localhost:8090`
-- **GMF Uploads Path:** `G:/My Drive/SLT_GMF_Uploads` (Google Drive mounted locally)
+- **Backend API:** `http://localhost:8090` (Docs: `http://localhost:8090/docs`)
+- **Database:** PostgreSQL on `localhost:5432` (`slt_ebill`)
+- **Worker Queue:** Runs via `app.billing.worker_queue`
+- **GMF Uploads Directory:** `./local_gmf_uploads` (or Google Drive mount)
 - **Output PDFs:** `./output`
-- **Database:** PostgreSQL on localhost:5432
-- **Redis:** Docker on port 16379
 
 ### 2. Production VM (SLM-EKB)
-- **IP:** `206.189.159.175`
+- **Host IP:** `206.189.159.175`
 - **SSH:** `ssh root@206.189.159.175`
-- **Project folder on VM:** `/root/slt-billing`
+- **Project path on VM:** `/root/slt-billing`
 - **Frontend:** `http://206.189.159.175:8080`
 - **Backend API:** `http://206.189.159.175:8000`
-- **GMF Uploads Path (on VM host):** `/var/slt-billing/gmf_uploads` -> mapped to `/app/gmf_uploads` inside containers
-- **Output PDFs (on VM host):** `/var/slt-billing/output_invoices` -> mapped to `/app/output` inside containers
-- **Google Drive Sync:** `rclone` syncs `/var/slt-billing/output_invoices` -> `gdrive:SLT_Output_Invoices` every 5 minutes via cronjob
-- **Services managed by:** Docker Compose (`docker-compose.prod.yml`)
-- **Other projects on VM (DO NOT TOUCH):** `langfuse` (port 3000), `ai_agents` (ports 8100/3100)
+- **GMF Uploads Path:** `/var/slt-billing/gmf_uploads` -> `/app/gmf_uploads`
+- **Output Invoices Path:** `/var/slt-billing/output_invoices` -> `/app/output`
+- **Google Drive Sync:** `rclone` syncs `/var/slt-billing/output_invoices` -> `gdrive:SLT_Output_Invoices` every 5 min via cron.
+- **Docker Compose:** `docker-compose.prod.yml`
+- **Protected other services on VM (DO NOT TOUCH):** `langfuse` (port 3000), `ai_agents` (ports 8100/3100)
 
 ---
 
-## User Accounts
+## Important Development Conventions
 
-| Email | Password | Role | Notes |
-|---|---|---|---|
-| `admin@slt.lk` | `admin123` | ADMIN | Full admin access |
-| `admin1@slt.lk` | `admin1123` | ADMIN1 | File upload + monitoring only |
-
----
-
-## Key Files Changed Recently (July 2026)
-
-### Bug Fixes
-- **`app/billing/worker_queue.py`** — Fixed race condition in status updates. Added `_robust_file_op()` retry wrapper for Windows file locking (WinError 32). Fixed atomic DB increment to avoid lost updates.
-- **`app/api/routers/billing.py`** — Fixed duplicate upload bug by reversing sequence: DB commit -> disk write.
-- **`app/uploads/watcher.py`** — Fixed watcher race condition caused by old file-first sequence.
-- **`reset_test_data.py`** — Added comprehensive filesystem cleanup (queue folders, output, drive subdirs).
-
-### UI Improvements
-- **`frontend/src/pages/admin/GenerationHub.tsx`** — Added `shrink-0` to RunCard to fix overlapping cards when list grows.
-- **`frontend/src/pages/admin/InvoicePreview.tsx`** — Updated mode selector buttons (Auto/Manual) to premium dark/light gradient. Updated "Generate PDF Preview" button to match. Template name badge changed to amber/yellow for clear visibility.
-- **`frontend/src/pages/admin/GmfMonitor.tsx`** — Added "Show Completed" toggle switch.
-- **`frontend/src/pages/admin/UploadCenter.tsx`** — Added GMF file format validation (rejects non-GMF files).
-- **`frontend/src/components/AdminLayout.tsx`** — Cleaned sidebar navigation.
-
-### Infrastructure
-- **`docker-compose.prod.yml`** — Updated all volume mounts to use `/var/slt-billing/` paths and added output volume for persistent storage.
-- **`Models/SmartAI_Bill/templates/registry.py`** — Set `invoice_of_summary` to `ready: True`.
+1. **Exact Money Arithmetic:** Always use `Decimal` with 2 decimal places and `ROUND_HALF_UP`. Never use IEEE `float` for monetary calculations.
+2. **Framework-Independent Billing Engine:** `Models/SmartAI_Bill/` contains pure parsing and rendering logic without FastAPI or web dependencies.
+3. **Thin API Layer:** Routers in `app/api/routers/` handle validation, database transactions, and call engine services; do not put raw billing math or rendering code in routers.
+4. **Idempotent Batch Runs & Atomic Increments:** Use atomic SQL increments (`processed_records_count`) and robust file operation retries (`_robust_file_op`) to avoid Windows/Linux file locking issues.
+5. **Preserve System Stability:** Never alter running production workflows, background worker queues, or template registry schemas without verifying backwards compatibility.
+6. **No PII in Git:** Test files and seed data must use synthetic mock data.
 
 ---
 
-## VM Deployment Commands (Reference)
+## VM Deployment Commands
 
-### Update & Redeploy to VM
 ```bash
-# On LOCAL machine: commit + push
+# 1. Commit and push from local
 git add .
 git commit -m "your message"
-git push origin main
+git push origin <branch>
 
-# On VM SSH terminal:
-cd slt-billing
-git pull origin main
+# 2. On VM SSH terminal:
+cd /root/slt-billing
+git pull origin <branch>
 docker compose -f docker-compose.prod.yml down
 docker compose -f docker-compose.prod.yml up --build -d
-```
 
-### Run Database Migrations on VM
-```bash
+# 3. Database migrations / Seeding on VM (if needed)
 docker exec -it slt-billing-backend-1 alembic upgrade head
-```
-
-### Re-Seed Users on VM (if admin1 login fails)
-```bash
 docker exec -it slt-billing-backend-1 python -m app.db.seed
-```
 
-### Reset All Test Data on VM (Clean Slate for Testing)
-```bash
-docker exec -it slt-billing-backend-1 python reset_test_data.py
-# Type YES when prompted
-
-# Then clear Google Drive output folder immediately:
+# 4. Clean reset of test data on VM (if requested)
+docker exec -it slt-billing-backend-1 python reset_test_data.py -y
 rclone sync /var/slt-billing/output_invoices gdrive:SLT_Output_Invoices
 ```
-
----
-
-## Important Conventions
-
-1. **Money = `Decimal`**, quantized 2 dp, `ROUND_HALF_UP`. Never `float`.
-2. **Billing logic is framework-independent.** No FastAPI/HTTP imports in the engine.
-3. **API is a thin layer.** No billing math or SQL inside routers.
-4. **Batch runs are idempotent.** One bill per account per period.
-5. **An invoice is a frozen snapshot.** Store computed totals, never recompute.
-6. **No PII in logs or git.** All test data is synthetic.
-
----
-
-## What Needs To Be Done Next (Open Tasks)
-
-1. **Subdomain Setup:** `VITE_API_BASE_URL` in `docker-compose.prod.yml` is hardcoded to `http://206.189.159.175:8000`. When a subdomain is configured, update this and rebuild containers. Also update `CORS_ORIGINS` in backend environment.
-2. **Admin1 Portal Branding:** The phrase "Admin 1 portal for file uploads and monitoring" still appears in some UI headers. Should be replaced with "This portal" or a cleaner label.
-3. **Billing Operator Persona Naming:** Give a professional name to the "Billing Operator" (Admin1) persona.
-
----
-
-## GitHub Repository
-
-- **Repo:** `https://github.com/hamdhi-muhammad-24/slt-billing-system` (PUBLIC)
-- **Branch:** `main`
-- **Latest commit:** All July 2026 bug fixes, UI improvements, and VM deployment config are pushed and live.

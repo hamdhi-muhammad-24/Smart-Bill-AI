@@ -14,10 +14,30 @@ import {
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
+import { cn, formatCycleDisplayName } from '@/lib/utils'
 import { Progress } from '@/components/ui/progress'
 import { useState } from 'react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+
+function formatRunTitle(batchName: string): { title: string; subtitle?: string } {
+  if (!batchName) return { title: 'Batch Run' }
+  if (batchName.startsWith('Auto Gen ')) {
+    const parts = batchName.replace('Auto Gen ', '').split(' ')
+    const fileName = parts[0]
+    const timeStr = parts.slice(1).join(' ')
+    return {
+      title: `Auto: ${fileName.replace(/_/g, ' ')}`,
+      subtitle: timeStr ? `Generated at ${timeStr}` : undefined
+    }
+  }
+  if (batchName.startsWith('Batch ')) {
+    return {
+      title: 'Manual Batch Run',
+      subtitle: batchName.replace('Batch ', '')
+    }
+  }
+  return { title: batchName }
+}
 
 function RunCard({ 
   run, 
@@ -35,35 +55,79 @@ function RunCard({
   const isFailed = run.status === 'FAILED'
   const isPartial = run.status === 'COMPLETED_WITH_ERRORS' || run.status === 'PARTIAL'
   
-  let total = run.total_accounts || 1
-  if (total === 0) total = 1
-  const progress = Math.round(((run.succeeded + run.failed) / total) * 100)
+  const processedCount = (run.succeeded || 0) + (run.failed || 0)
+  const totalCount = isComplete 
+    ? (processedCount > 0 ? processedCount : Math.max(run.total_accounts || 1, 1))
+    : Math.max(run.total_accounts || 1, processedCount, 1)
+  
+  const progress = isComplete 
+    ? 100 
+    : isFailed 
+      ? 100 
+      : Math.min(99, Math.round((processedCount / totalCount) * 100))
+
+  const { title, subtitle } = formatRunTitle(run.batch_name)
+  const cycleLabel = formatCycleDisplayName(run.cycle_number || run.batch_name)
 
   return (
     <div 
       className={cn(
-        "flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm relative overflow-hidden pl-5 transition-all duration-200 hover:shadow-md hover:scale-[1.005] shrink-0", 
-        isComplete && "border-l-4 border-l-emerald-500 bg-gradient-to-br from-card to-emerald-50/5 dark:to-emerald-950/2",
-        isFailed && "border-l-4 border-l-red-500 bg-gradient-to-br from-card to-red-50/5 dark:to-red-950/2",
-        isPartial && "border-l-4 border-l-amber-500 bg-gradient-to-br from-card to-amber-50/5 dark:to-amber-950/2",
-        isRunning && "border-l-4 border-l-blue-500 bg-gradient-to-br from-card to-blue-50/5 dark:to-blue-950/2",
+        "flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs relative overflow-hidden transition-all duration-200 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 shrink-0", 
+        isComplete && "border-l-4 border-l-emerald-500",
+        isFailed && "border-l-4 border-l-red-500",
+        isPartial && "border-l-4 border-l-amber-500",
+        isRunning && "border-l-4 border-l-blue-500 animate-pulse-border",
         onClick && "cursor-pointer"
       )}
       onClick={() => onClick && onClick(run.id)}
     >
-      <div className="flex items-center justify-between border-b pb-3">
-        <div className="flex items-center gap-2">
-          <Zap className={cn("size-5", isRunning ? "text-amber-500 fill-amber-500 animate-pulse" : isComplete ? "text-emerald-500" : isFailed ? "text-red-500" : "text-blue-500")} />
-          <span className="font-semibold">{run.batch_name}</span>
-          <span className="text-xs text-muted-foreground ml-2 px-2 py-0.5 bg-slate-100 rounded-full font-bold">
-            Cycle {run.cycle_number}
-          </span>
+      <div className="flex items-start justify-between gap-2 border-b border-border/40 pb-3">
+        <div className="flex items-start gap-2.5 min-w-0">
+          <div className={cn(
+            "p-2 rounded-lg shrink-0 mt-0.5",
+            isRunning ? "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300" :
+            isComplete ? "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300" :
+            isFailed ? "bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300" :
+            "bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
+          )}>
+            <Zap className={cn("size-4 shrink-0", isRunning && "animate-pulse")} />
+          </div>
+          <div className="flex flex-col min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-sm text-foreground truncate">{title}</span>
+              {cycleLabel && (
+                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-muted text-muted-foreground whitespace-nowrap">
+                  {cycleLabel}
+                </span>
+              )}
+            </div>
+            {subtitle && (
+              <span className="text-xs text-muted-foreground mt-0.5 truncate">{subtitle}</span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-sm font-medium">
-          {isRunning && <span className="text-amber-600 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> {run.status}</span>}
-          {isComplete && <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 size={12} /> {run.status}</span>}
-          {isFailed && <span className="text-red-600 flex items-center gap-1"><XCircle size={12} /> {run.status}</span>}
-          {isPartial && <span className="text-orange-600 flex items-center gap-1"><AlertTriangle size={12} /> {run.status}</span>}
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {isRunning && (
+            <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/40 px-2.5 py-0.5 rounded-full">
+              <Loader2 size={12} className="animate-spin" /> In Progress
+            </span>
+          )}
+          {isComplete && (
+            <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/40 px-2.5 py-0.5 rounded-full">
+              <CheckCircle2 size={12} /> Completed
+            </span>
+          )}
+          {isFailed && (
+            <span className="inline-flex items-center gap-1 text-xs font-bold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-950/40 px-2.5 py-0.5 rounded-full">
+              <XCircle size={12} /> Failed
+            </span>
+          )}
+          {isPartial && (
+            <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-950/40 px-2.5 py-0.5 rounded-full">
+              <AlertTriangle size={12} /> Partial
+            </span>
+          )}
           
           {onDelete && !isRunning && (
             <Button
@@ -76,28 +140,44 @@ function RunCard({
               }}
               title="Delete run record"
             >
-              <Trash2 size={14} />
+              <Trash2 size={13} />
             </Button>
           )}
         </div>
       </div>
       
-      <div className="flex flex-col gap-1.5 mt-1">
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>{run.succeeded + run.failed} / {run.total_accounts} accounts processed</span>
-          <span>{progress}%</span>
+      <div className="flex flex-col gap-2 pt-1">
+        <div className="flex justify-between items-center text-xs font-semibold">
+          <span className="text-muted-foreground">
+            {processedCount} / {totalCount} account{totalCount !== 1 ? 's' : ''} processed
+          </span>
+          <span className={cn(
+            "font-extrabold",
+            isComplete ? "text-emerald-600 dark:text-emerald-400" :
+            isFailed ? "text-red-600 dark:text-red-400" :
+            "text-foreground"
+          )}>
+            {progress}%
+          </span>
         </div>
-        <Progress value={progress} className="h-2" />
-        <div className="flex justify-between mt-2 text-xs">
-          <span className="text-emerald-600 font-medium">{run.succeeded} Success</span>
-          {run.failed > 0 && <span className="text-red-600 font-medium">{run.failed} Failed</span>}
+        <Progress value={progress} className="h-2 rounded-full" />
+        
+        <div className="flex justify-between items-center text-xs pt-1">
+          <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+            <CheckCircle2 size={12} /> {run.succeeded || 0} Succeeded
+          </span>
+          {run.failed > 0 && (
+            <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1">
+              <XCircle size={12} /> {run.failed} Failed
+            </span>
+          )}
         </div>
         
         {onRetry && run.failed > 0 && (
           <Button
             variant="outline"
             size="sm"
-            className="mt-2 w-full h-8 text-xs bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 border-red-200"
+            className="mt-2 w-full h-8 text-xs font-bold bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 border-red-200"
             onClick={(e) => {
               e.stopPropagation()
               onRetry(run.id)
@@ -109,19 +189,19 @@ function RunCard({
           </Button>
         )}
         
-        <div className="flex justify-end gap-2 mt-3 pt-2 border-t border-slate-100">
+        <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-border/30">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 text-xs font-semibold"
+            className="h-7 text-xs font-semibold hover:bg-muted"
             onClick={(e) => {
               e.stopPropagation()
               onClick && onClick(run.id)
             }}
           >
             <Eye size={12} className="mr-1.5" />
-            View Details
+            View Output Files
           </Button>
         </div>
       </div>
@@ -165,13 +245,15 @@ export default function GenerationHub() {
   const { data: pendingBatches, isLoading: loadingBatches } = useQuery({
     queryKey: ['billing-pending-batches'],
     queryFn: () => getPendingBatches(),
-    refetchInterval: 1000,
+    refetchInterval: 3000,
+    placeholderData: (prev) => prev,
   })
 
   const { data: runs, isLoading: loadingRuns } = useQuery({
     queryKey: ['billing-runs'],
     queryFn: () => getRuns(),
-    refetchInterval: 1000,
+    refetchInterval: 3000,
+    placeholderData: (prev) => prev,
   })
 
   const batchMutation = useMutation({
@@ -230,7 +312,7 @@ export default function GenerationHub() {
   const batchesList = pendingBatches || []
   const hasBatches = batchesList.length > 0
 
-  const activeCyclesStr = batchesList.map(b => 'Cycle ' + b.cycle_number).join(', ')
+  const activeCyclesStr = batchesList.map(b => formatCycleDisplayName(String(b.cycle_number))).join(', ')
 
   return (
     <div className="flex flex-col gap-6">
@@ -332,7 +414,7 @@ export default function GenerationHub() {
         <div className="flex flex-col gap-4 lg:col-span-2">
           <h3 className="font-semibold text-lg">Ready for Generation</h3>
           <div className="rounded-xl border bg-card shadow-sm flex flex-col min-h-[400px]">
-            {loadingBatches ? (
+            {loadingBatches && !pendingBatches ? (
               <div className="flex-1 flex items-center justify-center">
                 <Loader2 className="animate-spin text-muted-foreground" />
               </div>
@@ -345,11 +427,16 @@ export default function GenerationHub() {
             ) : (
               <div className="flex flex-col p-3 gap-3 max-h-[600px] overflow-y-auto">
                 {batchesList.map(batch => {
-                  const cycleTitle = typeof batch.cycle_number === 'number' || String(batch.cycle_number).startsWith('Cycle')
-                    ? `Cycle ${String(batch.cycle_number).replace('Cycle_', '')}`
-                    : String(batch.cycle_number).replace('_', ' ')
-
+                  const cycleTitle = formatCycleDisplayName(String(batch.cycle_number))
                   const hasRecordCounts = (batch.total_records || 0) > 0
+                  
+                  const isThisCardPending = 
+                    batchMutation.isPending &&
+                    batchMutation.variables?.uploadIds?.some(id => batch.upload_ids.includes(id))
+
+                  const isLimit10Pending = isThisCardPending && batchMutation.variables?.recordLimit === 10
+                  const isLimit50Pending = isThisCardPending && batchMutation.variables?.recordLimit === 50
+                  const isLimitAllPending = isThisCardPending && batchMutation.variables?.recordLimit === null
                   
                   return (
                     <div key={`${batch.cycle_number}-${batch.date}`} className="flex flex-col gap-3 p-4 rounded-xl border bg-card hover:border-indigo-300 dark:hover:border-indigo-800 transition-all shadow-xs">
@@ -388,30 +475,36 @@ export default function GenerationHub() {
                           variant="outline"
                           size="sm"
                           onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 10 })}
-                          disabled={batchMutation.isPending}
+                          disabled={isThisCardPending}
                           className="h-8.5 text-xs font-bold px-1.5 whitespace-nowrap hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-950/50 border-indigo-200/80 dark:border-indigo-800/60"
                           title="Generate next 10 customer records"
                         >
+                          {isLimit10Pending ? (
+                            <Loader2 size={12} className="animate-spin mr-1 shrink-0" />
+                          ) : null}
                           Generate 10
                         </Button>
                         <Button 
                           variant="outline"
                           size="sm"
                           onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: 50 })}
-                          disabled={batchMutation.isPending}
+                          disabled={isThisCardPending}
                           className="h-8.5 text-xs font-bold px-1.5 whitespace-nowrap hover:bg-indigo-50 hover:text-indigo-700 dark:hover:bg-indigo-950/50 border-indigo-200/80 dark:border-indigo-800/60"
                           title="Generate next 50 customer records"
                         >
+                          {isLimit50Pending ? (
+                            <Loader2 size={12} className="animate-spin mr-1 shrink-0" />
+                          ) : null}
                           Generate 50
                         </Button>
                         <Button 
                           onClick={() => batchMutation.mutate({ uploadIds: batch.upload_ids, recordLimit: null })}
-                          disabled={batchMutation.isPending}
+                          disabled={isThisCardPending}
                           className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 font-extrabold shadow-[0_2px_8px_rgba(79,70,229,0.25)] text-white hover:scale-[1.01] border-transparent transition-all h-8.5 text-xs px-1.5 whitespace-nowrap"
                           title="Generate all remaining customer records"
                         >
-                          {batchMutation.isPending ? (
-                            <Loader2 size={12} className="animate-spin shrink-0" />
+                          {isLimitAllPending ? (
+                            <Loader2 size={12} className="animate-spin shrink-0 mr-1" />
                           ) : (
                             <Play size={12} className="mr-1 fill-current shrink-0" />
                           )}
