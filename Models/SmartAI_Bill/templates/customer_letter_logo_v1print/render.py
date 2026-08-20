@@ -16,7 +16,7 @@ as ENGLISH_BODY. Edit it here if the wording ever changes.
 
 import io
 from pathlib import Path
-from typing import List
+from typing import List, Any, Optional, Dict
 
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
@@ -213,10 +213,25 @@ class CustomerLetterRenderer:
     def __init__(self):
         self.generated_pdfs = []
 
-    def render(self, records: List[Customer]):
+    def render(self, records: Any):
+        if isinstance(records, dict) and "records" in records:
+            records = records["records"]
+        elif isinstance(records, dict) and "customers" in records:
+            records = records["customers"]
+        elif not isinstance(records, list):
+            records = [records]
+
         template_page, page2_reader = _load_static_pages()
         self.generated_pdfs = []
         for i, cust in enumerate(records, 1):
+            if isinstance(cust, dict):
+                cust = Customer(
+                    name=cust.get("name") or cust.get("client_name") or "",
+                    address_lines=cust.get("address_lines") or cust.get("client_address_lines") or [],
+                    telephone=cust.get("telephone") or cust.get("telephone_number") or "",
+                    raw=cust.get("raw") or cust
+                )
+
             writer = PdfWriter()
             for page in build_letter_pages(cust, template_page, page2_reader):
                 writer.add_page(page)
@@ -224,7 +239,18 @@ class CustomerLetterRenderer:
             writer.write(buf)
             pdf_bytes = buf.getvalue()
 
-            acc = str(cust.raw.get(C.FILENAME_COLUMN) or cust.telephone or f"cust_{i:04d}").strip().replace(" ", "")
+            acc = None
+            if hasattr(cust, "raw") and isinstance(cust.raw, dict):
+                for k in [C.FILENAME_COLUMN, "ACCOUNT", "ACCOUNT_NO", "ACC_NO", "ACCOUNT_NUMBER", "Account No", "Account", "SERIAL_NUM", "CUSTOMER_REF", "TELEPHONE"]:
+                    val = cust.raw.get(k)
+                    if val is not None and str(val).strip() not in ("", "None", "0"):
+                        acc = str(val).strip().replace(" ", "")
+                        break
+            if not acc and getattr(cust, "telephone", None):
+                acc = str(cust.telephone).strip().replace(" ", "")
+            if not acc:
+                acc = f"cust_{i:04d}"
+
             fname = f"{acc}_Customer_Letter.pdf"
             self.generated_pdfs.append((fname, pdf_bytes, cust))
         return self.generated_pdfs

@@ -50,7 +50,7 @@ def process_single_file(args):
     source_filename = os.path.basename(file_path)
 
     try:
-        documents = split_gmf_documents(file_path, offset=offset, limit=limit, original_filename=source_filename)
+        documents = split_gmf_documents(file_path, offset=offset, limit=limit, original_filename=source_filename, approved_templates=approved_templates)
 
         if not documents:
             results.append(ProcessingResult(
@@ -118,9 +118,12 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
 
         if is_preview:
             try:
-                data = parser_func(doc_path, limit=1)
+                data = parser_func(doc_path, limit=1, offset=0)
             except TypeError:
-                data = parser_func(doc_path)
+                try:
+                    data = parser_func(doc_path, limit=1)
+                except TypeError:
+                    data = parser_func(doc_path)
 
             if isinstance(data, list) and len(data) > 1:
                 data = data[:1]
@@ -134,7 +137,20 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
             try:
                 data = parser_func(doc_path, limit=limit, offset=offset)
             except TypeError:
-                data = parser_func(doc_path)
+                try:
+                    data = parser_func(doc_path, limit=limit)
+                except TypeError:
+                    data = parser_func(doc_path)
+
+            # Guaranteed fallback slicing: If the parser returned unsliced data (len(data) > lim),
+            # enforce the requested offset & limit slice so extra PDFs are never generated.
+            if limit is not None:
+                lim = int(limit)
+                off = int(offset or 0)
+                if isinstance(data, list) and len(data) > lim:
+                    data = data[off : (off + lim)]
+                elif isinstance(data, dict) and "records" in data and isinstance(data["records"], list) and len(data["records"]) > lim:
+                    data["records"] = data["records"][off : (off + lim)]
 
         renderer = RendererClass()
         renderer.render(data)
