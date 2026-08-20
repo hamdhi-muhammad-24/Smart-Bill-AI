@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
+import { cn, formatTemplateDisplayName } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 
@@ -483,7 +483,7 @@ export default function InvoicePreview() {
                           </span>
 
                           <span className="font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700/60 px-2 py-0.5 rounded text-[11px] leading-tight break-all shadow-sm">
-                            {gmf.template_detected || 'Unknown'}
+                            {formatTemplateDisplayName(gmf.template_detected)}
                           </span>
                         </div>
 
@@ -534,7 +534,7 @@ export default function InvoicePreview() {
                       {selectedGmf.filename}
                     </span>
                     <span className="text-sm text-muted-foreground font-medium flex items-center gap-1.5 mt-0.5">
-                      Detected Template: <span className="text-primary font-bold bg-primary/10 px-2 py-0.5 rounded border border-primary/20">{selectedGmf.template_detected || 'Unrecognized'}</span>
+                      Detected Template: <span className="text-primary font-bold bg-primary/10 px-2 py-0.5 rounded border border-primary/20">{formatTemplateDisplayName(selectedGmf.template_detected)}</span>
                     </span>
                   </div>
 

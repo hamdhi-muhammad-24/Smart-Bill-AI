@@ -78,13 +78,13 @@ export default function Admin1Dashboard() {
   const { data: stats, isLoading: loadingStats } = useQuery({
     queryKey: ['billing-stats'],
     queryFn: getStats,
-    refetchInterval: 1000,
+    refetchInterval: 3000,
   })
 
   const { data: events, isLoading: loadingEvents } = useQuery({
     queryKey: ['billing-events'],
     queryFn: () => getNotifications(false),
-    refetchInterval: 1000,
+    refetchInterval: 3000,
   })
 
   return (

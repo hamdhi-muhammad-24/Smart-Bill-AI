@@ -8,22 +8,22 @@ import {
   Loader2,
   XCircle,
   Trash2,
-  Info,
   ArrowRight,
   Layers,
-  X,
   Eye
 } from 'lucide-react'
 import { getUploads, deleteUpload, clearAllUploads, getUploadSummary, type GmfUploadOut } from '../../lib/api'
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { DataTable, type ColumnDef } from '../../components/ui-kit/DataTable'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { toast } from 'sonner'
 import { useAuth } from '../../auth/AuthProvider'
+import { cn } from '../../lib/utils'
 
 function StatusBadge({ status, processed, total }: { status: string; processed?: number; total?: number }) {
   if (status === 'PENDING_APPROVAL') {
@@ -51,10 +51,11 @@ function StatusBadge({ status, processed, total }: { status: string; processed?:
     )
   }
   if (status === 'PARTIALLY_PROCESSED') {
+    const isPartiallyApproved = !processed || processed === 0
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border border-amber-300/60">
         <Loader2 size={12} className="text-amber-600 animate-pulse" />
-        Partial ({processed && total ? `${processed}/${total}` : 'In Progress'})
+        {isPartiallyApproved ? 'Partially Approved' : `Partially Completed (${processed}/${total || '?'})`}
       </span>
     )
   }
@@ -75,16 +76,24 @@ function StatusBadge({ status, processed, total }: { status: string; processed?:
 }
 
 function getCycleLabel(folderType: string, cycleNumber?: number | null): string {
-  if (folderType === 'LOD') return 'LOD'
+  if (folderType === 'LOD') return 'Letter of Demand (LOD)'
   if (folderType === 'VAT_Confirmation') return 'VAT Confirmation'
   if (folderType === 'Final_Notice') return 'Final Notice'
-  if (folderType === 'Customer_Letter' || folderType === 'Customer_Letter_Logo_V1Print') return 'Customer Letter'
+  if (folderType === 'Customer_Letter' || folderType === 'Customer_Letter_Logo_V1Print' || folderType === 'Customer_Migration_Letter') return 'Customer Migration Letter'
   if (folderType === 'Test_GMFs') return 'Test GMF'
   if (cycleNumber) return `Cycle ${cycleNumber}`
   return 'Unknown'
 }
 
 function formatTemplateName(templateId: string): string {
+  if (!templateId) return 'Unknown'
+  const clean = templateId.toLowerCase()
+  if (clean === 'customer_letter_logo_v1print' || clean === 'customer_letter' || clean === 'customer_migration_letter') {
+    return 'Customer Migration Letter'
+  }
+  if (clean === 'lod') return 'Letter of Demand (LOD)'
+  if (clean === 'vat_confirmation') return 'VAT Confirmation'
+  if (clean === 'final_notice') return 'Final Notice'
   return templateId.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
 
@@ -122,7 +131,7 @@ function TemplateBreakdownPills({ breakdown, total, templateDetected }: { breakd
 
 function GmfSummaryDrawer({ upload, onClose }: { upload: GmfUploadOut | null; onClose: () => void }) {
   const navigate = useNavigate()
-  const { data: summary, isLoading } = useQuery({
+  const { data: summary } = useQuery({
     queryKey: ['gmf-summary', upload?.id],
     queryFn: () => (upload?.id ? getUploadSummary(upload.id) : null),
     enabled: !!upload?.id,
@@ -214,9 +223,51 @@ function GmfSummaryDrawer({ upload, onClose }: { upload: GmfUploadOut | null; on
               Detected Templates & Customer Breakdown
             </h4>
             <div className="flex flex-col gap-2">
-              {hasBreakdown ? (
+              {Array.isArray(templateBreakdown) && templateBreakdown.length > 0 ? (
+                templateBreakdown.map((item: any) => {
+                  const percent = total > 0 ? Math.round((item.count / total) * 100) : 100
+                  const isApproved = item.status === 'APPROVED' || item.is_approved
+                  const isRejected = item.status === 'REJECTED'
+                  return (
+                    <div key={item.template_id} className="flex flex-col gap-2 p-3 rounded-lg border bg-card hover:bg-accent/40 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className={cn("size-2 rounded-full", isApproved ? "bg-emerald-500" : isRejected ? "bg-red-500" : "bg-amber-500")} />
+                          <span className="font-bold text-sm text-foreground">{item.template_name || formatTemplateName(item.template_id)}</span>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-[11px] font-bold px-2 py-0.5",
+                            isApproved
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border-emerald-200"
+                              : isRejected
+                              ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300 border-red-200"
+                              : "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200"
+                          )}
+                        >
+                          {isApproved ? 'Approved' : isRejected ? 'Rejected' : 'Pending Approval'}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t border-border/40">
+                        <span>{percent}% of total</span>
+                        <div className="flex items-center gap-2">
+                          {typeof item.processed_count === 'number' && item.processed_count > 0 && (
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                              {item.processed_count.toLocaleString()} processed
+                            </span>
+                          )}
+                          <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold">
+                            {item.count.toLocaleString()} customers
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
+              ) : hasBreakdown ? (
                 Object.entries(templateBreakdown).map(([tid, count]) => {
-                  const percent = total > 0 ? Math.round((count / total) * 100) : 100
+                  const percent = total > 0 ? Math.round((Number(count) / total) * 100) : 100
                   return (
                     <div key={tid} className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/40 transition-colors">
                       <div className="flex items-center gap-2">
@@ -226,7 +277,7 @@ function GmfSummaryDrawer({ upload, onClose }: { upload: GmfUploadOut | null; on
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-bold text-muted-foreground">{percent}%</span>
                         <span className="px-2.5 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-black text-xs">
-                          {count.toLocaleString()} customers
+                          {Number(count).toLocaleString()} customers
                         </span>
                       </div>
                     </div>
@@ -316,7 +367,6 @@ function GmfSummaryDrawer({ upload, onClose }: { upload: GmfUploadOut | null; on
 export default function GmfMonitor() {
   const queryClient = useQueryClient()
   const { session } = useAuth()
-  const navigate = useNavigate()
   const [showCompleted, setShowCompleted] = useState(false)
   const [selectedUpload, setSelectedUpload] = useState<GmfUploadOut | null>(null)
   const canManageUploads = session?.role === 'gmf_handler' || (session?.role as string) === 'admin1'
@@ -324,7 +374,7 @@ export default function GmfMonitor() {
   const { data: uploads, isLoading } = useQuery({
     queryKey: ['billing-uploads'],
     queryFn: () => getUploads(),
-    refetchInterval: 1000,
+    refetchInterval: 3000,
   })
 
   const deleteMutation = useMutation({
