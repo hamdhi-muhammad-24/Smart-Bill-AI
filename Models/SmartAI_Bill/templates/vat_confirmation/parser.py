@@ -48,6 +48,8 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
                     (row.get("address_line4") or "").strip(),
                 ]
                 clean_lines = [line for line in addr_lines if line and line not in ("-", ".")]
+                
+                content = (row.get("content") or "").strip()
 
                 all_records.append({
                     "recipient_name": rec_name,
@@ -55,6 +57,7 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
                     "account_number": ref,
                     "vat_no": vat_no,
                     "address_lines": clean_lines,
+                    "content": content,
                 })
     else:
         with open(file_path, "rb") as f:
@@ -81,6 +84,7 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
             name_idx = _get_col_idx("NAME")
             vat_idx = _get_col_idx("VAT_REGISTRATION", "VAT_NO", "VAT_REGISTRATION_NUMBER")
             addr_cols = ["ADDR_LINE_1", "ADDR_LINE_2", "ADDR_LINE_3", "ADDR_LINE_4", "ADDR_LINE_5", "CITY"]
+            content_idx = _get_col_idx("CONTENT", "BODY")
 
             for row in rows:
 
@@ -93,6 +97,7 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
                     continue
 
                 vat_no = _clean(row[vat_idx]) if vat_idx is not None and vat_idx < len(row) else ""
+                content = _clean(row[content_idx]) if content_idx is not None and content_idx < len(row) else ""
 
                 lines = [recipient_name]
                 for col in addr_cols:
@@ -108,6 +113,7 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
                     "account_number": ref,
                     "vat_no": vat_no,
                     "address_lines": lines,
+                    "content": content,
                 })
 
             wb.close()

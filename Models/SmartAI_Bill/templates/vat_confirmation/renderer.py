@@ -80,11 +80,16 @@ def build_overlay(record, page_number, today_str):
     y += config.GAP_SALUTATION_TO_BODY
 
     # Body paragraphs
-    for para in config.BODY_PARAGRAPHS:
-        text = para.format(
-            deadline=config.VERIFICATION_DEADLINE,
-            email=config.VERIFICATION_EMAIL,
-        )
+    record_content = record.get("content")
+    paragraphs = record_content.split('\n') if record_content else config.BODY_PARAGRAPHS
+    
+    for para in paragraphs:
+        if not para.strip():
+            continue
+            
+        # Support placeholders in dynamic content as well
+        text = para.replace("{deadline}", config.VERIFICATION_DEADLINE).replace("{email}", config.VERIFICATION_EMAIL)
+        
         bold = text.startswith("Email address:")
         font = config.FONT_BOLD if bold else config.FONT_BODY
         c.setFont(font, config.SIZE_BODY)
@@ -122,9 +127,12 @@ class VATConfirmationRenderer:
         self.generated_pdfs = [] # list of (output_filename, pdf_bytes, record)
 
     def render(self, data):
-        records = data.get("records", [])
-        if not records and "reference" in data:
-            records = [data]
+        if isinstance(data, list):
+            records = data
+        else:
+            records = data.get("records", [])
+            if not records and "reference" in data:
+                records = [data]
 
         today_str = datetime.date.today().strftime(config.DATE_FORMAT)
         page_number = config.START_PAGE_NUMBER
