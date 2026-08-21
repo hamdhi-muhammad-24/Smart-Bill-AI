@@ -47,7 +47,7 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       EMAIL_FROM: "SLT Billing <billing@slt.lk>"
-      CORS_ORIGINS: '["http://localhost", "http://127.0.0.1", "http://206.189.159.175", "http://206.189.159.175:8080"]'
+      CORS_ORIGINS: '["http://localhost", "http://127.0.0.1", "http://206.189.159.175", "http://206.189.159.175:8080", "https://smartbills.sltdigitallab.lk"]'
       LOG_LEVEL: INFO
       GMF_DRIVE_PATH: /app/gmf_uploads
       OUTPUT_DIR: /app/output
@@ -148,7 +148,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://206.189.159.175:8000
+        VITE_API_BASE_URL: https://smartbills.sltdigitallab.lk
         VITE_AZURE_CLIENT_ID: 0d42d2c9-48a3-4924-980e-68c613f6737b
         VITE_AZURE_TENANT_ID: 534253fc-dfb6-462f-b5ca-cbe81939f5ee
     ports:
