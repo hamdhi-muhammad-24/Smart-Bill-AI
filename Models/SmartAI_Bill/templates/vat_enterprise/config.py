@@ -6,15 +6,15 @@ PAGE_H = 842.25
 COORDS = {
     # VAT Specific Headers
     # y was accidentally written in top-origin (84.8 / 76.2 from top); corrected to bottom-origin
-    "slt_vat_reg":          (273.60, 758),
+    "slt_vat_reg":          (273.60, 756),
     "customer_vat_reg":     (273.60, 747),
 
     # Standard Headers (Right side)
-    "telephone_number":     (180, 735),
-    "account_number":       (160, 707),   # was 615.44 (landing on billing-period row)
-    "invoice_number":       (155, 680),
-    "billing_date":         (160, 650),
-    "billing_period":       (140, 620),
+    "telephone_number":     (180, 733),
+    "account_number":       (160, 705),   # was 615.44 (landing on billing-period row)
+    "invoice_number":       (155, 678),
+    "billing_date":         (160, 648),
+    "billing_period":       (140, 618),
 
     # Customer Address
     "customer_business":    (280.8, 725),
@@ -23,14 +23,14 @@ COORDS = {
     "customer_addr_line_h": 11,
 
     # ENTERPRISE badge
-    "badge_text":           (325, 618),   # was 529.04 (80pt too low)
+    "badge_text":           (320, 616),   # was 529.04 (80pt too low)
 
     # Summary Box (Horizontal layout based on PDF)
-    "balance_bf":        (90, 520),
-    "payments_received": (190, 520),
-    "charges_period":    (300, 520),
-    "total_payable":     (410, 520),
-    "payment_due_date":  (510, 520),
+    "balance_bf":        (90, 516),
+    "payments_received": (190, 516),
+    "charges_period":    (300, 516),
+    "total_payable":     (410, 516),
+    "payment_due_date":  (510, 516),
 
     # Taxes & Total (positioned around TOTAL_AMOUNT_Y=243)
     "taxes_label":            (45, 230),
@@ -57,7 +57,7 @@ COORDS = {
     # Page indicators
     # p1: x=536 (right-aligned; places "1" at x≈511 = template position), y=751.2 (top of page)
     # p1 previously had y=86.96 (top-origin → drew near bottom) and x=511.2 (gave wrong x)
-    "page_indicator_p1":    (536.00, 759),
+    "page_indicator_p1":    (536.00, 756),
     "page_indicator_p2":    (536.00, 788.00),
     "page_invoice_no_p2":   (43.20, 784.40),
 
@@ -66,26 +66,47 @@ COORDS = {
     "barcode_width":        80.16,
     "barcode_height":       14.40,
 
-    "payonline_qr":         (500.00, 697),
+    "payonline_qr":         (500.00, 695),
     "payonline_qr_size":    48.00,
 
     # Lanka QR Code
-    "qr_code":              (511.20, 96),
+    "qr_code":              (511.20, 92),
     "qr_size":              48.00,
 
     # Payment Slip (Bottom)
-    "slip_barcode":         (309.00, 116.00),
+    "slip_barcode":         (309.00, 113.00),
     "slip_barcode_width":   138.00,
     "slip_barcode_height":  25.00,
     # Baselines centered inside each rounded slip box (box borders sit at
     # ~113.6/133.5, ~90.3/110.0, ~67.4/86.6, ~44.0/63.3 bottom-origin) — the old
     # values sat near each box's bottom edge, so the row below's top border cut
     # through the text (and the last row's own bottom border cut through it).
-    "slip_telephone":       (157.68, 127.67),  # was 116.64 / 162.24
-    "slip_invoice":         (157.68, 104.23),  # was 93.84 / 139.44
-    "slip_customer":        (157.68, 81.11),   # was 71.04 / 116.64
-    "slip_account":         (157.68, 57.73),   # was 48.24 / 93.84
+    "slip_telephone":       (157.68, 126.67),  # was 116.64 / 162.24
+    "slip_invoice":         (157.68, 103.23),  # was 93.84 / 139.44
+    "slip_customer":        (157.68, 80.11),   # was 71.04 / 116.64
+    "slip_account":         (157.68, 56.73),   # was 48.24 / 93.84
 }
+
+# RED-notice coordinate overrides - same key set as COORDS, used instead of
+# COORDS when rendering against Template_RED.pdf's background (a physically
+# different page than layout.pdf, so fixed positions may need their own
+# values here). Starts as an exact copy of COORDS so RED renders identically
+# to NONRED until individual fields below are measured/tuned against the
+# real Template_RED.pdf.
+RED_COORDS = dict(COORDS)
+RED_COORDS["telephone_number"] = (185, 730)   # <- your own tuned value, RED only
+RED_COORDS["badge_text"] = (320, 612)
+RED_COORDS["account_number"] = (160, 703)   # <- your own tuned value, RED only
+RED_COORDS["invoice_number"] = (155, 676)
+RED_COORDS["billing_date"] = (160, 645)
+RED_COORDS["page_indicator_p1"] = (536.00, 753)
+RED_COORDS["payonline_qr"] = (500.00, 692)
+RED_COORDS["qr_code"] = (511.20, 90)
+RED_COORDS["slip_telephone"] = (157.68, 121.67)
+RED_COORDS["slip_invoice"] = (157.68, 99.23)
+RED_COORDS["slip_customer"] = (157.68, 78.11)
+RED_COORDS["slip_account"] = (157.68, 54.73)
+
 
 CHARGES_TABLE = {
     "page1_y_start":        455.40,
@@ -112,7 +133,7 @@ POST_TC_COLUMNS = {
 }
 
 FONTS = {
-    "header":         {"size": 8, "bold": False},
+    "header":         {"size": 9, "bold": False},
     "customer_name":  {"size": 9,  "bold": True},
     "customer_addr":  {"size": 9,  "bold": True},
     "badge":          {"size": 18, "bold": True},

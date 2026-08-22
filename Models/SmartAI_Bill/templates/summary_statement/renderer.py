@@ -98,7 +98,11 @@ class SummaryStatementRenderer(BaseRenderer):
         # Customer Ref No
         x, y = COORDS_HEADER["customer_ref_no"]
         self.text(x, y, data["customer_ref_no"], size=f["size"])
-        self.text(45, 650, data["source_filename"], size=7)
+        # Clean the source filename by removing the random suffix (e.g. __mp5l12aq_1.gmf)
+        source_file = data.get("source_filename", "")
+        if "__" in source_file:
+            source_file = source_file.split("__")[0]
+        self.text(45, 650, source_file, size=7)
 
         # Customer block (name, position, department, company, address)
         f = FONTS["customer"]

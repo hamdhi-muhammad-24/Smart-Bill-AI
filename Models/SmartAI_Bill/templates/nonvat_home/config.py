@@ -61,7 +61,7 @@ COORDS = {
     "barcode_width":        100,
     "barcode_height":       20,
 
-    "qr_code":              (511.2, 88.4),
+    "qr_code":              (511.2, 86),
     "qr_size":              48,
     "payonline_qr":         (498, 689),
     "payonline_qr_size":    48,
