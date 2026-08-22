@@ -149,6 +149,8 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: http://206.189.159.175:8000
+        VITE_AZURE_CLIENT_ID: 0d42d2c9-48a3-4924-980e-68c613f6737b
+        VITE_AZURE_TENANT_ID: 534253fc-dfb6-462f-b5ca-cbe81939f5ee
     ports:
       - "8080:80"
     depends_on:

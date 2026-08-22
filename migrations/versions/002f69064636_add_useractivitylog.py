@@ -30,9 +30,9 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')
     )
-    op.drop_table('user_portal_access')
-    op.drop_table('user_activity_log')
-    op.drop_table('access_requests')
+    op.execute('DROP TABLE IF EXISTS user_portal_access CASCADE;')
+    op.execute('DROP TABLE IF EXISTS user_activity_log CASCADE;')
+    op.execute('DROP TABLE IF EXISTS access_requests CASCADE;')
     # ### end Alembic commands ###
 
 

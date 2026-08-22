@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { AuthProvider } from './auth/AuthProvider'
-import { ThemeProvider } from 'next-themes'
 import './index.css'
 import App from './App.tsx'
 import React from 'react'
@@ -20,13 +19,12 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   render() {
     if (this.state.hasError) {
       return (
-        <div style={{ padding: '20px', color: 'red', fontFamily: 'monospace' }}>
-          <h2>Something went wrong.</h2>
-          <details style={{ whiteSpace: 'pre-wrap' }}>
-            {this.state.error && this.state.error.toString()}
-            <br />
-            {this.state.error && this.state.error.stack}
-          </details>
+        <div style={{ padding: '24px', maxWidth: '600px', margin: '40px auto', fontFamily: 'system-ui, sans-serif', background: '#fee2e2', border: '1px solid #ef4444', borderRadius: '8px', color: '#991b1b' }}>
+          <h2 style={{ margin: '0 0 12px 0' }}>Something went wrong</h2>
+          <p style={{ margin: '0 0 12px 0' }}>An error occurred while loading the application:</p>
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#ffffff', padding: '12px', borderRadius: '6px', fontSize: '13px', overflowX: 'auto', border: '1px solid #fca5a5' }}>
+            {this.state.error && (this.state.error.stack || this.state.error.message || String(this.state.error))}
+          </pre>
         </div>
       );
     }
@@ -39,18 +37,17 @@ import { msalInstance } from './auth/msalConfig'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <MsalProvider instance={msalInstance}>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+    <ErrorBoundary>
+      <MsalProvider instance={msalInstance}>
+        <QueryClientProvider client={queryClient}>
           <BrowserRouter>
             <AuthProvider>
-              <ErrorBoundary>
-                <App />
-              </ErrorBoundary>
+              <App />
             </AuthProvider>
           </BrowserRouter>
-        </ThemeProvider>
-      </QueryClientProvider>
-    </MsalProvider>
+        </QueryClientProvider>
+      </MsalProvider>
+    </ErrorBoundary>
   </StrictMode>,
 )
+

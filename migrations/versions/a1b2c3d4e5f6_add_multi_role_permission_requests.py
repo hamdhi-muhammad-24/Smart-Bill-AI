@@ -15,6 +15,16 @@ depends_on = None
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    if conn.dialect.name == 'postgresql':
+        op.execute("COMMIT")
+        op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN1'")
+        op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'GMF_HANDLER'")
+        op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ENVELOPE_HANDLER'")
+        op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'MANAGER'")
+        op.execute("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'CUSTOMER'")
+        op.execute("BEGIN")
+
     # Create permission_request_status enum safely
     op.execute(
         "DO $prs$ BEGIN "

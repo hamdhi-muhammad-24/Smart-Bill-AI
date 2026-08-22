@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { useTheme } from 'next-themes'
+import { useTheme } from '@/components/ThemeProvider'
 import Brand from './Brand'
 
 interface NavItem {
@@ -89,7 +89,7 @@ function SidebarFrame({ onNav }: { email?: string; onNav?: () => void }) {
 
 export default function EnvelopeLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
-  const { theme, setTheme } = useTheme()
+  const { toggleTheme } = useTheme()
   const { logout } = useAuth()
 
   return (
@@ -133,7 +133,7 @@ export default function EnvelopeLayout() {
             variant="ghost"
             size="icon"
             className="rounded-full"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            onClick={toggleTheme}
             title="Toggle theme"
           >
             <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0 text-amber-500" />

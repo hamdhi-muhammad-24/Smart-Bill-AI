@@ -314,6 +314,23 @@ def get_stats(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1
 # GMF Uploads
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _resolve_upload_file_path(upload: GmfUpload) -> Optional[Path]:
+    """Find the existing file on disk across possible storage locations."""
+    if upload.file_path and os.path.exists(upload.file_path):
+        return Path(upload.file_path)
+    fn = upload.filename
+    possible_paths = [
+        settings.queue_pending_dir / fn,
+        settings.queue_incoming_dir / fn,
+        settings.gmf_drive_path / "Staged" / fn,
+        settings.gmf_drive_path / (upload.folder_type or "") / fn,
+        settings.gmf_drive_path / "Processed" / (upload.folder_type or "unknown") / fn,
+    ]
+    for p in possible_paths:
+        if p.exists():
+            return p
+    return None
+
 def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set) -> tuple:
     """
     Returns (approved_total_records, approved_remaining_records, is_fully_approved).
@@ -409,12 +426,18 @@ def get_pending_batches(
     pending_uploads = db.query(GmfUpload).filter(
         GmfUpload.status.in_([GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED]),
         GmfUpload.folder_type != "Test_GMFs",
-        GmfUpload.billing_run_id.is_(None),
     ).order_by(GmfUpload.detected_at.asc()).all()
 
     cycles = {}
     dates = {}
     for upload in pending_uploads:
+        if upload.billing_run_id is not None:
+            active_run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
+            if active_run and active_run.status == RunStatus.RUNNING:
+                continue
+            else:
+                upload.billing_run_id = None
+
         app_tot, app_rem, _ = _calculate_upload_approved_counts(upload, approved_templates)
         # ONLY include uploads that have remaining approved records ready for generation
         if app_rem <= 0:
@@ -948,10 +971,15 @@ def generate_batch_endpoint(
             active_run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
             if active_run and active_run.status == RunStatus.RUNNING:
                 continue
+            else:
+                upload.billing_run_id = None
         if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.PARTIALLY_PROCESSED):
             continue
-        if not os.path.exists(upload.file_path):
+
+        resolved_path = _resolve_upload_file_path(upload)
+        if not resolved_path:
             continue
+        upload.file_path = str(resolved_path)
 
         app_tot, app_rem, _ = _calculate_upload_approved_counts(upload, approved_templates)
         if app_rem <= 0:
