@@ -8,7 +8,7 @@ import { authMe } from '../lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { useTheme } from 'next-themes'
+import { useTheme } from '@/components/ThemeProvider'
 import Brand from './Brand'
 
 interface NavItem {
@@ -96,7 +96,7 @@ export default function AdminLayout() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { logout } = useAuth()
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
+  const { toggleTheme } = useTheme()
 
   const { data: me } = useQuery({
     queryKey: ['me'],
@@ -153,7 +153,7 @@ export default function AdminLayout() {
             variant="ghost"
             size="icon"
             className="rounded-full"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            onClick={toggleTheme}
             title="Toggle theme"
           >
             <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />

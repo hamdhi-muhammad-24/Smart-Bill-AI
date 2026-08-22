@@ -71,8 +71,12 @@ export default function RoleSelector() {
   } | null>(null)
 
   function hasAccess(portalId: string): boolean {
-    if (!session) return false
-    return session.roles.includes(portalId)
+    if (!session || !session.roles) return false
+    const upperRoles = session.roles.map((r) => r.toUpperCase())
+    if (portalId === 'GMF_HANDLER') {
+      return upperRoles.includes('GMF_HANDLER') || upperRoles.includes('ADMIN1')
+    }
+    return upperRoles.includes(portalId.toUpperCase())
   }
 
   function handlePortalClick(portal: typeof PORTALS[0]) {

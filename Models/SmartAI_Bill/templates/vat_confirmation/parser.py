@@ -134,5 +134,5 @@ def parse_vat_confirmation(file_path: str, limit=None, offset=0) -> dict:
     }
 
 
-def load_recipients(csv_path):
-    return parse_vat_confirmation(csv_path)["records"]
+def load_recipients(csv_path, limit=None, offset=0):
+    return parse_vat_confirmation(csv_path, limit=limit, offset=offset)["records"]

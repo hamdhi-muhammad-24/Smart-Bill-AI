@@ -14,7 +14,7 @@ import {
   Moon,
   Sun
 } from 'lucide-react'
-import { useTheme } from 'next-themes'
+import { useTheme } from '@/components/ThemeProvider'
 import { useAuth } from '../auth/AuthProvider'
 import Brand from '../components/Brand'
 import { Button } from '@/components/ui/button'
@@ -123,7 +123,7 @@ const supportLinks = [
 
 export default function PublicPortal() {
   const { session } = useAuth()
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, toggleTheme } = useTheme()
   const signInPath = !session
     ? '/login'
     : session.isNewUser
@@ -148,7 +148,7 @@ export default function PublicPortal() {
       <header className="sticky top-0 z-40 border-b border-border/40 bg-background/60 shadow-sm backdrop-blur-2xl">
         <div className="flex h-20 w-full items-center justify-between px-6 lg:px-10">
           {/* Logo on the far left */}
-          <Brand size="md" tone={theme === 'dark' ? 'dark' : 'light'} />
+          <Brand size="md" tone={resolvedTheme === 'dark' ? 'dark' : 'light'} />
 
           {/* Centered Navigation Links */}
           <nav className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden items-center gap-10 text-[14px] font-semibold text-muted-foreground md:flex">
@@ -169,7 +169,7 @@ export default function PublicPortal() {
               variant="outline"
               size="icon"
               className="rounded-full bg-background/70 hover:bg-background backdrop-blur-md border-border/60 shadow-sm transition-all"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              onClick={toggleTheme}
               title="Toggle theme"
             >
               <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0 text-foreground" />
@@ -398,7 +398,7 @@ export default function PublicPortal() {
       <footer id="terms-privacy" className="border-t border-border/60 bg-background/80 backdrop-blur-xl mt-auto">
         <div className="flex w-full flex-col sm:flex-row items-center justify-between px-6 lg:px-10 py-10 text-sm text-muted-foreground">
           <div className="flex-1 flex justify-start mb-6 sm:mb-0">
-            <Brand size="md" tone={theme === 'dark' ? 'dark' : 'light'} />
+            <Brand size="md" tone={resolvedTheme === 'dark' ? 'dark' : 'light'} />
           </div>
           
           <div className="flex-[2] sm:flex-1 flex flex-col items-center text-center gap-1 font-medium">

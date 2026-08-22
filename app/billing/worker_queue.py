@@ -506,35 +506,72 @@ def _worker_process(worker_id):
                                     dest_file_path.unlink()
                                 except Exception:
                                     pass
-                            if os.path.exists(working_path):
+
+                            # Move master file if exists, or promote working copy
+                            master_path = Path(upload.file_path) if upload.file_path and os.path.exists(upload.file_path) else None
+                            if master_path and master_path.exists() and str(master_path) != str(dest_file_path):
+                                try:
+                                    shutil.move(str(master_path), str(dest_file_path))
+                                except Exception as mv_err:
+                                    logger.warning(f"Could not move master file {master_path} to {dest_file_path}: {mv_err}")
+                            elif os.path.exists(working_path):
                                 try:
                                     shutil.move(str(working_path), str(dest_file_path))
-                                    upload.file_path = str(dest_file_path)
                                 except Exception as mv_err:
-                                    logger.warning(f"Could not move file {working_path} to {dest_file_path}: {mv_err}")
+                                    logger.warning(f"Could not move working file {working_path} to {dest_file_path}: {mv_err}")
+
+                            # Clean up working temp file if still present
+                            if os.path.exists(working_path):
+                                try:
+                                    os.remove(working_path)
+                                except Exception:
+                                    pass
+
+                            # Clean up any leftover pending queue file
+                            pending_path = settings.queue_pending_dir / filename
+                            if pending_path.exists() and str(pending_path) != str(dest_file_path):
+                                try:
+                                    pending_path.unlink()
+                                except Exception:
+                                    pass
 
                             upload.status = GmfUploadStatus.COMPLETED
-                            upload.billing_run_id = None
-                        else:
-                            staged_dest = settings.gmf_drive_path / "Staged"
-                            staged_dest.mkdir(parents=True, exist_ok=True)
-                            dest_file_path = staged_dest / filename
-                            if str(working_path) != str(dest_file_path):
-                                if dest_file_path.exists():
-                                    try:
-                                        dest_file_path.unlink()
-                                    except Exception:
-                                        pass
-                                if os.path.exists(working_path):
-                                    try:
-                                        shutil.move(str(working_path), str(dest_file_path))
-                                    except Exception as mv_err:
-                                        logger.warning(f"Could not move file {working_path} to {dest_file_path}: {mv_err}")
-
-                            upload.status = GmfUploadStatus.PARTIALLY_PROCESSED if upload.processed_records_count > 0 else GmfUploadStatus.APPROVED
                             upload.file_path = str(dest_file_path)
                             upload.billing_run_id = None
-                            
+                        else:
+                            # Partially processed: keep master file in queue/pending or Staged intact
+                            master_path = Path(upload.file_path) if upload.file_path and os.path.exists(upload.file_path) else None
+                            if not master_path:
+                                for candidate in [
+                                    settings.queue_pending_dir / filename,
+                                    settings.gmf_drive_path / "Staged" / filename,
+                                    settings.gmf_drive_path / (upload.folder_type or "") / filename,
+                                ]:
+                                    if candidate.exists():
+                                        master_path = candidate
+                                        break
+
+                            if not master_path:
+                                staged_master = settings.queue_pending_dir / filename
+                                staged_master.parent.mkdir(parents=True, exist_ok=True)
+                                if os.path.exists(working_path):
+                                    try:
+                                        shutil.move(str(working_path), str(staged_master))
+                                        master_path = staged_master
+                                    except Exception as mv_err:
+                                        logger.warning(f"Could not save staged master: {mv_err}")
+                            else:
+                                # Master file exists, clean up temporary queue working copy
+                                if os.path.exists(working_path):
+                                    try:
+                                        os.remove(working_path)
+                                    except Exception:
+                                        pass
+
+                            upload.status = GmfUploadStatus.PARTIALLY_PROCESSED if upload.processed_records_count > 0 else GmfUploadStatus.APPROVED
+                            upload.file_path = str(master_path) if master_path else upload.file_path
+                            upload.billing_run_id = None
+
                         upload.processed_at = datetime.now()
                         
                         run_id_to_update = run_id or upload.billing_run_id

@@ -9,7 +9,7 @@ import {
   Moon,
   Sun
 } from 'lucide-react'
-import { useTheme } from 'next-themes'
+import { useTheme } from '@/components/ThemeProvider'
 import { useAuth } from '../auth/AuthProvider'
 import { setToken } from '../lib/api'
 import Brand from '../components/Brand'
@@ -21,7 +21,7 @@ import { loginRequest } from '../auth/msalConfig'
 
 export default function Login() {
   const { session, isChecking, login } = useAuth()
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const { instance } = useMsal()
   const [error, setError] = useState<string | null>(null)
@@ -117,14 +117,14 @@ export default function Login() {
       <div className="relative flex w-full flex-col bg-background lg:w-[500px] xl:w-[650px] lg:shrink-0">
         <div className="absolute top-0 left-0 w-full h-16 px-6 sm:px-8 flex justify-between items-center z-20">
           <div className="lg:hidden">
-            <Brand size="md" />
+            <Brand size="md" tone={resolvedTheme === 'dark' ? 'dark' : 'light'} />
           </div>
           <div className="ml-auto flex items-center gap-3">
             <Button
               variant="outline"
               size="icon"
               className="rounded-full bg-background hover:bg-muted border-border transition-all"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+              onClick={toggleTheme}
               title="Toggle theme"
             >
               <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0 text-foreground" />
