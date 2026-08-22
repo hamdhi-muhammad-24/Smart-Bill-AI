@@ -40,7 +40,7 @@ function UploadJobBadge({ job }: { job: UploadJob }) {
 
 export default function UploadCenter() {
   const queryClient = useQueryClient()
-  const [folderType, setFolderType] = useState<string>('Cycle_1')
+  const [folderType, setFolderType] = useState<string>('Cycle')
   const [files, setFiles] = useState<File[]>([])
   const [dragging, setDragging] = useState<boolean>(false)
   const [success, setSuccess] = useState<boolean>(false)
@@ -150,10 +150,7 @@ export default function UploadCenter() {
               onChange={(e) => setFolderType(e.target.value)}
               className="w-full sm:w-64 rounded-md border-none bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-800 text-white dark:from-slate-100 dark:via-blue-50 dark:to-indigo-200 dark:text-slate-900 font-extrabold px-4 py-2.5 text-sm shadow-[0_4px_12px_rgba(0,0,0,0.15)] hover:scale-[1.01] transition-all cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 text-center"
             >
-              <option value="Cycle_1" className="bg-background text-foreground font-bold">Cycle 1</option>
-              <option value="Cycle_2" className="bg-background text-foreground font-bold">Cycle 2</option>
-              <option value="Cycle_3" className="bg-background text-foreground font-bold">Cycle 3</option>
-              <option value="Cycle_4" className="bg-background text-foreground font-bold">Cycle 4</option>
+              <option value="Cycle" className="bg-background text-foreground font-bold">Cycle (auto-detect)</option>
               <option value="Test_GMFs" className="bg-background text-foreground font-bold">Test GMFs</option>
               <option value="LOD" className="bg-background text-foreground font-bold">LOD</option>
               <option value="VAT_Confirmation" className="bg-background text-foreground font-bold">VAT Confirmation</option>

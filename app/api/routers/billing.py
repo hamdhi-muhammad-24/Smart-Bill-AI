@@ -1816,12 +1816,11 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
     import shutil
     from app.db.base import SessionLocal
     from app.db.models import GmfUpload, GmfUploadStatus, NotificationEvent, NotificationEventType, InvoiceTemplate, TemplateApprovalStatus
-    from app.uploads.watcher import _detect_template, _get_cycle
+    from app.uploads.watcher import _detect_template, _get_cycle, _resolve_folder_type
 
     logger = logging.getLogger("gmf_upload")
     logger.setLevel(logging.INFO)
 
-    cycle_number = _get_cycle(folder_type)
     is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
     registered_count = 0
     failed_count = 0
@@ -1839,6 +1838,13 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 failed_count += 1
                 logger.error("Staged upload disappeared before registration: %s", source_path)
                 continue
+
+            resolved_folder_type = _resolve_folder_type(folder_type, source_path)
+            if resolved_folder_type is None:
+                failed_count += 1
+                logger.error("Could not assign a billing cycle from BILLDATE: %s", filename)
+                continue
+            cycle_number = _get_cycle(resolved_folder_type)
 
             template_detected, total_records_count = _detect_template(str(source_path))
             template_status = templates_cache.get(template_detected)
@@ -1869,7 +1875,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
 
             existing = db.query(GmfUpload).filter(
                 GmfUpload.filename == filename,
-                GmfUpload.folder_type == folder_type,
+                GmfUpload.folder_type == resolved_folder_type,
             ).first()
             if existing:
                 if existing.status == GmfUploadStatus.COMPLETED:
@@ -1897,7 +1903,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 db.add(GmfUpload(
                     filename=filename,
                     file_path=str(final_path),
-                    folder_type=folder_type,
+                    folder_type=resolved_folder_type,
                     cycle_number=cycle_number,
                     template_detected=template_detected,
                     status=final_status,
@@ -1922,7 +1928,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 logger.error("Failed to move staged GMF %s to %s: %s", filename, final_path, move_err)
                 upload = db.query(GmfUpload).filter(
                     GmfUpload.filename == filename,
-                    GmfUpload.folder_type == folder_type,
+                    GmfUpload.folder_type == resolved_folder_type,
                 ).first()
                 if upload:
                     upload.status = GmfUploadStatus.FAILED
@@ -1954,12 +1960,11 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
     import logging
     from app.db.base import SessionLocal
     from app.db.models import GmfUpload, GmfUploadStatus, NotificationEvent, NotificationEventType, InvoiceTemplate, TemplateApprovalStatus
-    from app.uploads.watcher import _detect_template, _get_cycle, _should_skip
+    from app.uploads.watcher import _detect_template, _get_cycle, _should_skip, _resolve_folder_type
     
     logger = logging.getLogger("gmf_upload")
     logger.setLevel(logging.INFO)
     
-    cycle_number = _get_cycle(folder_type)
     is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
     
     temp_extract_dir = tempfile.mkdtemp(prefix="slt_zip_extract_")
@@ -1985,6 +1990,12 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
             
             for idx, file_path in enumerate(extracted_files):
                 filename = file_path.name
+
+                resolved_folder_type = _resolve_folder_type(folder_type, file_path)
+                if resolved_folder_type is None:
+                    logger.error("Could not assign a billing cycle from BILLDATE: %s", filename)
+                    continue
+                cycle_number = _get_cycle(resolved_folder_type)
                 
                 template_detected, total_records_count = _detect_template(str(file_path))
                 is_approved = templates_cache.get(template_detected) == TemplateApprovalStatus.APPROVED if template_detected else False
@@ -2004,7 +2015,7 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
                 # 1. Update/Insert DB record FIRST
                 existing = db.query(GmfUpload).filter(
                     GmfUpload.filename == filename,
-                    GmfUpload.folder_type == folder_type
+                    GmfUpload.folder_type == resolved_folder_type
                 ).first()
                 if existing:
                     existing.file_path = str(final_path)
@@ -2018,7 +2029,7 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
                     upload = GmfUpload(
                         filename=filename,
                         file_path=str(final_path),
-                        folder_type=folder_type,
+                        folder_type=resolved_folder_type,
                         cycle_number=cycle_number,
                         template_detected=template_detected,
                         total_records_count=total_records_count,
@@ -2063,7 +2074,7 @@ def upload_gmf(
     _: UserOut = Depends(require_admin1_or_admin)
 ):
     """Accept direct GMF file or ZIP uploads."""
-    if folder_type not in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "Customer_Letter_Logo_V1Print"):
+    if folder_type not in ("Cycle", "Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "No_Cycle", "Test_GMFs", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "Customer_Letter_Logo_V1Print"):
         raise HTTPException(status_code=400, detail="Invalid folder_type.")
 
     staged_files: list[tuple[str, str]] = []

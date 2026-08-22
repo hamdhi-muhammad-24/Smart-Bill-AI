@@ -104,7 +104,7 @@ def _resolve_cycle_folder(upload):
 
     if cycle_num and isinstance(cycle_num, int) and 1 <= cycle_num <= 4:
         return f"Cycle_{cycle_num}"
-    elif f_type in ("LOD", "VAT_Confirmation", "Test_GMFs", "Final_Notice", "Customer_Letter"):
+    elif f_type in ("No_Cycle", "LOD", "VAT_Confirmation", "Test_GMFs", "Final_Notice", "Customer_Letter"):
         return f_type
     elif f_type in ("Customer_Letter_Logo_V1Print", "Customer_Migration_Letter", "customer_letter"):
         return "Customer_Letter"

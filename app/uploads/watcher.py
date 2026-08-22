@@ -13,6 +13,8 @@ import sys
 import time
 import json
 import shutil
+from datetime import datetime
+import re
 from pathlib import Path
 
 from watchdog.observers import Observer
@@ -49,13 +51,15 @@ CYCLE_FOLDERS = {
     "Cycle_3": 3,
     "Cycle_4": 4,
 }
+INCOMING_CYCLE_FOLDER = "Cycle"
+NO_CYCLE_FOLDER = "No_Cycle"
 TEST_FOLDER = "Test_GMFs"
 LOD_FOLDER = "LOD"
 VAT_CONF_FOLDER = "VAT_Confirmation"
 FINAL_NOTICE_FOLDER = "Final_Notice"
 CUSTOMER_LETTER_FOLDER = "Customer_Letter"
 CUSTOMER_LETTER_ALT_FOLDER = "Customer_Letter_Logo_V1Print"
-VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {
+VALID_FOLDERS = set(CYCLE_FOLDERS.keys()) | {INCOMING_CYCLE_FOLDER, NO_CYCLE_FOLDER} | {
     TEST_FOLDER, 
     LOD_FOLDER, 
     VAT_CONF_FOLDER, 
@@ -103,6 +107,31 @@ def _detect_template(file_path: str) -> tuple[str | None, int]:
 def _get_cycle(folder_name: str) -> int | None:
     """Return cycle number (1-4) from folder name, or None for Test_GMFs."""
     return CYCLE_FOLDERS.get(folder_name)
+
+
+def _get_cycle_from_billdate(file_path: str | Path) -> int | None:
+    """Return the cycle assigned to the first BILLDATE in a GMF file."""
+    try:
+        with Path(file_path).open("r", encoding="utf-8", errors="replace") as file:
+            for line in file:
+                match = re.match(r"^BILLDATE\s+([^|\s]+)", line.strip())
+                if match:
+                    bill_day = datetime.strptime(match.group(1), "%d/%m/%Y").day
+                    for cycle, days in ((1, range(1, 4)), (2, range(8, 11)), (3, range(16, 19)), (4, range(24, 27))):
+                        if bill_day in days:
+                            return cycle
+                    return None
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def _resolve_folder_type(folder_name: str, file_path: str | Path) -> str:
+    """Normalize the incoming Cycle folder to a stored cycle or No_Cycle folder type."""
+    if folder_name != INCOMING_CYCLE_FOLDER:
+        return folder_name
+    cycle_number = _get_cycle_from_billdate(file_path)
+    return f"Cycle_{cycle_number}" if cycle_number else NO_CYCLE_FOLDER
 
 
 def _get_billing_mode() -> str:
@@ -187,7 +216,9 @@ class GmfFolderHandler(FileSystemEventHandler):
             logger.warning(f"File disappeared before processing: {filepath}")
             return
 
-        # Auto-detect billing cycle
+        # Auto-detect billing cycle from BILLDATE in the shared Cycle folder.
+        resolved_folder_name = _resolve_folder_type(folder_name, filepath)
+        folder_name = resolved_folder_name
         cycle_number = _get_cycle(folder_name)
         is_test = folder_name == TEST_FOLDER
 
@@ -454,6 +485,8 @@ def start_watcher():
     if not watch_path.exists():
         logger.warning(f"Watch directory does not exist, creating: {watch_path}")
         watch_path.mkdir(parents=True, exist_ok=True)
+    (watch_path / INCOMING_CYCLE_FOLDER).mkdir(parents=True, exist_ok=True)
+    (watch_path / NO_CYCLE_FOLDER).mkdir(parents=True, exist_ok=True)
 
     # First, pick up any files that were uploaded while the watcher was stopped
     logger.info("Running startup scan for existing files...")
