@@ -9,13 +9,13 @@ COORDS = {
     "billing_date":         (155, 643),
     "billing_period":       (155, 615),
 
-    "customer_business":    (280, 725),
-    "customer_addr_start":  715,
+    "customer_business":    (280, 722),
+    "customer_addr_start":  712,
     "customer_addr_x":      280,
     "customer_addr_line_h": 11,
 
     # ENTERPRISE badge
-    "badge_text":           (330, 612),
+    "badge_text":           (320, 612),
 
     # Summary boxes
     "balance_bf":           (85, 512),
@@ -86,7 +86,7 @@ FONTS = {
     "header":         {"size": 9,   "bold": False},
     "customer_name":  {"size": 9.5, "bold": True},
     "customer_addr":  {"size": 9,   "bold": True},
-    "badge":          {"size": 11,  "bold": True},
+    "badge":          {"size": 18,  "bold": True},
     "summary_box":    {"size": 10,  "bold": False},
     "summary_total":  {"size": 10,  "bold": True},
     "product_label":  {"size": 9,   "bold": True},
@@ -95,7 +95,7 @@ FONTS = {
     "total":          {"size": 10,  "bold": True},
     "payments":       {"size": 8,   "bold": False},
     "slip":           {"size": 8,   "bold": False},
-    "gen_id":         {"size": 8,   "bold": False},
+    "gen_id":         {"size": 7,   "bold": False},
     "page_indicator": {"size": 9,   "bold": False},
     "invoice_no_p2":  {"size": 10,  "bold": True},
 }
@@ -104,4 +104,4 @@ POST_TC_COLUMNS = {
     "left":  {"x_start": 45, "x_end": 300, "amount_x": 295},
     "right": {"x_start": 315, "x_end": 555, "amount_x": 550},
     "vert_line_x": 308,
-}
+}

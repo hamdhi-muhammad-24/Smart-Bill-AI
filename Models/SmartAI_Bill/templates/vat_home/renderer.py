@@ -248,7 +248,7 @@ class VATHomeRenderer:
         due = data.get("payment_due_date", "")
         try:
             dd, mm, yyyy = due.split("/")
-            due_mmddyy = f"{mm}{dd}{yyyy[-2:]}"
+            due_mmddyy = f"{mm}{dd}{yyyy}"
         except ValueError:
             due_mmddyy = ""
         ts = datetime.now().strftime("%H:%M:%S")

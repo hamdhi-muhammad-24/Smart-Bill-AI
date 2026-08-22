@@ -190,8 +190,12 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
     if base_name.lower().endswith(".processing"):
         base_name = base_name[:-11]
     
-    # Prefix is the original filename stripped of extension, to preserve it for downstream checks
-    base_prefix = os.path.splitext(base_name)[0]
+    # Prefix is the original filename stripped of extension, to preserve it for downstream checks.
+    # GMF files carry no real extension - a trailing ".7" (etc.) is part of
+    # the filename's own version/sequence number, not a file extension, so
+    # only strip it when it's an actual Office file extension.
+    _base_root, _base_ext = os.path.splitext(base_name)
+    base_prefix = _base_root if _base_ext.lower() in (".xlsx", ".xls", ".csv") else base_name
     
     for i, block in enumerate(doc_blocks, 1):
         tf = tempfile.NamedTemporaryFile("w", delete=False, prefix=f"{base_prefix}__", suffix=f"_{i}.gmf", encoding="utf-8")
@@ -209,6 +213,11 @@ def write_doc_to_temp(doc_lines, temp_dir, source_filename, doc_index, original_
     """
     clean_filename = source_filename[:-11] if source_filename.lower().endswith('.processing') else source_filename
     base, ext = os.path.splitext(clean_filename)
+    if ext.lower() not in ('.xlsx', '.xls'):
+        # GMF files carry no real extension - a trailing ".7" (etc.) is part
+        # of the filename's own version/sequence number, not a file
+        # extension. Don't let splitext() truncate it.
+        base, ext = clean_filename, ""
     if ext.lower() in ('.xlsx', '.xls'):
         temp_name = f"{base}__doc{doc_index:04d}{ext}"
         temp_path = os.path.join(temp_dir, temp_name)
