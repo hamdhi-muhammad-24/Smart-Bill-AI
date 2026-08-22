@@ -18,7 +18,7 @@ if _smartai_path not in sys.path:
 from app.db.base import SessionLocal
 from app.db.models import GmfUpload, GmfUploadStatus, InvoiceTemplate, TemplateApprovalStatus, BillingRun, BillingRunFailure, RunStatus
 from app.core.config import settings
-from processing.output_manager import create_output_batches
+from processing.output_manager import create_output_batches, create_summary_groups
 from config import OUTPUT_PDF_NAMES, OUTPUT_PDF_NAME_DEFAULT
 from sqlalchemy import update as sql_update, or_
 from core.self_seal_appender import get_approved_self_seal_pdf, apply_self_seal_to_directory
@@ -124,7 +124,8 @@ def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
     while True:
         b_dir = base_dir / f"Batch_{b_num}"
         b_dir.mkdir(parents=True, exist_ok=True)
-        pdf_count = len([f for f in b_dir.iterdir() if f.is_file() and f.name.lower().endswith(".pdf")])
+        # Recursively count PDFs in the batch folder
+        pdf_count = sum(1 for _ in b_dir.rglob("*.pdf"))
         if pdf_count < max_per_batch:
             return b_dir
         b_num += 1
@@ -320,6 +321,8 @@ def _worker_process(worker_id):
     from templates.registry import get_renderer, get_parser
     from core.gmf_splitter import split_gmf_documents, count_documents
     from processing.batch_processor import process_single_file
+    from core.gmf_reader import parse_filename, is_red_notice, categorize_bill_handling_code, get_category_folder
+    from config import BATCH_FOLDER_SIZE
     
     logger.info(f"Worker {worker_id} started")
     COMPLETED_TEMP.mkdir(parents=True, exist_ok=True)
@@ -476,13 +479,42 @@ def _worker_process(worker_id):
                     )
                 # ───────────────────────────────────────────────────────────
 
+                # Resolve category and red status for this GMF file
+                file_info = parse_filename(filename)
+                bill_handling_code = file_info.get("bill_handling", "")
+                category_name = categorize_bill_handling_code(bill_handling_code)
+                category_folder_name = get_category_folder(category_name)
+                is_red = is_red_notice(filename)
+                red_folder_name = "RED" if is_red else "Non-Red"
+
                 # Copy generated files to output folder
                 pdf_files = list(Path(temp_pdf_dir).glob("*.pdf"))
+                is_cycle_folder = folder_name.lower().startswith("cycle_")
+
                 for file_path in pdf_files:
-                    shutil.copy2(file_path, cycle_base_dir / file_path.name)
+                    # Find a batch folder that has space
+                    batch_dir = _get_batch_folder(cycle_base_dir, BATCH_FOLDER_SIZE)
+                    if is_cycle_folder:
+                        # Cycles get the full Email/Print + RED/Non-Red sub-folder structure
+                        target_dir = batch_dir / category_folder_name / red_folder_name
+                    else:
+                        # Non-cycle templates (LOD, Final_Notice, etc.) go flat into the batch
+                        target_dir = batch_dir
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(file_path, target_dir / file_path.name)
                 
                 generated_count = len(pdf_files)
                 total_count = len(results)
+
+                # Build summary groups if any summary_statement was processed
+                try:
+                    create_summary_groups(
+                        cycle_base_dir.parent,  # date-level folder: output/YYYY-MM-DD/
+                        results,
+                        log_callback=lambda msg: logger.info(msg),
+                    )
+                except Exception as sg_err:
+                    logger.warning(f"create_summary_groups non-fatal error: {sg_err}")
             
             # Move source GMF to Processed/Staged folder and update DB
             try:

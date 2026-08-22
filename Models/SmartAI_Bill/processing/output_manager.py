@@ -211,28 +211,134 @@ def list_pdfs_in_batch(date_str, cycle_label, batch_name):
     for root in get_output_roots():
         batch_path = os.path.join(root, date_str, cycle_label, batch_name)
         if os.path.exists(batch_path) and os.path.isdir(batch_path):
-            for f in os.listdir(batch_path):
-                if f.lower().endswith(".pdf"):
-                    pdfs.add(f)
+            for dirpath, _, filenames in os.walk(batch_path):
+                for f in filenames:
+                    if f.lower().endswith(".pdf"):
+                        # Get path relative to the batch folder
+                        full_path = os.path.join(dirpath, f)
+                        rel_path = os.path.relpath(full_path, batch_path)
+                        # Replace backslashes with forward slashes for URLs
+                        pdfs.add(rel_path.replace("\\", "/"))
         
         # Check direct files if batch_name is Batch_01
-        cycle_path = os.path.join(root, date_str, cycle_label)
-        if os.path.exists(cycle_path):
-            for f in os.listdir(cycle_path):
-                if f.lower().endswith(".pdf"):
-                    pdfs.add(f)
+        if batch_name == "Batch_01":
+            cycle_path = os.path.join(root, date_str, cycle_label)
+            if os.path.exists(cycle_path):
+                for f in os.listdir(cycle_path):
+                    if f.lower().endswith(".pdf"):
+                        pdfs.add(f)
     return sorted(list(pdfs))
 
 
 def get_pdf_path(date_str, cycle_label, batch_name, filename):
     """Return absolute path to a specific PDF file across all output roots."""
+    basename = os.path.basename(filename)
     for root in get_output_roots():
-        # Check batch subfolder first
-        p = os.path.join(root, date_str, cycle_label, batch_name, filename)
-        if os.path.exists(p):
-            return p
+        # Check batch subfolder recursively
+        batch_path = os.path.join(root, date_str, cycle_label, batch_name)
+        if os.path.exists(batch_path):
+            for dirpath, _, filenames in os.walk(batch_path):
+                if basename in filenames:
+                    return os.path.join(dirpath, basename)
         # Check direct cycle directory
-        p_direct = os.path.join(root, date_str, cycle_label, filename)
+        p_direct = os.path.join(root, date_str, cycle_label, basename)
         if os.path.exists(p_direct):
             return p_direct
-    return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, filename)
+    return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, basename)
+
+
+def create_summary_groups(date_base_dir, processing_results, log_callback=None):
+    """
+    Create a summary/ folder under date_base_dir that groups each Summary Statement
+    with all its sub-account bills, searching across ALL cycle folders for that date.
+
+    Structure:
+        output/YYYY-MM-DD/
+        ├── Summary_Statement/     ← cycle folders unchanged
+        ├── VAT_Enterprise/
+        └── summary/               ← NEW: sits at the date level
+            └── CRxxxxxxxxx/       ← one folder per summary statement
+                ├── 00_<summary>.pdf   ← summary statement first (00_ prefix)
+                ├── <account1>.pdf
+                └── <account2>.pdf
+
+    Args:
+        date_base_dir (str|Path): The dated output folder (e.g. output/2026-08-21/).
+        processing_results (list[ProcessingResult]): Results from process_single_file / process_batch.
+        log_callback (callable|None): Optional logging function.
+    """
+    date_base_dir = str(date_base_dir)
+
+    # Filter results that carry summary metadata
+    summary_results = [r for r in processing_results if getattr(r, "summary_meta", None)]
+    if not summary_results:
+        return
+
+    # Collect ALL PDFs under date_base_dir across every cycle folder,
+    # but skip the summary/ folder itself to avoid circular copying.
+    all_pdfs = {}  # filename -> absolute path
+    for dirpath, dirnames, filenames in os.walk(date_base_dir):
+        rel = os.path.relpath(dirpath, date_base_dir)
+        # Skip the summary folder itself
+        if rel == "summary" or rel.startswith("summary" + os.sep):
+            dirnames[:] = []  # don't descend further
+            continue
+        for fname in filenames:
+            if fname.lower().endswith(".pdf"):
+                # First occurrence wins (avoids Batch_2 overwriting Batch_1 copy)
+                if fname not in all_pdfs:
+                    all_pdfs[fname] = os.path.join(dirpath, fname)
+
+    summary_root = os.path.join(date_base_dir, "summary")
+
+    for result in summary_results:
+        meta = result.summary_meta
+        customer_ref = meta.get("customer_ref", "unknown")
+        account_nos = meta.get("account_nos", [])
+        summary_pdf_name = meta.get("pdf_name", "")
+
+        group_dir = os.path.join(summary_root, customer_ref)
+        os.makedirs(group_dir, exist_ok=True)
+
+        copied = 0
+        errors = 0
+
+        # 1. Copy the summary statement PDF first (prefixed with 00_ to sort to top)
+        if summary_pdf_name and summary_pdf_name in all_pdfs:
+            src = all_pdfs[summary_pdf_name]
+            dest_name = f"00_{summary_pdf_name}"
+            dest = os.path.join(group_dir, dest_name)
+            try:
+                shutil.copy2(src, dest)
+                copied += 1
+            except Exception as e:
+                errors += 1
+                if log_callback:
+                    log_callback(f"  Summary group warning: could not copy summary PDF {summary_pdf_name}: {e}")
+
+        # 2. Copy matching sub-account bills (account number must appear in filename)
+        for acc_no in account_nos:
+            if not acc_no:
+                continue
+            matched = [
+                (fname, path)
+                for fname, path in all_pdfs.items()
+                if acc_no in fname and fname != summary_pdf_name
+            ]
+            for fname, src in matched:
+                dest = os.path.join(group_dir, fname)
+                if os.path.exists(dest):
+                    continue  # already copied (e.g. account appears in multiple summaries)
+                try:
+                    shutil.copy2(src, dest)
+                    copied += 1
+                except Exception as e:
+                    errors += 1
+                    if log_callback:
+                        log_callback(f"  Summary group warning: could not copy {fname}: {e}")
+
+        if log_callback:
+            status = f"({errors} errors)" if errors else "OK"
+            log_callback(
+                f"  Summary group [{customer_ref}]: {copied} file(s) -> {group_dir} {status}"
+            )

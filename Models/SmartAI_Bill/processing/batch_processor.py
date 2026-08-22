@@ -30,6 +30,9 @@ class ProcessingResult:
         self.duration = duration
         self.attempt = attempt
         self.doc_index = doc_index
+        # Populated for summary_statement template only.
+        # Format: {"customer_ref": "CRxxxxxxxxx", "account_nos": ["...", ...], "pdf_name": "..."}
+        self.summary_meta = None
 
 
 def process_single_file(args):
@@ -192,6 +195,21 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
             gen_count = len(getattr(renderer, "generated_pdfs", []))
             result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
             result.success = True
+
+        # Capture summary statement metadata for folder grouping
+        if template_id == "summary_statement" and result.success and isinstance(data, dict):
+            customer_ref = re.sub(r'[^A-Za-z0-9_-]+', '_', str(data.get("customer_ref_no", "") or "")).strip('_')
+            account_nos = [
+                str(a.get("account_no", "")).strip()
+                for a in data.get("accounts", [])
+                if a.get("account_no", "").strip()
+            ]
+            if customer_ref:
+                result.summary_meta = {
+                    "customer_ref": customer_ref,
+                    "account_nos": account_nos,
+                    "pdf_name": os.path.basename(result.output_pdf) if result.output_pdf else "",
+                }
 
     except Exception as e:
         result.error = f"Doc {doc_index}: {type(e).__name__}: {str(e)}"

@@ -1,5 +1,60 @@
 import os
 
+# Category mapping — based on BPR03 rules
+BILL_HANDLING_CATEGORY = {
+    #Email / E-statement only
+    '02': 'email',   # E-statement by email
+    '04': 'email',   # E-statement on web
+    '06': 'email',   # Prestige - E-statement (treat as 02)
+    '13': 'email',   # Corporate_E-Statement by FTP
+    '21': 'email',   # Corporate_E-statement by Email
+    '22': 'email',   # Corporate_E-statement by Report
+    '23': 'email',   # E-Statement-App Mode
+    '24': 'email',   # E-Statement by SMS
+    '10': 'email',   # By Hand - Operator
+    '11': 'email',   # By Hand - Special
+    '25': 'email',   # whatsapp
+    '26': 'email',   # cooparate e bill
+
+    #Print only (hard copy delivery)
+    '01': 'print',   # Hard Copy
+    '05': 'print',   # Prestige - Post (treat as 01)
+    '08': 'print',   # By Hand - Data
+    '09': 'print',   # By Hand - BCU
+    '15': 'print',   # BCU Single side print
+
+    #Both print and email/digital
+    '03': 'print_and_email',  # E-statement & Post
+    '16': 'print_and_email',  # Prestige - Post & E-statement
+    '19': 'print_and_email',  # Corporate Hard Copy & E-Bill
+    '20': 'print_and_email',  # Hard Copy & CD (physical + digital)
+
+    #Other
+    '07': 'other',   # Prepaid (no bill delivery)
+    '12': 'other',   # No Print (explicitly no delivery)
+    '14': 'other',   # DNR (Do Not Return)
+    '17': 'other',   # Special List 1 (needs manual review)
+    '18': 'other',   # Special List 2 (needs manual review)
+}
+
+CATEGORY_FOLDERS = {
+    'email':           'Email',
+    'print':           'Print',
+    'print_and_email': 'Email & Print',
+    'other':           'Other',
+}
+
+def categorize_bill_handling_code(code):
+    if not code:
+        return 'other'
+    # Normalize (strip whitespace, keep leading zeros)
+    code = str(code).strip().zfill(2)
+    return BILL_HANDLING_CATEGORY.get(code, 'other')
+
+def get_category_folder(category):
+    return CATEGORY_FOLDERS.get(category, 'Other')
+
+
 
 class GMFHeader:
     def __init__(self):

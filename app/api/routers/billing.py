@@ -87,6 +87,16 @@ class GmfUploadOut(BaseModel):
         from_attributes = True
 
 
+class BillingRunFailureOut(BaseModel):
+    id: int
+    account_number: Optional[str]
+    error_message: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class BillingRunOut(BaseModel):
     id: int
     batch_name: str
@@ -98,7 +108,7 @@ class BillingRunOut(BaseModel):
     started_at: datetime
     finished_at: Optional[datetime]
     output_path: Optional[str]
-    failures: List[dict] = []
+    failures: List[BillingRunFailureOut] = []
 
     class Config:
         from_attributes = True
@@ -1347,7 +1357,7 @@ def output_pdfs(
     return {"date": date_str, "cycle": cycle, "batch": batch, "files": pdfs}
 
 
-@router.get("/output/{date_str}/{cycle}/{batch}/{filename}")
+@router.get("/output/{date_str}/{cycle}/{batch}/{filename:path}")
 def serve_pdf(
     date_str: str, cycle: str, batch: str, filename: str,
     _: UserOut = Depends(require_admin)
