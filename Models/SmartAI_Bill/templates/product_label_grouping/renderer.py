@@ -104,11 +104,17 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         due = data.get("payment_due_date", "")
         try:
             dd, mm, yyyy = due.split("/")
-            due_mmddyy   = f"{mm}{dd}{yyyy[-2:]}"
+            due_mmddyy   = f"{mm}{dd}{yyyy}"
         except ValueError:
             due_mmddyy = ""
         ts   = datetime.now().strftime("%H:%M:%S")
-        line = f'{data["source_filename"]}_{ts}{due_mmddyy}'
+
+        # Clean the source filename by removing the random suffix (e.g. __sqg099w7_1.gmf)
+        source_file = data.get("source_filename", "")
+        if "__" in source_file:
+            source_file = source_file.split("__")[0] + "_"
+
+        line = f'{source_file}_{ts}{due_mmddyy}'
         self.text(*COORDS["gen_id_line"], line, size=f["size"])
         if data.get("customer_segment"):
             self.text(*COORDS["gen_id_line2"], data["customer_segment"],

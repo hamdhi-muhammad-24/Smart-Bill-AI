@@ -11,7 +11,7 @@ COORDS = {
     "account_number":       (155, 701),
     "invoice_number":       (155, 672),
     "billing_date":         (155, 643),
-    "billing_period":       (155, 615),
+    "billing_period":       (150, 615),
 
     "customer_name":        (280, 725),
     "customer_business_y":  715,
@@ -104,7 +104,7 @@ FONTS = {
     "vat_reg":       {"size": 7.5, "bold": False},
     "customer_name": {"size": 9.5, "bold": True},
     "customer_addr": {"size": 9,   "bold": True},
-    "badge":         {"size": 11,  "bold": True},
+    "badge":         {"size": 13,  "bold": True},
     "summary_box":   {"size": 10,  "bold": False},
     "summary_total": {"size": 10,  "bold": True},
     "group_ref":     {"size": 10,  "bold": True},

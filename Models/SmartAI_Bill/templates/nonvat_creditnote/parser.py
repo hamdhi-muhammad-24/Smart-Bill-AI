@@ -213,6 +213,9 @@ def parse_nonvat_creditnote(file_path):
     # --------------------------------------------------
 
     filename = os.path.basename(file_path).removesuffix(".processing")
+    # Clean the source filename by removing the random suffix (e.g. __a9ijep_x_1.gmf)
+    if "__" in filename:
+        filename = filename.split("__")[0]
 
     timestamp = datetime.datetime.now().strftime(
         "%H:%M:%d%m%Y"

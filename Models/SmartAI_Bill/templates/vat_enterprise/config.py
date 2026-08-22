@@ -88,7 +88,7 @@ COORDS = {
 }
 
 CHARGES_TABLE = {
-    "page1_y_start":        466.40,
+    "page1_y_start":        455.40,
     "page1_y_min":          165.00, # Band floor: mask rect ends at y_top=692 → y_bottom=842.25-692≈150
     #"page1_band_mask":      (45, 127, 560, 457),  # (x0, y0, x1, y1) bottom-origin rect to mask baked labels
     "otherpage_y_start":    770,

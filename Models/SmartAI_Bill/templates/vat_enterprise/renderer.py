@@ -34,6 +34,7 @@ class VATEnterpriseRenderer(BaseRenderer):
 
         # 4. Draw page 1 static/slip footer elements (QR codes, barcodes, slip text)
         self._draw_page1_footer(data)
+        self._draw_currency_label(data)
 
         # 5. Draw dynamic charges table
         y = self._draw_charges(data["product_labels"])
@@ -117,11 +118,17 @@ class VATEnterpriseRenderer(BaseRenderer):
         due = data.get("payment_due_date", "")
         try:
             dd, mm, yyyy = due.split("/")
-            due_mmddyy = f"{mm}{dd}{yyyy[-2:]}"
+            due_mmddyy = f"{mm}{dd}{yyyy}"
         except ValueError:
             due_mmddyy = ""
         ts = datetime.now().strftime("%H:%M:%S")
-        line = f'{data["source_filename"]}_{ts}_{due_mmddyy}'
+
+        # Clean the source filename by removing the random suffix (e.g. __sqg099w7_1.gmf)
+        source_file = data.get("source_filename", "")
+        if "__" in source_file:
+            source_file = source_file.split("__")[0] + "_"
+
+        line = f'{source_file}_{ts}_{due_mmddyy}'
         self.text(*COORDS["gen_id_line"], line, size=f["size"])
         if data.get("customer_segment"):
             self.text(*COORDS["gen_id_line2"], data["customer_segment"], size=f["size"])
@@ -165,6 +172,20 @@ class VATEnterpriseRenderer(BaseRenderer):
         )
         self.text(*COORDS["slip_customer"], slip_name or "", size=f["size"])
         self.text(*COORDS["slip_account"], data["account_number"], size=f["size"])
+
+    def _draw_currency_label(self, data):
+        """Currency label above the charges column (e.g. "(Rs.)") - read from
+        the GMF's ACCCURRENCYCODE tag (data['currency_code']), never a fixed
+        string, since a different account can have a different currency.
+        Must NOT be sourced from SLTACCCURRENCYCODE - that's SLT's internal
+        accounting code (e.g. "LKR"), a different tag/value entirely,
+        confirmed distinct in the real GMF."""
+        code = data.get("currency_code", "")
+        if not code:
+            return
+        f = FONTS["header"]
+        self.text(CHARGES_TABLE["amount_x"], CHARGES_TABLE["page1_y_start"] + 11.0,
+                  f"({code}.)", size=f["size"], bold=True, align="right")
 
     def _draw_charges(self, product_labels):
         y = CHARGES_TABLE["page1_y_start"]

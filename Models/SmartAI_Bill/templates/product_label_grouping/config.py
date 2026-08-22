@@ -10,14 +10,14 @@ COORDS = {
     "account_number":       (155, 701),
     "invoice_number":       (155, 672),
     "billing_date":         (155, 643),
-    "billing_period":       (155, 615),
+    "billing_period":       (150, 615),
 
-    "customer_name":        (280, 725),
+    "customer_name":        (280, 724),
     "customer_addr_start":  715,
     "customer_addr_x":      280,
     "customer_addr_line_h": 11,
 
-    "badge_text":           (330, 612),
+    "badge_text":           (345, 612),
 
     "balance_bf":           (85, 512),
     "payments_received":    (190, 512),
@@ -79,7 +79,7 @@ FONTS = {
     "header":         {"size": 9,   "bold": False},
     "customer_name":  {"size": 9.5, "bold": True},
     "customer_addr":  {"size": 9,   "bold": True},
-    "badge":          {"size": 11,  "bold": True},
+    "badge":          {"size": 18,  "bold": True},
     "summary_box":    {"size": 10,  "bold": False},
     "summary_total":  {"size": 10,  "bold": True},
     "product_label":  {"size": 9,   "bold": True},
