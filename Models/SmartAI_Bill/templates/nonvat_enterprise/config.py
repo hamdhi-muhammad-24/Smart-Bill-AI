@@ -7,7 +7,7 @@ COORDS = {
     "account_number":       (155, 701),
     "invoice_number":       (155, 672),
     "billing_date":         (155, 643),
-    "billing_period":       (155, 615),
+    "billing_period":       (150, 615),
 
     "customer_business":    (280, 722),
     "customer_addr_start":  712,
