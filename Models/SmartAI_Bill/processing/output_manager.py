@@ -184,7 +184,8 @@ def list_cycles_for_date(date_str):
             for d in os.listdir(date_path):
                 if os.path.isdir(os.path.join(date_path, d)):
                     cycles.add(d)
-    return sorted(list(cycles))
+    import re
+    return sorted(list(cycles), key=lambda x: [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', x)])
 
 
 def list_batches_for_cycle(date_str, cycle_label):
@@ -202,7 +203,8 @@ def list_batches_for_cycle(date_str, cycle_label):
                     has_direct_pdfs = True
             if has_direct_pdfs:
                 batches.add("Batch_01")
-    return sorted(list(batches))
+    import re
+    return sorted(list(batches), key=lambda x: [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', x)])
 
 
 def list_pdfs_in_batch(date_str, cycle_label, batch_name):
@@ -303,20 +305,21 @@ def create_summary_groups(date_base_dir, processing_results, log_callback=None):
         copied = 0
         errors = 0
 
-        # 1. Copy the summary statement PDF first (prefixed with 00_ to sort to top)
+        # 1. Move the summary statement PDF first (prefixed with 00_ to sort to top)
         if summary_pdf_name and summary_pdf_name in all_pdfs:
             src = all_pdfs[summary_pdf_name]
             dest_name = f"00_{summary_pdf_name}"
             dest = os.path.join(group_dir, dest_name)
             try:
-                shutil.copy2(src, dest)
-                copied += 1
+                if os.path.exists(src):
+                    shutil.move(src, dest)
+                    copied += 1
             except Exception as e:
                 errors += 1
                 if log_callback:
-                    log_callback(f"  Summary group warning: could not copy summary PDF {summary_pdf_name}: {e}")
+                    log_callback(f"  Summary group warning: could not move summary PDF {summary_pdf_name}: {e}")
 
-        # 2. Copy matching sub-account bills (account number must appear in filename)
+        # 2. Move matching sub-account bills (account number must appear in filename)
         for acc_no in account_nos:
             if not acc_no:
                 continue
@@ -327,15 +330,15 @@ def create_summary_groups(date_base_dir, processing_results, log_callback=None):
             ]
             for fname, src in matched:
                 dest = os.path.join(group_dir, fname)
-                if os.path.exists(dest):
-                    continue  # already copied (e.g. account appears in multiple summaries)
+                if os.path.exists(dest) or not os.path.exists(src):
+                    continue  # already moved (e.g. account appears in multiple summaries)
                 try:
-                    shutil.copy2(src, dest)
+                    shutil.move(src, dest)
                     copied += 1
                 except Exception as e:
                     errors += 1
                     if log_callback:
-                        log_callback(f"  Summary group warning: could not copy {fname}: {e}")
+                        log_callback(f"  Summary group warning: could not move {fname}: {e}")
 
         if log_callback:
             status = f"({errors} errors)" if errors else "OK"

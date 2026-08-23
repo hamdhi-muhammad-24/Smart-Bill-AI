@@ -454,67 +454,113 @@ def _worker_process(worker_id):
                     with SessionLocal() as db:
                         u_rec = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
                         if u_rec:
+                            if not u_rec.total_records_count or u_rec.total_records_count <= 1:
+                                try:
+                                    from gmf_core.gmf_splitter import count_documents
+                                    real_total = count_documents(str(working_path))
+                                    u_rec.total_records_count = max(real_total, 1)
+                                    db.commit()
+                                except Exception as e:
+                                    logger.warning(f"Failed to count records early: {e}")
+                            
                             run_id = _create_billing_run(db, u_rec, filename, offset, limit)
                 except Exception as create_run_err:
                     logger.warning(f"Could not create BillingRun for {filename}: {create_run_err}")
 
-            # Process the GMF file
+            # Determine chunking strategy to avoid OOM on large spreadsheets and allow live progress
+            f_type = (upload.folder_type or "").strip()
+            is_spreadsheet = f_type in ("LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "No_Cycle", "Test_GMFs")
+            chunk_size = 50 if is_spreadsheet else (limit or float('inf'))
+            current_offset = offset or 0
+            records_remaining = limit if limit is not None else float('inf')
+            
+            total_generated_count = 0
+            all_results = []
+            
             import tempfile
             import shutil
-            with tempfile.TemporaryDirectory(prefix="gmf_pdf_gen_") as temp_pdf_dir:
-                args = (str(working_path), temp_pdf_dir, 1, False, approved_templates, offset, limit)
-                results = process_single_file(args)
-
-                # ── Self-Seal envelope post-processing ─────────────────────
-                # If an approved Self-Seal artwork exists, append its composite
-                # PDF as page 2 to every 1-page bill in the temp directory.
-                # Excluded templates (LOD, VAT Confirmation, Final Notice,
-                # Customer Letter) are skipped automatically by the appender.
-                approved_self_seal_pdf = get_approved_self_seal_pdf()
-                if approved_self_seal_pdf:
-                    apply_self_seal_to_directory(
-                        temp_pdf_dir,
-                        template_id,
-                        approved_self_seal_pdf,
-                    )
-                # ───────────────────────────────────────────────────────────
-
-                # Resolve category and red status for this GMF file
-                file_info = parse_filename(filename)
-                bill_handling_code = file_info.get("bill_handling", "")
-                category_name = categorize_bill_handling_code(bill_handling_code)
-                category_folder_name = get_category_folder(category_name)
-                is_red = is_red_notice(filename)
-                red_folder_name = "RED" if is_red else "Non-Red"
-
-                # Copy generated files to output folder
-                pdf_files = list(Path(temp_pdf_dir).glob("*.pdf"))
-                is_cycle_folder = folder_name.lower().startswith("cycle_")
-
-                for file_path in pdf_files:
-                    # Find a batch folder that has space
-                    batch_dir = _get_batch_folder(cycle_base_dir, BATCH_FOLDER_SIZE)
-                    if is_cycle_folder:
-                        # Cycles get the full Email/Print + RED/Non-Red sub-folder structure
-                        target_dir = batch_dir / category_folder_name / red_folder_name
-                    else:
-                        # Non-cycle templates (LOD, Final_Notice, etc.) go flat into the batch
-                        target_dir = batch_dir
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(file_path, target_dir / file_path.name)
+            
+            file_info = parse_filename(filename)
+            bill_handling_code = file_info.get("bill_handling", "")
+            category_name = categorize_bill_handling_code(bill_handling_code)
+            category_folder_name = get_category_folder(category_name)
+            is_red = is_red_notice(filename)
+            red_folder_name = "RED" if is_red else "Non-Red"
+            is_cycle_folder = folder_name.lower().startswith("cycle_")
+            
+            while records_remaining > 0:
+                current_limit = min(chunk_size, records_remaining) if records_remaining != float('inf') else chunk_size
+                if current_limit == float('inf'): current_limit = None
                 
-                generated_count = len(pdf_files)
-                total_count = len(results)
+                with tempfile.TemporaryDirectory(prefix="gmf_pdf_gen_") as temp_pdf_dir:
+                    args = (str(working_path), temp_pdf_dir, 1, False, approved_templates, current_offset, current_limit)
+                    chunk_results = process_single_file(args)
+                    
+                    if not chunk_results:
+                        break
+                        
+                    # ── Self-Seal envelope post-processing ─────────────────────
+                    approved_self_seal_pdf = get_approved_self_seal_pdf()
+                    if approved_self_seal_pdf:
+                        apply_self_seal_to_directory(
+                            temp_pdf_dir,
+                            template_id,
+                            approved_self_seal_pdf,
+                        )
+                    # ───────────────────────────────────────────────────────────
+                    
+                    # Copy generated files to output folder
+                    pdf_files = list(Path(temp_pdf_dir).glob("*.pdf"))
+                    
+                    for file_path in pdf_files:
+                        batch_dir = _get_batch_folder(cycle_base_dir, BATCH_FOLDER_SIZE)
+                        if is_cycle_folder:
+                            target_dir = batch_dir / category_folder_name / red_folder_name
+                        else:
+                            target_dir = batch_dir
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(file_path, target_dir / file_path.name)
+                        
+                    chunk_gen_count = len(pdf_files)
+                    total_generated_count += chunk_gen_count
+                    all_results.extend(chunk_results)
+                    
+                    # Update billing run incrementally so live view works!
+                    run_id_to_update = run_id
+                    if not run_id_to_update:
+                        with SessionLocal() as db_update:
+                            u_rec = db_update.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+                            if u_rec: run_id_to_update = u_rec.billing_run_id
+                            
+                    if run_id_to_update:
+                        with SessionLocal() as db_update:
+                            _update_billing_run(db_update, run_id_to_update, chunk_gen_count, cycle_base_dir)
+                            db_update.commit()
+                            
+                    if current_limit is not None:
+                        current_offset += current_limit
+                        if records_remaining != float('inf'):
+                            records_remaining -= current_limit
+                    else:
+                        break
+                        
+                        # Stop if we didn't generate any PDFs in this chunk (end of data or error)
+                    if chunk_gen_count == 0:
+                        break
+            
+            is_eof = (limit is None) or (records_remaining > 0 and chunk_gen_count == 0)
+            generated_count = total_generated_count
+            total_count = len(all_results)
 
-                # Build summary groups if any summary_statement was processed
-                try:
-                    create_summary_groups(
-                        cycle_base_dir.parent,  # date-level folder: output/YYYY-MM-DD/
-                        results,
-                        log_callback=lambda msg: logger.info(msg),
-                    )
-                except Exception as sg_err:
-                    logger.warning(f"create_summary_groups non-fatal error: {sg_err}")
+            # Build summary groups if any summary_statement was processed
+            try:
+                create_summary_groups(
+                    cycle_base_dir.parent,  # date-level folder: output/YYYY-MM-DD/
+                    all_results,
+                    log_callback=lambda msg: logger.info(msg),
+                )
+            except Exception as sg_err:
+                logger.warning(f"create_summary_groups non-fatal error: {sg_err}")
             
             # Move source GMF to Processed/Staged folder and update DB
             try:
@@ -522,7 +568,16 @@ def _worker_process(worker_id):
                     upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
                     if upload:
                         upload.processed_records_count = (upload.processed_records_count or 0) + generated_count
-                        if not upload.total_records_count or upload.total_records_count <= 1:
+                        
+                        if is_eof:
+                            # True EOF reached: override initial estimate with precise processed count
+                            upload.total_records_count = upload.processed_records_count
+                            run_id_to_update = run_id or upload.billing_run_id
+                            if run_id_to_update:
+                                run = db.query(BillingRun).filter(BillingRun.id == run_id_to_update).first()
+                                if run:
+                                    run.total_accounts = run.succeeded + run.failed
+                        elif not upload.total_records_count or upload.total_records_count <= 1:
                             try:
                                 real_total = count_documents(str(working_path))
                                 upload.total_records_count = max(real_total, total_count)

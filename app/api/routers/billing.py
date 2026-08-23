@@ -955,6 +955,10 @@ def generate_batch_endpoint(
         InvoiceTemplate.is_active == True
     ).all()
     approved_templates = {t.template_code for t in app_tmpls}
+    
+    # Always consider spreadsheet-based utility templates as approved for generation
+    approved_templates.update({"lod", "vat_confirmation", "final_notice"})
+
     if "customer_letter_logo_v1print" in approved_templates:
         approved_templates.add("customer_migration_letter")
         approved_templates.add("customer_letter")
@@ -1864,7 +1868,14 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     templates_cache[template_detected] = TemplateApprovalStatus.PENDING
 
             elif is_approved:
-                final_path = settings.queue_incoming_dir / filename
+                # Respect global billing_mode so we don't auto-generate if in manual mode
+                from app.db.models import SystemSetting
+                billing_mode_setting = db.query(SystemSetting).filter(SystemSetting.key == "billing_mode").first()
+                billing_mode = billing_mode_setting.value if billing_mode_setting else "auto"
+                if billing_mode == "auto":
+                    final_path = settings.queue_incoming_dir / filename
+                else:
+                    final_path = settings.queue_pending_dir / filename
                 final_status = GmfUploadStatus.APPROVED
             elif is_rejected:
                 final_path = settings.queue_pending_dir / filename
