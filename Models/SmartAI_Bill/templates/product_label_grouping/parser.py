@@ -44,6 +44,11 @@ def parse_product_label_grouping(file_path: str) -> dict:
         "taxes_total":           0,
         "tax_status":            "",
         "total_charges":         0,
+        # Customer-facing display currency, e.g. "Rs" - from ACCCURRENCYCODE.
+        # NOT the same as SLTACCCURRENCYCODE (SLT's internal accounting
+        # currency code, e.g. "LKR") - confirmed distinct tags/values in the
+        # real GMF, must not be confused.
+        "currency_code":         "",
         "payments":              [],
         "cancelled_payments":    [],
         "total_payments":        0,
@@ -289,6 +294,8 @@ def parse_product_label_grouping(file_path: str) -> dict:
                 data['total_charges']  = to_float(value)
             elif key == 'NEWBAL':
                 data['total_payable'] = to_float(value)
+            elif key == 'ACCCURRENCYCODE':
+                data['currency_code'] = value
 
             elif key == 'SLTPRODUCTLABEL':
                 label = apply_label_override(value)      # BPR30

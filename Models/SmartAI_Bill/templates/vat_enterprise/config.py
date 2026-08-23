@@ -4,6 +4,13 @@ PAGE_W = 595.5
 PAGE_H = 842.25
 
 COORDS = {
+    # "Tax Invoice" label, top-left, above the telephone number field - shown
+    # for both RED and NONRED alike. Not baked into either layout.pdf or
+    # Template_RED.pdf (checked both directly, neither has this text) and
+    # never drawn anywhere in this template before, so this is a new
+    # placement estimate, not a measured value - nudge if it's off.
+    "tax_invoice_label":    (43.20, 750),
+
     # VAT Specific Headers
     # y was accidentally written in top-origin (84.8 / 76.2 from top); corrected to bottom-origin
     "slt_vat_reg":          (273.60, 756),
@@ -137,15 +144,15 @@ FONTS = {
     "customer_name":  {"size": 9,  "bold": True},
     "customer_addr":  {"size": 9,  "bold": True},
     "badge":          {"size": 18, "bold": True},
-    "summary_box":    {"size": 11.04, "bold": False},
-    "summary_total":  {"size": 11.04, "bold": True},
+    "summary_box":    {"size": 11, "bold": False},
+    "summary_total":  {"size": 11, "bold": True},
     "product_label":  {"size": 9, "bold": True},
     "charge_line":    {"size": 9, "bold": False},
     "taxes":          {"size": 9, "bold": False},
-    "total":          {"size": 11.04, "bold": True},
-    "payments":       {"size": 8.64,  "bold": False},
-    "slip":           {"size": 9.60,  "bold": False},
+    "total":          {"size": 10, "bold": True},
+    "payments":       {"size": 8,  "bold": False},
+    "slip":           {"size": 9,  "bold": False},
     "gen_id":         {"size": 7,  "bold": False},
     "page_indicator": {"size": 9,  "bold": False},
-    "invoice_no_p2":  {"size": 11.04, "bold": True},
+    "invoice_no_p2":  {"size": 10, "bold": True},
 }

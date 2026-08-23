@@ -73,6 +73,7 @@ class VATEnterpriseRenderer(BaseRenderer):
 
     def _draw_header(self, data):
         f = FONTS["header"]
+        self.text(*self.active_coords["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
         self.text(*self.active_coords["telephone_number"], data["telephone_number"], size=f["size"])
         self.text(*self.active_coords["account_number"], data["account_number"], size=f["size"])
         self.text(*self.active_coords["invoice_number"], data["invoice_number"], size=f["size"])

@@ -1,13 +1,13 @@
 """NonVAT Enterprise (Sheet 19) - Coordinates."""
 
 COORDS = {
-    "gen_id_line":      (273, 590),
-    "gen_id_line2":     (273, 580.4),
-    "telephone_number":     (175, 728),
-    "account_number":       (155, 701),
-    "invoice_number":       (155, 672),
-    "billing_date":         (155, 643),
-    "billing_period":       (150, 615),
+    "gen_id_line":      (273, 592),
+    "gen_id_line2":     (273, 584),
+    "telephone_number":     (175, 730),
+    "account_number":       (155, 703),
+    "invoice_number":       (155, 674),
+    "billing_date":         (155, 645),
+    "billing_period":       (150, 617),
 
     "customer_business":    (280, 722),
     "customer_addr_start":  712,
@@ -15,14 +15,14 @@ COORDS = {
     "customer_addr_line_h": 11,
 
     # ENTERPRISE badge
-    "badge_text":           (320, 612),
+    "badge_text":           (320, 614),
 
     # Summary boxes
-    "balance_bf":           (85, 512),
-    "payments_received":    (190, 512),
-    "charges_period":       (295, 512),
-    "total_payable":        (408, 512),
-    "payment_due_date":     (510, 512),
+    "balance_bf":           (85, 514),
+    "payments_received":    (190, 514),
+    "charges_period":       (295, 514),
+    "total_payable":        (408, 514),
+    "payment_due_date":     (510, 514),
 
     # Taxes & Total
     "taxes_label":          (45, 250),
@@ -42,28 +42,28 @@ COORDS = {
     "payments_total_label":   "Total Payments Received",
 
     # Page indicators
-    "page_indicator_p1":    (542, 752),
+    "page_indicator_p1":    (542, 753),
     "page_indicator_p2":    (536, 780),
     "page_invoice_no_p2":   (45, 780),
 
     # Barcode
-    "barcode":              (375, 638),
+    "barcode":              (375, 644),
     "barcode_width":        100,
     "barcode_height":       20,
 
-    "qr_code":       (511.2, 88.4),
+    "qr_code":       (511.2, 92),
     "qr_size":       48,
 
-    "payonline_qr":       (498, 689),
+    "payonline_qr":       (498, 692),
     "payonline_qr_size":  48,
 
-    "slip_barcode":        (309, 110),
+    "slip_barcode":        (309, 112),
     "slip_barcode_width":  138,
     "slip_barcode_height": 25,
-    "slip_telephone":       (157, 120),
-    "slip_invoice":         (157, 97),
-    "slip_customer":        (157, 75),
-    "slip_account":         (157, 50),
+    "slip_telephone":       (157, 122),
+    "slip_invoice":         (157, 99),
+    "slip_customer":        (157, 77),
+    "slip_account":         (157, 52),
 }
 
 CHARGES_TABLE = {
@@ -84,21 +84,22 @@ CHARGES_TABLE = {
 
 FONTS = {
     "header":         {"size": 9,   "bold": False},
-    "customer_name":  {"size": 9.5, "bold": True},
+    "customer_name":  {"size": 9, "bold": True},
     "customer_addr":  {"size": 9,   "bold": True},
     "badge":          {"size": 18,  "bold": True},
-    "summary_box":    {"size": 10,  "bold": False},
-    "summary_total":  {"size": 10,  "bold": True},
+    "summary_box":    {"size": 11,  "bold": False},
+    "summary_total":  {"size": 11,  "bold": True},
     "product_label":  {"size": 9,   "bold": True},
-    "charge_line":    {"size": 8,   "bold": False},
+    "charge_line":    {"size": 9 ,  "bold": False},
     "taxes":          {"size": 9,   "bold": False},
     "total":          {"size": 10,  "bold": True},
     "payments":       {"size": 8,   "bold": False},
-    "slip":           {"size": 8,   "bold": False},
+    "slip":           {"size": 9,   "bold": False},
     "gen_id":         {"size": 7,   "bold": False},
     "page_indicator": {"size": 9,   "bold": False},
     "invoice_no_p2":  {"size": 10,  "bold": True},
 }
+
 
 POST_TC_COLUMNS = {
     "left":  {"x_start": 45, "x_end": 300, "amount_x": 295},

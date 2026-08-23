@@ -1,6 +1,7 @@
 """Product Label Grouping Renderer (Sheet 22)."""
 import os
 from datetime import datetime
+from reportlab.lib.colors import black
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_vat_reg_printable, is_tax_section_printable
@@ -23,14 +24,15 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         self._draw_generation_id(data)
         self._draw_summary_boxes(data)
         self._draw_page1_footer(data)
+        self._draw_currency_label(data)
 
         y = self._draw_charges_with_subtotals(data["product_labels"])
         y = self._draw_adjustments(data, y)
         y = self._draw_top_level_discounts(data, y)
         y = self._draw_taxes_only(data, y)
 
-        self._draw_total_charges_fixed(data)
-        self._draw_payments_fixed(data)
+        y = self._draw_total_charges_dynamic(data, y)
+        y = self._draw_payments_dynamic(data, y)
         self._draw_cancel_payments_fixed(data)
         self._draw_messages_fixed(data)
 
@@ -162,6 +164,19 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         self.text(*COORDS["slip_account"],  data["account_number"],
                   size=f["size"])
 
+    def _draw_currency_label(self, data):
+        """Currency label above the charges column (e.g. "(Rs.)") - read from
+        the GMF's ACCCURRENCYCODE tag (data['currency_code']), never a fixed
+        string, since a different account can have a different currency.
+        Must NOT be sourced from SLTACCCURRENCYCODE - that's SLT's internal
+        accounting code (e.g. "LKR"), a different tag/value entirely,
+        confirmed distinct in the real GMF."""
+        code = data.get("currency_code", "")
+        if not code:
+            return
+        f = FONTS["header"]
+        self.text(CHARGES_TABLE["amount_x"], CHARGES_TABLE["page1_y_start"] + 6.0,
+                  f"({code}.)", size=f["size"], bold=True, align="right")
 
     def _draw_charges_with_subtotals(self, product_labels):
         """BPR12: per-product recurring + one-off subtotals."""
@@ -282,31 +297,56 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         return y
 
 
-    def _draw_total_charges_fixed(self, data):
-        c  = self.canvases[0][1]
+    def _draw_total_charges_dynamic(self, data, y):
+        """Draws right after Taxes & Levies finishes, following the running
+        y cursor instead of a fixed page position."""
+        line_h = CHARGES_TABLE["line_h"]
+        y_min = CHARGES_TABLE["page1_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        if y - line_h < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+        y -= 10
+
+        c  = self.canvases[-1][1]
         f  = FONTS["total"]
         x  = COORDS["total_charges_label_x"]
-        y  = COORDS["total_charges_label_y"]
         ax = COORDS["total_charges_amount_x"]
+
+        # Top and bottom horizontal lines framing the total charges row
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(x, y + 11, ax, y + 11)   # Top horizontal line
+        c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
+
         c.setFont("Helvetica-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
         c.drawRightString(ax, y, f"{data['total_charges']:,.2f}")
+        return y - line_h
 
-    def _draw_payments_fixed(self, data):
-        """BPR26: suppress if zero."""
+    def _draw_payments_dynamic(self, data, y):
+        """BPR26: suppress if zero. Draws right after Total Charges finishes,
+        following the running y cursor instead of a fixed page position."""
         if not data.get("total_payments") and not data.get("payments"):
-            return
-        c      = self.canvases[0][1]
-        f      = FONTS["payments"]
-        hx     = COORDS["payments_header_x"]
-        hy     = COORDS["payments_header_y"]
-        rx     = COORDS["payments_row_x"]
-        y      = COORDS["payments_row_start_y"]
-        ax     = COORDS["payments_amount_x"]
+            return y
+
         line_h = COORDS["payments_line_h"]
+        y_min = CHARGES_TABLE["payments_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        rows_h = line_h * (len(data.get("payments", [])) + 2)  # header + rows + total line
+        if y - rows_h < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+        y -= 5
+
+        c  = self.canvases[-1][1]
+        f  = FONTS["payments"]
+        rx = COORDS["payments_row_x"]
+        ax = COORDS["payments_amount_x"]
+
+        top_y = y + line_h * 0.5   # a touch above the header, matches the divider's top
 
         c.setFont("Helvetica-Bold", f["size"])
-        c.drawString(hx, hy, "Details of Payments Received")
+        c.drawString(rx, y, "Details of Payments Received")
+        y -= line_h
         c.setFont("Helvetica", f["size"])
         for p in data.get("payments", []):
             line = (f"{p.get('pay_type', 'Payment')}-"
@@ -318,6 +358,16 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         c.setFont("Helvetica-Bold", f["size"])
         c.drawString(rx, y, COORDS["payments_total_label"])
         c.drawRightString(ax, y, f"{data['total_payments']:,.2f}")
+
+        # Vertical divider next to the payments block, sized to end exactly
+        # at "Total Payments Received" - drawn last, once that y is known,
+        # rather than at a fixed length.
+        bottom_y = y - 3
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(CHARGES_TABLE["vert_line_x"], top_y, CHARGES_TABLE["vert_line_x"], bottom_y)
+
+        return y - line_h
 
     def _draw_cancel_payments_fixed(self, data):
         """BPR26: cancelled payments."""

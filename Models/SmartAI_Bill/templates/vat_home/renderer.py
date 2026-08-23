@@ -198,6 +198,7 @@ class VATHomeRenderer:
 
     def _draw_header(self, data):
         f = FONTS["header"]
+        self.text(*COORDS["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
         self.text(*COORDS["telephone_number"], data["telephone_number"], size=f["size"])
         self.text(*COORDS["account_number"], data["account_number"], size=f["size"])
         self.text(*COORDS["invoice_number"], data["invoice_number"], size=f["size"])
