@@ -12,7 +12,8 @@ import {
   Globe,
   ChevronRight,
   Moon,
-  Sun
+  Sun,
+  Mail
 } from 'lucide-react'
 import { useTheme } from '@/components/ThemeProvider'
 import { useAuth } from '../auth/AuthProvider'
@@ -30,33 +31,44 @@ const navLinks = [
 
 const actionCards = [
   {
-    icon: Zap,
-    title: 'GMF Operations Portal',
-    description: 'For GMF handlers to securely upload files, monitor detection queues, and manage processing batches.',
-    cta: 'Enter GMF Portal',
-    helper: 'gmf@slt.com.lk',
+    icon: LockKeyhole,
+    title: 'System Administration',
+    badge: 'System Control',
+    description: 'For system administrators to generate billing cycles, design templates, verify output PDFs, and configure engine parameters.',
+    cta: 'Enter Admin Console',
     path: 'signin' as const,
-    accentClass: 'from-blue-600 to-cyan-500',
+    accentClass: 'from-[#0066b3] to-[#00b2e3]',
     iconClass: 'bg-gradient-to-br from-[#0066b3] to-[#00b2e3] text-white shadow-[0_12px_30px_rgba(0,102,179,0.35)]',
     buttonClass: 'bg-gradient-to-r from-[#0066b3] to-[#00b2e3] text-white shadow-lg hover:shadow-[#00b2e3]/25 hover:-translate-y-0.5',
   },
   {
-    icon: LockKeyhole,
-    title: 'System Administration',
-    description: 'For system administrators to generate billing cycles, design templates, and configure engine parameters.',
-    cta: 'Enter Admin Console',
-    helper: 'admin@slt.com.lk',
+    icon: Zap,
+    title: 'GMF Operations Portal',
+    badge: 'Batch Processing',
+    description: 'For GMF handlers to securely upload files, monitor detection queues, and manage high-volume processing batches.',
+    cta: 'Enter GMF Portal',
     path: 'signin' as const,
-    accentClass: 'from-slate-800 to-slate-900 dark:from-slate-200 dark:to-slate-400',
-    iconClass: 'bg-gradient-to-br from-slate-800 to-slate-900 dark:from-slate-200 dark:to-slate-400 text-white dark:text-slate-900 shadow-[0_12px_30px_rgba(51,65,85,0.35)] dark:shadow-[0_12px_30px_rgba(255,255,255,0.15)]',
-    buttonClass: 'bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-200 dark:to-slate-300 text-white dark:text-slate-900 shadow-lg hover:shadow-slate-500/25 dark:hover:shadow-white/20 hover:-translate-y-0.5',
+    accentClass: 'from-blue-600 to-cyan-500',
+    iconClass: 'bg-gradient-to-br from-[#005f99] to-[#00b2e3] text-white shadow-[0_12px_30px_rgba(0,95,153,0.35)]',
+    buttonClass: 'bg-gradient-to-r from-[#005f99] to-[#00b2e3] text-white shadow-lg hover:shadow-[#00b2e3]/25 hover:-translate-y-0.5',
+  },
+  {
+    icon: Mail,
+    title: 'Envelope Campaign Portal',
+    badge: 'Artwork & Campaigns',
+    description: 'For envelope handlers to manage promotional artwork, envelope overlays, campaign rules, and print-ready composite PDFs.',
+    cta: 'Enter Envelope Portal',
+    path: 'signin' as const,
+    accentClass: 'from-purple-600 to-indigo-500',
+    iconClass: 'bg-gradient-to-br from-purple-600 to-indigo-600 text-white shadow-[0_12px_30px_rgba(147,51,234,0.35)]',
+    buttonClass: 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg hover:shadow-purple-500/25 hover:-translate-y-0.5',
   },
   {
     icon: ShieldCheck,
     title: 'User Management Portal',
-    description: 'For user managers to provision new staff access, manage user roles, and monitor system activity logs.',
+    badge: 'User Provisioning',
+    description: 'For user managers to provision new staff access, manage role permissions, review pending requests, and monitor audit logs.',
     cta: 'Enter Manager Portal',
-    helper: 'manager@slt.com.lk',
     path: 'signin' as const,
     accentClass: 'from-emerald-600 to-teal-500',
     iconClass: 'bg-gradient-to-br from-[#00a651] to-teal-500 text-white shadow-[0_12px_30px_rgba(0,166,81,0.35)]',
@@ -290,35 +302,38 @@ export default function PublicPortal() {
       </section>
 
       <section id="portal-access" className="relative z-10 mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8 pt-12">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-foreground tracking-tight">Select Your Workspace</h2>
-          <p className="mt-4 text-lg text-muted-foreground font-medium max-w-2xl mx-auto">Choose the appropriate portal below to securely access your dedicated SLT-MOBITEL billing environment.</p>
+        <div className="text-center mb-14">
+          <h2 className="text-3xl sm:text-4xl font-black text-foreground tracking-tight">Select Your Workspace</h2>
+          <p className="mt-4 text-base sm:text-lg text-muted-foreground font-medium max-w-2xl mx-auto">
+            Choose the appropriate portal below to securely access your dedicated SLT-MOBITEL billing environment.
+          </p>
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-3 max-w-7xl mx-auto">
+        {/* 2x2 Clean Grid */}
+        <div className="grid gap-8 md:grid-cols-2 max-w-5xl mx-auto">
           {actionCards.map((action) => {
             const Icon = action.icon
             return (
               <Card
                 key={action.title}
-                className={`glass-card relative overflow-hidden rounded-[2rem] py-0 transition-all duration-500 hover:-translate-y-2 hover:shadow-2xl border-border/50`}
+                className="glass-card relative overflow-hidden rounded-3xl py-0 transition-all duration-500 hover:-translate-y-1.5 hover:shadow-2xl border-border/60 bg-card/80 backdrop-blur-md"
               >
                 <div className={`absolute inset-x-0 top-0 h-2 bg-gradient-to-r ${action.accentClass}`} />
-                <CardContent className="flex h-full min-h-[320px] flex-col p-8 sm:p-10">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={`flex size-16 items-center justify-center rounded-2xl ${action.iconClass} transition-transform group-hover:scale-110`}>
-                      <Icon size={28} />
+                <CardContent className="flex h-full min-h-[300px] flex-col p-8 sm:p-9">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className={`flex size-14 items-center justify-center rounded-2xl ${action.iconClass} transition-transform duration-300 group-hover:scale-105`}>
+                      <Icon size={26} />
                     </div>
-                    <span className="whitespace-nowrap rounded-full bg-muted border border-border/50 px-3.5 py-1.5 text-xs font-bold text-foreground shadow-sm">
-                      {action.helper}
+                    <span className="rounded-full bg-muted/80 border border-border/60 px-3.5 py-1 text-xs font-extrabold text-muted-foreground uppercase tracking-wider shadow-2xs">
+                      {action.badge}
                     </span>
                   </div>
-                  <h2 className="mt-8 text-2xl font-extrabold text-foreground tracking-tight">{action.title}</h2>
-                  <p className="mt-4 flex-1 text-[15px] leading-relaxed text-muted-foreground font-medium">{action.description}</p>
-                  <Button asChild className={cn("mt-10 h-14 w-full justify-between px-6 font-extrabold border-none text-[15px] rounded-xl transition-all duration-300", action.buttonClass)}>
+                  <h3 className="mt-6 text-2xl font-black text-foreground tracking-tight">{action.title}</h3>
+                  <p className="mt-3 flex-1 text-[14px] leading-relaxed text-muted-foreground font-medium">{action.description}</p>
+                  <Button asChild className={cn("mt-8 h-13 w-full justify-between px-6 font-extrabold border-none text-[15px] rounded-xl transition-all duration-300 shadow-md", action.buttonClass)}>
                     <Link to={resolveActionPath(action)}>
                       <span className="truncate">{action.cta}</span>
-                      <ArrowRight size={20} />
+                      <ArrowRight size={18} />
                     </Link>
                   </Button>
                 </CardContent>
