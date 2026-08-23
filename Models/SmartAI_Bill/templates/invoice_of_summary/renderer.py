@@ -21,6 +21,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._on_page1 = True
 
     def render(self, data):
+        self.check_red_notice(data)
         self._draw_header(data)
         self._draw_vat_lines(data)
         self._draw_customer(data)
@@ -272,7 +273,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
 
     def _ensure_space(self, needed=None):
         needed = needed if needed is not None else CHARGES_TABLE["line_h"]
-        y_min  = (CHARGES_TABLE["page1_y_min"] if self._on_page1
+        y_min  = (self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self._on_page1
                   else CHARGES_TABLE["otherpage_y_min"])
         if self._y - needed < y_min:
             self.new_page()
