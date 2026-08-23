@@ -41,6 +41,28 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const { isChecking } = useAuth()
+  const isReturningFromAuth = typeof window !== 'undefined' && (
+    window.location.search.includes('code=') ||
+    window.location.hash.includes('code=') ||
+    window.location.search.includes('error=') ||
+    window.location.hash.includes('error=') ||
+    sessionStorage.getItem('msal-post-login') === 'pending'
+  )
+
+  if (isChecking && isReturningFromAuth) {
+    return (
+      <ThemeProvider defaultTheme="system" storageKey="slt-billing-theme">
+        <div className="flex h-svh w-full flex-col items-center justify-center bg-background gap-4">
+          <Loader2 className="size-10 animate-spin text-[#0066b3]" />
+          <p className="text-sm font-bold text-muted-foreground animate-pulse">
+            Authenticating with Microsoft...
+          </p>
+        </div>
+      </ThemeProvider>
+    )
+  }
+
   return (
     <ThemeProvider defaultTheme="system" storageKey="slt-billing-theme">
       <Routes>

@@ -35,19 +35,30 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 import { MsalProvider } from '@azure/msal-react'
 import { msalInstance } from './auth/msalConfig'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <MsalProvider instance={msalInstance}>
-        <QueryClientProvider client={queryClient}>
-          <BrowserRouter>
-            <AuthProvider>
-              <App />
-            </AuthProvider>
-          </BrowserRouter>
-        </QueryClientProvider>
-      </MsalProvider>
-    </ErrorBoundary>
-  </StrictMode>,
-)
+async function startApp() {
+  try {
+    await msalInstance.initialize()
+  } catch (err) {
+    console.error('MSAL initialization error:', err)
+  }
+
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <MsalProvider instance={msalInstance}>
+          <QueryClientProvider client={queryClient}>
+            <BrowserRouter>
+              <AuthProvider>
+                <App />
+              </AuthProvider>
+            </BrowserRouter>
+          </QueryClientProvider>
+        </MsalProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  )
+}
+
+startApp()
+
 

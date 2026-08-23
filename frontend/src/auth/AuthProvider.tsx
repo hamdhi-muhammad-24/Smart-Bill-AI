@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { clearToken, setToken, getToken, authMe } from '../lib/api'
 import { useMsal } from '@azure/msal-react'
-import { loginRequest } from './msalConfig'
+import { InteractionStatus } from '@azure/msal-browser'
+import { loginRequest, clearStaleMsalInteractions } from './msalConfig'
 
 export interface Session {
   role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'customer'
@@ -66,13 +67,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   })
   
-  const [isChecking, setIsChecking] = useState(() => !getToken())
+  const [isChecking, setIsChecking] = useState(() => {
+    if (typeof window === 'undefined') return false
+    const url = window.location.href
+    const hasAuth = url.includes('code=') || url.includes('error=') || url.includes('id_token=') || sessionStorage.getItem('msal-post-login') === 'pending'
+    return hasAuth || !getToken()
+  })
   const hasHandledRedirect = useRef(false)
   const isInitializing = useRef(false)
 
   useEffect(() => {
     // Wait until MSAL has finished its initial interactions (including redirect handling)
-    if (inProgress !== 'none' || isInitializing.current) {
+    if (inProgress !== InteractionStatus.None || isInitializing.current) {
       return
     }
 
@@ -141,26 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        // No stored token — try silent token acquisition if MSAL has a cached account
-        if (accounts.length > 0) {
-          try {
-            const silentResult = await instance.acquireTokenSilent({
-              ...loginRequest,
-              account: accounts[0],
-            })
-            setToken(silentResult.accessToken)
-            const me = await authMe()
-            const s = buildSessionFromMe(me)
-            setSession(s)
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-          } catch {
-            clearToken()
-            localStorage.removeItem(STORAGE_KEY)
-            setSession(null)
-          }
-        } else {
-          setSession(null)
-        }
+        // No stored token — do not auto-login; require explicit user interaction
+        setSession(null)
       } catch (err) {
         console.error('AuthProvider init error:', err)
         clearToken()
@@ -184,7 +172,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null)
     localStorage.removeItem(STORAGE_KEY)
     clearToken()
-    instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin })
+    clearStaleMsalInteractions()
+    if (accounts.length > 0) {
+      instance.logoutRedirect({
+        account: accounts[0],
+        postLogoutRedirectUri: window.location.origin + '/login',
+      }).catch(() => {
+        clearStaleMsalInteractions()
+        navigate('/login', { replace: true })
+      })
+    } else {
+      navigate('/login', { replace: true })
+    }
   }
 
   return (

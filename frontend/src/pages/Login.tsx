@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
@@ -15,27 +15,52 @@ import { setToken } from '../lib/api'
 import Brand from '../components/Brand'
 import { Button } from '@/components/ui/button'
 import { useMsal } from '@azure/msal-react'
-import { loginRequest } from '../auth/msalConfig'
+import { InteractionStatus } from '@azure/msal-browser'
+import { loginRequest, clearStaleMsalInteractions } from '../auth/msalConfig'
 
 // Remove ROLE_HOME
 
 export default function Login() {
-  const { session, isChecking, login } = useAuth()
+  const { isChecking, login } = useAuth()
   const { resolvedTheme, toggleTheme } = useTheme()
   const navigate = useNavigate()
-  const { instance } = useMsal()
+  const { instance, inProgress } = useMsal()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  // Reset any loading or error state immediately if returning via browser Back button or tab switch
+  useEffect(() => {
+    function resetLoginState() {
+      setLoading(false)
+      setError(null)
+      sessionStorage.removeItem('msal-post-login')
+      
+      const url = window.location.href
+      const hasAuthParams = url.includes('code=') || url.includes('error=') || url.includes('id_token=')
+      if (!hasAuthParams) {
+        clearStaleMsalInteractions()
+      }
+    }
+
+    resetLoginState()
+    window.addEventListener('pageshow', resetLoginState)
+    window.addEventListener('focus', resetLoginState)
+
+    return () => {
+      window.removeEventListener('pageshow', resetLoginState)
+      window.removeEventListener('focus', resetLoginState)
+    }
+  }, [])
+
   if (isChecking) return null
-  if (session) {
-    if (session.isNewUser) return <Navigate to="/request-access" replace />
-    return <Navigate to="/role-select" replace />
-  }
+
+  const isMsalBusy = inProgress !== InteractionStatus.None
 
   async function handleMicrosoftLogin() {
+    if (loading) return
     setError(null)
     setLoading(true)
+    clearStaleMsalInteractions()
     try {
       // Use redirect (not popup) so auth happens in the main window.
       // After redirect, MSAL returns to the app and AuthProvider handles the token.
@@ -45,8 +70,29 @@ export default function Login() {
     } catch (err: any) {
       console.error('MSAL Login error:', err)
       sessionStorage.removeItem('msal-post-login')
-      setError(err?.message || 'Authentication failed or was cancelled.')
+      clearStaleMsalInteractions()
       setLoading(false)
+
+      const errMsg = String(err?.message || '')
+      const errCode = String(err?.errorCode || '')
+
+      if (errCode === 'timed_out' || errMsg.includes('timed_out') || errMsg.includes('failed_to_redirect')) {
+        // User clicked browser back button or navigation was cancelled
+        setError(null)
+      } else if (errCode === 'interaction_in_progress' || errMsg.includes('interaction_in_progress')) {
+        // Interaction lock was cleared; try login once more automatically
+        try {
+          sessionStorage.setItem('msal-post-login', 'pending')
+          await instance.loginRedirect(loginRequest)
+        } catch {
+          setError(null)
+          setLoading(false)
+        }
+      } else if (errCode === 'user_cancelled' || errMsg.includes('user_cancelled')) {
+        setError(null)
+      } else {
+        setError(errMsg || 'Authentication failed or was cancelled.')
+      }
     }
   }
 
@@ -62,7 +108,7 @@ export default function Login() {
       roles: devRoles,
       email: `${targetRole}@slt.lk`,
     })
-    navigate('/role-select', { replace: true })
+    navigate('/role-select')
   }
 
   return (
@@ -163,12 +209,12 @@ export default function Login() {
             <Button
               onClick={handleMicrosoftLogin}
               className="h-16 w-full bg-gradient-to-r from-[#0066b3] to-[#00b2e3] hover:opacity-90 font-extrabold text-[16px] text-white shadow-lg shadow-[#0066b3]/25 active:scale-[0.98] border-none transition-all duration-300 rounded-xl group"
-              disabled={loading}
+              disabled={loading || isMsalBusy}
             >
-              {loading ? (
+              {loading || isMsalBusy ? (
                 <span className="flex items-center gap-3">
                   <span className="size-5 animate-spin rounded-full border-[3px] border-white/30 border-t-white" />
-                  Connecting to Microsoft...
+                  {isMsalBusy ? 'Initializing Microsoft Login...' : 'Connecting to Microsoft...'}
                 </span>
               ) : (
                 <span className="flex items-center justify-center gap-3 w-full px-2 tracking-wide">
@@ -189,34 +235,34 @@ export default function Login() {
               <span className="text-[10px] font-bold bg-[#00a651]/15 text-[#00a651] px-2 py-0.5 rounded-full">DEV MODE</span>
             </div>
             <p className="text-xs text-muted-foreground font-medium">Test any portal instantly without needing a Microsoft account:</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <button
                 type="button"
                 onClick={() => handleDevLogin('admin')}
-                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+                className="h-11 text-xs font-extrabold rounded-xl border border-border/80 bg-card hover:bg-[#0066b3]/10 hover:border-[#0066b3]/40 text-foreground hover:text-[#0066b3] dark:hover:text-[#00b2e3] transition-all flex items-center justify-center shadow-xs cursor-pointer active:scale-95"
               >
-                Admin Portal
+                Admin
               </button>
               <button
                 type="button"
                 onClick={() => handleDevLogin('gmf_handler')}
-                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+                className="h-11 text-xs font-extrabold rounded-xl border border-border/80 bg-card hover:bg-cyan-500/10 hover:border-cyan-500/40 text-foreground hover:text-cyan-700 dark:hover:text-cyan-400 transition-all flex items-center justify-center shadow-xs cursor-pointer active:scale-95"
               >
-                GMF Portal
+                GMF Handler
               </button>
               <button
                 type="button"
                 onClick={() => handleDevLogin('envelope_handler')}
-                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+                className="h-11 text-xs font-extrabold rounded-xl border border-border/80 bg-card hover:bg-purple-500/10 hover:border-purple-500/40 text-foreground hover:text-purple-700 dark:hover:text-purple-400 transition-all flex items-center justify-center shadow-xs cursor-pointer active:scale-95"
               >
-                Envelope Portal
+                Envelope
               </button>
               <button
                 type="button"
                 onClick={() => handleDevLogin('manager')}
-                className="h-10 text-xs font-bold rounded-xl border border-border/60 bg-background hover:bg-muted text-foreground transition-all flex items-center justify-center shadow-sm"
+                className="h-11 text-xs font-extrabold rounded-xl border border-border/80 bg-card hover:bg-emerald-500/10 hover:border-emerald-500/40 text-foreground hover:text-emerald-700 dark:hover:text-emerald-400 transition-all flex items-center justify-center shadow-xs cursor-pointer active:scale-95"
               >
-                Manager Portal
+                User Manager
               </button>
             </div>
           </div>
