@@ -7,11 +7,11 @@ COORDS = {
     "gen_id_line":  (273, 590),
     "gen_id_line2": (273, 580.4),
 
-    "telephone_number":     (175, 726),
-    "account_number":       (155, 701),
-    "invoice_number":       (155, 672),
-    "billing_date":         (155, 643),
-    "billing_period":       (150, 615),
+    "telephone_number":     (175, 730),
+    "account_number":       (155, 703),
+    "invoice_number":       (155, 674),
+    "billing_date":         (155, 645),
+    "billing_period":       (150, 617),
 
     "customer_name":        (280, 725),
     "customer_business_y":  715,
@@ -19,13 +19,13 @@ COORDS = {
     "customer_addr_x":      280,
     "customer_addr_line_h": 11,
 
-    "badge_text": (330, 612),
+    "badge_text": (325, 614),
 
-    "balance_bf":        (85, 512),
-    "payments_received": (190, 512),
-    "charges_period":    (295, 512),
-    "total_payable":     (408, 512),
-    "payment_due_date":  (510, 512),
+    "balance_bf":        (85, 514),
+    "payments_received": (190, 514),
+    "charges_period":    (295, 514),
+    "total_payable":     (408, 514),
+    "payment_due_date":  (510, 514),
 
     "summary_x":              45,
     "summary_amount_x":       553,
@@ -41,23 +41,23 @@ COORDS = {
     "payments_line_h": 11,
 
     # Barcode + QR
-    "barcode":       (375, 638),
+    "barcode":       (373, 642),
     "barcode_width": 100,
     "barcode_height": 20,
 
-    "qr_code": (511.2, 88.4),
+    "qr_code": (511.2, 91),
     "qr_size": 48,
 
-    "payonline_qr":      (498, 689),
+    "payonline_qr":      (498, 692),
     "payonline_qr_size": 48,
 
     "slip_barcode":        (309, 110),
     "slip_barcode_width":  138,
     "slip_barcode_height": 25,
-    "slip_telephone":      (157, 120),
-    "slip_invoice":        (157, 97),
-    "slip_customer":       (157, 75),
-    "slip_account":        (157, 50),
+    "slip_telephone":      (157, 122),
+    "slip_invoice":        (157, 100),
+    "slip_customer":       (157, 78),
+    "slip_account":        (157, 53),
 
     "usage_preview_x":         306,
     "usage_preview_y":         245,
@@ -92,6 +92,10 @@ USAGE_TABLE_2COL = {
     "right_amount_x":   555,
     "right_box_right":  560,
 
+    # Vertical divider between the left/right column pair - midway between
+    # left_box_right (295) and right_col_x[0] (310).
+    "vert_line_x":      302,
+
     "line_h":           9,
     "font_size":        7,
     "font_header":      7,
@@ -104,7 +108,7 @@ FONTS = {
     "vat_reg":       {"size": 7.5, "bold": False},
     "customer_name": {"size": 9.5, "bold": True},
     "customer_addr": {"size": 9,   "bold": True},
-    "badge":         {"size": 13,  "bold": True},
+    "badge":         {"size": 18,  "bold": True},
     "summary_box":   {"size": 10,  "bold": False},
     "summary_total": {"size": 10,  "bold": True},
     "group_ref":     {"size": 10,  "bold": True},

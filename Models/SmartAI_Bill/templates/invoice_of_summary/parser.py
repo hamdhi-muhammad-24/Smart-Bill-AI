@@ -47,6 +47,11 @@ def parse_invoice_of_summary(file_path: str) -> dict:
         "taxes":                 [],
         "tax_status":            "",
         "total_charges":         0,
+        # Customer-facing display currency, e.g. "Rs" - from ACCCURRENCYCODE.
+        # NOT the same as SLTACCCURRENCYCODE (SLT's internal accounting
+        # currency code, e.g. "LKR") - confirmed distinct tags/values in the
+        # real GMF, must not be confused.
+        "currency_code":         "",
         "charge_groups":         [],
         "payments":              [],
         "cancelled_payments":    [],
@@ -324,6 +329,8 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                 data['total_charges']  = to_float(value)
             elif key == 'NEWBAL':
                 data['total_payable'] = to_float(value)
+            elif key == 'ACCCURRENCYCODE':
+                data['currency_code'] = value
 
             elif key == 'SLT_RENTAL_SUBTOTAL':
                 data['rental_subtotal'] = to_float(value)
