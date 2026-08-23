@@ -1,6 +1,7 @@
 """Subscription Ref Grouping Renderer (Sheet 23)."""
 import os
 from datetime import datetime
+from reportlab.lib.colors import black
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_vat_reg_printable, is_tax_section_printable
@@ -23,6 +24,7 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
         self._draw_generation_id(data)
         self._draw_summary_boxes(data)
         self._draw_page1_footer(data)
+        self._draw_currency_label(data)
 
         self._draw_hierarchy(data["subscription_refs"])
         self._draw_adjustments(data)
@@ -99,11 +101,17 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
         due = data.get("payment_due_date", "")
         try:
             dd, mm, yyyy = due.split("/")
-            due_mmddyy   = f"{mm}{dd}{yyyy[-2:]}"
+            due_mmddyy   = f"{mm}{dd}{yyyy}"
         except ValueError:
             due_mmddyy = ""
         ts   = datetime.now().strftime("%H:%M:%S")
-        line = f'{data["source_filename"]}_{ts}{due_mmddyy}'
+
+        # Clean the source filename by removing the random suffix (e.g. __sqg099w7_1.gmf)
+        source_file = data.get("source_filename", "")
+        if "__" in source_file:
+            source_file = source_file.split("__")[0] + "_"
+
+        line = f'{source_file}_{ts}{due_mmddyy}'
         self.text(*COORDS["gen_id_line"], line, size=f["size"])
         if data.get("customer_segment"):
             self.text(*COORDS["gen_id_line2"], data["customer_segment"],
@@ -156,6 +164,20 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
         self.text(*COORDS["slip_customer"], slip_name or "", size=f["size"])
         self.text(*COORDS["slip_account"],  data["account_number"],
                   size=f["size"])
+
+    def _draw_currency_label(self, data):
+        """Currency label above the charges column (e.g. "(Rs.)") - read from
+        the GMF's ACCCURRENCYCODE tag (data['currency_code']), never a fixed
+        string, since a different account can have a different currency.
+        Must NOT be sourced from SLTACCCURRENCYCODE - that's SLT's internal
+        accounting code (e.g. "LKR"), a different tag/value entirely,
+        confirmed distinct in the real GMF."""
+        code = data.get("currency_code", "")
+        if not code:
+            return
+        f = FONTS["header"]
+        self.text(CHARGES_TABLE["amount_x"], CHARGES_TABLE["page1_y_start"] + 6.0,
+                  f"({code}.)", size=f["size"], bold=True, align="right")
 
     # 3-level hierarchy
 
@@ -282,41 +304,78 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
             self._flowing_write(d["description"], amount=d["amount"])
 
     def _draw_taxes_and_total(self, data):
-        """BPR11/24: gate taxes. Always draw total."""
+        """BPR11/24: gate taxes. Always draw total. Draws right after
+        subscription refs/adjustments/discounts finish, following the
+        running flowing-y cursor instead of a fixed page position."""
         f = FONTS["taxes"]
+        y = self._get_flowing_y()
+        y_min = CHARGES_TABLE["taxes_total_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
 
         has_nonzero = any(t['amount'] for t in data.get("taxes", []))
         if is_tax_section_printable(data.get("tax_status"), has_nonzero):
-            self.text(*COORDS["taxes_label"], "Taxes & Levies",
+            if y - CHARGES_TABLE["line_h"] < y_min:
+                self.new_page()
+                y = CHARGES_TABLE["otherpage_y_start"]
+                y_min = CHARGES_TABLE["otherpage_y_min"]
+
+            self.text(COORDS["taxes_label"][0], y, "Taxes & Levies",
                       size=f["size"], bold=True)
-            y = COORDS["taxes_label"][1] - COORDS["taxes_line_h"]
+            y -= COORDS["taxes_line_h"]
             for tax in data["taxes"]:
                 if tax["amount"]:
+                    if y < y_min:
+                        self.new_page()
+                        y = CHARGES_TABLE["otherpage_y_start"]
+                        y_min = CHARGES_TABLE["otherpage_y_min"]
                     self.text(COORDS["taxes_label"][0], y,
                               tax["name"], size=f["size"])
                     self.number(COORDS["taxes_amount"][0], y,
                                 tax["amount"], size=f["size"], align="right")
                     y -= COORDS["taxes_line_h"]
 
+        if y - CHARGES_TABLE["line_h"] < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+        y -= 10
+
         f = FONTS["total"]
-        self.text(COORDS["total_charges_label"][0],
-                  COORDS["total_charges_label"][1],
-                  "Total Charges for the Period",
+        c  = self.canvas
+        x  = COORDS["total_charges_label"][0]
+        ax = COORDS["total_charges_amount"][0]
+
+        # Top and bottom horizontal lines framing the total charges row
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(x, y + 11, ax, y + 11)   # Top horizontal line
+        c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
+
+        self.text(x, y, "Total Charges for the Period",
                   size=f["size"], bold=True)
-        self.number(COORDS["total_charges_amount"][0],
-                    COORDS["total_charges_amount"][1],
-                    data["total_charges"],
+        self.number(ax, y, data["total_charges"],
                     size=f["size"], bold=True, align="right")
 
+        self._flowing_y = y - COORDS["taxes_line_h"]
+
     def _draw_payments(self, data):
-        """BPR26: suppress if zero."""
+        """BPR26: suppress if zero. Draws right after Total Charges finishes,
+        following the running flowing-y cursor instead of a fixed page
+        position."""
         if not data.get("total_payments") and not data.get("payments"):
             return
         f      = FONTS["payments"]
-        y      = COORDS["payments_start"][1]
         amt_x  = COORDS["payments_amount_x"]
         line_h = COORDS["payments_line_h"]
         x      = COORDS["payments_start"][0]
+
+        y = self._get_flowing_y()
+        y_min = CHARGES_TABLE["payments_y_min"] if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        rows_h = line_h * (len(data.get("payments", [])) + 2)  # header + rows + total line
+        if y - rows_h < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+        y -= 3
+
+        top_y = y + line_h * 0.5   # a touch above the header, matches the divider's top
 
         self.text(x, y, "Details of Payments Received",
                   size=f["size"], bold=True)
@@ -333,6 +392,16 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
                   size=f["size"], bold=True)
         self.number(amt_x, y, data["total_payments"],
                     size=f["size"], bold=True, align="right")
+
+        # Vertical divider next to the payments block, sized to end exactly
+        # at "Total Payments Received" - drawn last, once that y is known,
+        # rather than at a fixed length.
+        bottom_y = y - 3
+        c = self.canvas
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(CHARGES_TABLE["vert_line_x"], top_y, CHARGES_TABLE["vert_line_x"], bottom_y)
+
         self._payments_end_y = y - line_h
 
     def _draw_cancel_payments(self, data):
@@ -508,7 +577,7 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
             c = self.canvases[idx][1]
             c.setFont("Helvetica", 9)
             if idx == 0:
-                c.drawRightString(540, 750,
+                c.drawRightString(540, 753,
                                   f"1  of  {total_pages}")
             else:
                 c.setFont("Helvetica-Bold", 10)
