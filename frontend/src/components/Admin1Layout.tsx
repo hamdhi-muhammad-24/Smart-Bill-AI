@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, LogOut, Moon, Sun, FileSearch, Upload } from 'lucide-react'
+import { LayoutDashboard, Menu, LogOut, Moon, Sun, FileSearch, Upload, LayoutGrid } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/AuthProvider'
@@ -145,6 +145,18 @@ export default function Admin1Layout() {
 
           <span className="flex-1" />
 
+          {/* Switch Portal Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8.5 gap-2 rounded-lg border-border/80 bg-background/50 hover:bg-accent text-xs font-semibold shadow-xs transition-all text-foreground"
+            onClick={() => navigate('/role-select')}
+            title="Switch to another portal"
+          >
+            <LayoutGrid size={14} className="text-[#0066b3] dark:text-[#00b2e3]" />
+            <span className="hidden sm:inline">Switch Portal</span>
+          </Button>
+
           <Button
             variant="ghost"
             size="icon"
@@ -157,14 +169,19 @@ export default function Admin1Layout() {
             <span className="sr-only">Toggle theme</span>
           </Button>
 
+          {me?.email && (
+            <span className="hidden rounded-full border border-border bg-muted/45 px-3 py-1 text-xs font-medium text-muted-foreground lg:block">{me.email}</span>
+          )}
+
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={handleLogout}
-            className="rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
             title="Log out"
           >
-            <LogOut size={18} />
+            <LogOut size={14} />
+            Logout
           </Button>
         </header>
 

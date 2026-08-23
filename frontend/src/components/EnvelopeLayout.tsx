@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Menu, LogOut, Moon, Sun, Mail, Layers } from 'lucide-react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { LayoutDashboard, Menu, LogOut, Moon, Sun, Mail, Layers, LayoutGrid } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { cn } from '@/lib/utils'
@@ -91,6 +91,7 @@ export default function EnvelopeLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const { toggleTheme } = useTheme()
   const { logout } = useAuth()
+  const navigate = useNavigate()
 
   return (
     <div className="flex min-h-screen bg-background relative">
@@ -127,6 +128,18 @@ export default function EnvelopeLayout() {
           </div>
 
           <span className="flex-1" />
+
+          {/* Switch Portal Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8.5 gap-2 rounded-lg border-border/80 bg-background/50 hover:bg-accent text-xs font-semibold shadow-xs transition-all text-foreground"
+            onClick={() => navigate('/role-select')}
+            title="Switch to another portal"
+          >
+            <LayoutGrid size={14} className="text-[#0066b3] dark:text-[#00b2e3]" />
+            <span className="hidden sm:inline">Switch Portal</span>
+          </Button>
 
           {/* Theme Toggle Button */}
           <Button
