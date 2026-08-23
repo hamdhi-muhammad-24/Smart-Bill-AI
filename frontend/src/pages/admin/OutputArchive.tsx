@@ -44,9 +44,9 @@ export default function OutputArchive() {
     const result: Record<string, Record<string, string[]>> = {}
     pdfsData?.files.forEach(path => {
       const parts = path.split('/')
-      let category = 'Other', redLevel = 'Non-Red', filename = parts[parts.length - 1]
+      let category = 'Other', redLevel = 'Non-Red'
       if (parts.length === 3) { [category, redLevel] = parts }
-      else if (parts.length === 2) { [category, filename] = [parts[0], parts[1]]; redLevel = 'Non-Red' }
+      else if (parts.length === 2) { category = parts[0]; redLevel = 'Non-Red' }
       if (!result[category]) result[category] = {}
       if (!result[category][redLevel]) result[category][redLevel] = []
       result[category][redLevel].push(path)
