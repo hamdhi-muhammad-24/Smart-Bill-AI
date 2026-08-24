@@ -388,13 +388,14 @@ class GmfFolderHandler(FileSystemEventHandler):
 
                     from core.gmf_splitter import count_documents_with_breakdown
                     total_cnt, breakdown = count_documents_with_breakdown(str(new_filepath))
+                    effective_total = total_cnt if total_cnt > 0 else (total_records_count or 1)
                     upload = GmfUpload(
                         filename=filename,
                         file_path=str(new_filepath),
                         folder_type=folder_name,
                         cycle_number=cycle_number,
                         template_detected=template_detected,
-                        total_records_count=total_records_count,  # Using the parameter value, NOT the count from breakdown
+                        total_records_count=effective_total,
                         status=final_status,
                         template_breakdown=json.dumps(breakdown) if breakdown else None,
                     )
