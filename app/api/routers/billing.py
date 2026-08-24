@@ -55,7 +55,7 @@ from processing.output_manager import (
     list_pdfs_in_batch,
     get_pdf_path,
 )
-from templates.registry import TEMPLATE_REGISTRY
+from templates.registry import TEMPLATE_REGISTRY, get_parser
 from app.billing.worker_queue import TEMPLATE_FOLDER_MAP
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -626,11 +626,27 @@ def preview_invoice(
     if result.output_pdf and os.path.exists(result.output_pdf):
         _preview_template_id = result.template_id or (detected_templates[0] if detected_templates else "")
         _approved_self_seal_pdf = get_approved_self_seal_pdf()
-        if _approved_self_seal_pdf and _preview_template_id:
+        if _approved_self_seal_pdf and _preview_template_id in ("nonvat_home", "nonvat_enterprise"):
+            doc_data = None
+            try:
+                parser_func = get_parser(_preview_template_id)
+                preview_data = parser_func(upload.file_path, limit=1)
+                if isinstance(preview_data, list) and preview_data:
+                    doc_data = preview_data[0]
+                elif isinstance(preview_data, dict):
+                    if "records" in preview_data and isinstance(preview_data["records"], list) and preview_data["records"]:
+                        doc_data = preview_data["records"][0]
+                    else:
+                        doc_data = preview_data
+            except Exception as e:
+                logger.warning("Could not extract preview doc_data: %s", e)
+
             append_self_seal_if_needed(
                 result.output_pdf,
                 _preview_template_id,
                 _approved_self_seal_pdf,
+                doc_data=doc_data,
+                is_print=True,
             )
     # ───────────────────────────────────────────────────────────
 

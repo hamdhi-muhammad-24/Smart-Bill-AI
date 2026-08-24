@@ -500,13 +500,15 @@ def _worker_process(worker_id):
                         break
                         
                     # ── Self-Seal envelope post-processing ─────────────────────
-                    approved_self_seal_pdf = get_approved_self_seal_pdf()
-                    if approved_self_seal_pdf:
-                        apply_self_seal_to_directory(
-                            temp_pdf_dir,
-                            template_id,
-                            approved_self_seal_pdf,
-                        )
+                    if category_name == "print" and template_id in ("nonvat_home", "nonvat_enterprise"):
+                        approved_self_seal_pdf = get_approved_self_seal_pdf()
+                        if approved_self_seal_pdf:
+                            apply_self_seal_to_directory(
+                                temp_pdf_dir,
+                                template_id,
+                                approved_self_seal_pdf,
+                                is_print=True,
+                            )
                     # ───────────────────────────────────────────────────────────
                     
                     # Copy generated files to output folder

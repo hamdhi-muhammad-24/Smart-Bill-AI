@@ -25,14 +25,15 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Templates whose output PDFs must never have the envelope appended,
-# regardless of page count or approval status.
-EXCLUDED_TEMPLATES: frozenset[str] = frozenset({
-    "lod",
-    "vat_confirmation",
-    "final_notice",
-    "customer_letter_logo_v1print",
+# Templates whose output PDFs are eligible for the Self-Seal envelope.
+# ONLY NonVAT Home and NonVAT Enterprise print invoices receive the Self-Seal page.
+ALLOWED_TEMPLATES: frozenset[str] = frozenset({
+    "nonvat_home",
+    "nonvat_enterprise",
 })
+
+# Backward compatibility alias
+EXCLUDED_TEMPLATES: frozenset[str] = frozenset()
 
 
 def get_approved_self_seal_pdf() -> Optional[str]:
@@ -113,29 +114,116 @@ def get_pdf_page_count(pdf_path: str) -> int:
         return 0
 
 
+def create_self_seal_address_overlay(doc_data: Optional[dict] = None):
+    """
+    Generate an overlay with customer/company name, address lines, and postal/zip code
+    rotated 180 degrees at the letter box coordinates:
+    x = 419.53, y = 657.64 (top-left) -> ReportLab y = 841.89 - 657.64 = 184.25 pt.
+    """
+    if not doc_data:
+        return None
+
+    import io
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.colors import black
+
+    PAGE_W = 595.28
+    PAGE_H = 841.89
+
+    # Extract recipient address lines
+    lines = []
+    top_name = (
+        doc_data.get("business_name")
+        if doc_data.get("address_name_not_required")
+        else (doc_data.get("business_name") or doc_data.get("customer_name", ""))
+    )
+    if top_name:
+        lines.append(top_name)
+    elif doc_data.get("customer_name"):
+        lines.append(doc_data["customer_name"])
+
+    addr = doc_data.get("address_lines")
+    if addr and isinstance(addr, list):
+        for a in addr:
+            s = str(a).strip() if a else ""
+            if s and s != "-":
+                lines.append(s)
+    else:
+        raw_addr = doc_data.get("address", "") or doc_data.get("customer_address", "")
+        if raw_addr:
+            if "\n" in raw_addr:
+                lines.extend([l.strip() for l in raw_addr.split("\n") if l.strip() and l.strip() != "-"])
+            else:
+                lines.extend([p.strip() for p in raw_addr.split(",") if p.strip() and p.strip() != "-"])
+
+    zip_code = doc_data.get("zip_code") or doc_data.get("postal_code")
+    if zip_code and str(zip_code).strip() and str(zip_code).strip() != "-":
+        if str(zip_code).strip() not in lines:
+            lines.append(str(zip_code).strip())
+
+    if not lines:
+        return None
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(PAGE_W, PAGE_H))
+    c.saveState()
+
+    # Target address window on self-seal template (DPS 419 area, 180-deg rotated)
+    # The recipient window is located at x: ~40..290 pt, y: ~580..720 pt
+    box_x = 285.0
+    box_y_rl = 205
+    c.translate(box_x, box_y_rl)
+    c.rotate(180)
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColor(black)
+
+    cur_y = 0
+    line_height = 11
+    for idx, line_text in enumerate(lines):
+        if line_text:
+            if idx == 0:
+                c.setFont("Helvetica-Bold", 9)
+            else:
+                c.setFont("Helvetica-Bold", 8.5)
+            c.drawString(0, cur_y, str(line_text))
+            cur_y -= line_height
+
+    c.restoreState()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
 def append_self_seal_if_needed(
     pdf_path: str,
     template_id: str,
     approved_self_seal_pdf: Optional[str],
+    doc_data: Optional[dict] = None,
+    is_print: bool = True,
 ) -> bool:
     """
     Append the Self-Seal envelope as page 2 of *pdf_path* **in-place** when:
 
       - *approved_self_seal_pdf* is not None (an approved artwork exists), AND
-      - *template_id* is NOT in EXCLUDED_TEMPLATES, AND
+      - *template_id* is in ALLOWED_TEMPLATES ('nonvat_home', 'nonvat_enterprise'), AND
+      - *is_print* is True (only for print invoices), AND
       - *pdf_path* currently has exactly ONE page.
 
     Returns True if the PDF was modified, False otherwise.
-
-    The modification is atomic: a temporary file is written first and then
-    renamed over the original, so a crash mid-write does not corrupt the bill.
     """
     if not approved_self_seal_pdf:
         return False
 
-    if template_id in EXCLUDED_TEMPLATES:
+    if template_id not in ALLOWED_TEMPLATES:
         logger.debug(
-            "Skipping Self-Seal append for excluded template '%s': %s",
+            "Skipping Self-Seal append for non-eligible template '%s': %s",
+            template_id, pdf_path,
+        )
+        return False
+
+    if not is_print:
+        logger.debug(
+            "Skipping Self-Seal append for non-print invoice (%s): %s",
             template_id, pdf_path,
         )
         return False
@@ -150,6 +238,7 @@ def append_self_seal_if_needed(
 
     try:
         from pypdf import PdfReader, PdfWriter
+        from copy import deepcopy
 
         bill_reader = PdfReader(pdf_path)
         seal_reader = PdfReader(approved_self_seal_pdf)
@@ -157,8 +246,15 @@ def append_self_seal_if_needed(
         writer = PdfWriter()
         # Page 1: the bill
         writer.add_page(bill_reader.pages[0])
-        # Page 2: the Self-Seal envelope
-        writer.add_page(seal_reader.pages[0])
+
+        # Page 2: the Self-Seal envelope with recipient address window overlay
+        seal_page = deepcopy(seal_reader.pages[0])
+        overlay_buf = create_self_seal_address_overlay(doc_data)
+        if overlay_buf:
+            overlay_reader = PdfReader(overlay_buf)
+            seal_page.merge_page(overlay_reader.pages[0])
+
+        writer.add_page(seal_page)
 
         # Write to a temp file alongside the original, then rename atomically
         tmp_path = pdf_path + ".selfseal_tmp"
@@ -178,7 +274,6 @@ def append_self_seal_if_needed(
             "Failed to append Self-Seal envelope to %s: %s",
             pdf_path, exc, exc_info=True,
         )
-        # Clean up temp file if it was created
         tmp_path = pdf_path + ".selfseal_tmp"
         if os.path.exists(tmp_path):
             try:
@@ -192,12 +287,14 @@ def apply_self_seal_to_directory(
     pdf_dir: str,
     template_id: str,
     approved_self_seal_pdf: Optional[str],
+    doc_data_map: Optional[dict] = None,
+    is_print: bool = True,
 ) -> int:
     """
     Convenience helper: apply ``append_self_seal_if_needed`` to every PDF in
     *pdf_dir*.  Returns the number of PDFs that were modified.
     """
-    if not approved_self_seal_pdf:
+    if not approved_self_seal_pdf or not is_print or template_id not in ALLOWED_TEMPLATES:
         return 0
 
     modified = 0
@@ -205,7 +302,8 @@ def apply_self_seal_to_directory(
         for fname in os.listdir(pdf_dir):
             if fname.lower().endswith(".pdf"):
                 fpath = os.path.join(pdf_dir, fname)
-                if append_self_seal_if_needed(fpath, template_id, approved_self_seal_pdf):
+                doc_data = doc_data_map.get(fname) if doc_data_map else None
+                if append_self_seal_if_needed(fpath, template_id, approved_self_seal_pdf, doc_data=doc_data, is_print=is_print):
                     modified += 1
     except Exception as exc:
         logger.error("Error applying Self-Seal to directory %s: %s", pdf_dir, exc)
