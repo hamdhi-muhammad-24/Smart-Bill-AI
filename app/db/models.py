@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Enum,
+    Float,
     Identity,
     Index,
     Integer,
@@ -322,10 +323,10 @@ class EnvelopeTemplate(Base):
     display_name   = Column(Text, nullable=False)
     base_pdf_path  = Column(Text, nullable=False)  # relative path to empty PDF template
     # Placeholder box coordinates in PDF points (auto-detected or manual)
-    box_x0         = Column(Integer, nullable=True)
-    box_y0         = Column(Integer, nullable=True)
-    box_x1         = Column(Integer, nullable=True)
-    box_y1         = Column(Integer, nullable=True)
+    box_x0         = Column(Float, nullable=True)
+    box_y0         = Column(Float, nullable=True)
+    box_x1         = Column(Float, nullable=True)
+    box_y1         = Column(Float, nullable=True)
     rotation_deg   = Column(Integer, nullable=False, default=0)
     fit_mode       = Column(Text, nullable=False, default="cover")
     # Image validation constraints (flexible ranges)

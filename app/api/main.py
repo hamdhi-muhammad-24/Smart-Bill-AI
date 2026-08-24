@@ -38,44 +38,84 @@ def create_app() -> FastAPI:
     
     @application.on_event("startup")
     async def startup_event():
-        try:
-            from sqlalchemy import text
-            from app.db.base import SessionLocal
-            with SessionLocal() as db:
-                db.execute(text("ALTER TYPE gmf_upload_status ADD VALUE IF NOT EXISTS 'PARTIALLY_PROCESSED';"))
-                db.commit()
-        except Exception as e:
-            import logging
-            logging.getLogger("uvicorn").debug(f"Enum sync skipped or already exists: {e}")
-
         start_scheduler()
         try:
             from app.db.base import engine
             from sqlalchemy import text
             with engine.connect() as conn:
-                conn.execute(text("ALTER TYPE gmf_upload_status ADD VALUE IF NOT EXISTS 'PARTIALLY_PROCESSED'"))
-                conn.execute(text("ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN1'"))
-                conn.execute(text("ALTER TYPE envelope_artwork_status_enum ADD VALUE IF NOT EXISTS 'DRAFT'"))
-                conn.execute(text("ALTER TABLE gmf_uploads ADD COLUMN IF NOT EXISTS template_breakdown TEXT;"))
-                conn.execute(text("ALTER TABLE envelope_artworks ADD COLUMN IF NOT EXISTS campaign_name TEXT;"))
-                # New: multi-role access control tables
-                conn.execute(text(
-                    "DO $prs$ BEGIN "
-                    "CREATE TYPE permission_request_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED'); "
-                    "EXCEPTION WHEN duplicate_object THEN null; END $prs$;"
-                ))
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS user_role_grants (
+                # 1. Enums
+                for stmt in [
+                    "ALTER TYPE gmf_upload_status ADD VALUE IF NOT EXISTS 'PARTIALLY_PROCESSED';",
+                    "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ADMIN1';",
+                    "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'GMF_HANDLER';",
+                    "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ENVELOPE_HANDLER';",
+                    "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'MANAGER';",
+                    "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'CUSTOMER';",
+                    "DO $enum$ BEGIN CREATE TYPE envelope_type_enum AS ENUM ('LARGE', 'MEDIUM', 'SELF_SEAL'); EXCEPTION WHEN duplicate_object THEN null; END $enum$;",
+                    "DO $enum$ BEGIN CREATE TYPE envelope_artwork_status_enum AS ENUM ('ACTIVE', 'DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'REPLACED', 'REMOVED'); EXCEPTION WHEN duplicate_object THEN null; END $enum$;",
+                    "ALTER TYPE envelope_artwork_status_enum ADD VALUE IF NOT EXISTS 'DRAFT';",
+                    "DO $prs$ BEGIN CREATE TYPE permission_request_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED'); EXCEPTION WHEN duplicate_object THEN null; END $prs$;",
+                ]:
+                    try:
+                        conn.execute(text(stmt))
+                        conn.commit()
+                    except Exception as e:
+                        logging.getLogger("uvicorn").debug(f"Enum sync stmt skipped: {e}")
+
+                # 2. Tables & Columns
+                for stmt in [
+                    "ALTER TABLE gmf_uploads ADD COLUMN IF NOT EXISTS template_breakdown TEXT;",
+                    """CREATE TABLE IF NOT EXISTS envelope_templates (
+                        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        envelope_type envelope_type_enum NOT NULL UNIQUE,
+                        display_name TEXT NOT NULL,
+                        base_pdf_path TEXT NOT NULL,
+                        box_x0 DOUBLE PRECISION,
+                        box_y0 DOUBLE PRECISION,
+                        box_x1 DOUBLE PRECISION,
+                        box_y1 DOUBLE PRECISION,
+                        rotation_deg INTEGER NOT NULL DEFAULT 0,
+                        fit_mode TEXT NOT NULL DEFAULT 'cover',
+                        min_width INTEGER NOT NULL DEFAULT 800,
+                        min_height INTEGER NOT NULL DEFAULT 250,
+                        aspect_min INTEGER NOT NULL DEFAULT 70,
+                        aspect_max INTEGER NOT NULL DEFAULT 350,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );""",
+                    """CREATE TABLE IF NOT EXISTS envelope_artworks (
+                        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        envelope_template_id BIGINT NOT NULL REFERENCES envelope_templates(id) ON DELETE CASCADE,
+                        original_filename TEXT NOT NULL,
+                        campaign_name TEXT,
+                        image_path TEXT NOT NULL,
+                        image_width INTEGER NOT NULL,
+                        image_height INTEGER NOT NULL,
+                        output_pdf_path TEXT,
+                        preview_png_path TEXT,
+                        status envelope_artwork_status_enum NOT NULL DEFAULT 'ACTIVE',
+                        rejection_reason TEXT,
+                        uploaded_by TEXT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        replaced_at TIMESTAMPTZ
+                    );""",
+                    "ALTER TABLE envelope_artworks ADD COLUMN IF NOT EXISTS campaign_name TEXT;",
+                    """CREATE TABLE IF NOT EXISTS envelope_history (
+                        id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        template_name TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        filename TEXT,
+                        reason TEXT,
+                        timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );""",
+                    """CREATE TABLE IF NOT EXISTS user_role_grants (
                         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                         user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                         role user_role NOT NULL,
                         granted_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
                         granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         CONSTRAINT uq_user_role_grant UNIQUE (user_id, role)
-                    );
-                """))
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS permission_requests (
+                    );""",
+                    """CREATE TABLE IF NOT EXISTS permission_requests (
                         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                         email TEXT NOT NULL,
                         requested_roles TEXT NOT NULL,
@@ -85,41 +125,39 @@ def create_app() -> FastAPI:
                         reviewed_at TIMESTAMPTZ,
                         rejection_note TEXT,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                    );
-                """))
-                # Seed testuser016 as ADMIN if not present
-                conn.execute(text(
-                    "INSERT INTO users (email, role, is_active) "
-                    "VALUES ('testuser016@intranet.slt.com.lk', 'ADMIN', true) "
-                    "ON CONFLICT (email) DO UPDATE SET role = 'ADMIN', is_active = true;"
-                ))
-                # Grant all roles to testuser016
-                conn.execute(text(
-                    "WITH u AS (SELECT id FROM users WHERE email = 'testuser016@intranet.slt.com.lk') "
-                    "INSERT INTO user_role_grants (user_id, role) "
-                    "SELECT u.id, r.role FROM u, "
-                    "(VALUES ('ADMIN'::user_role), ('GMF_HANDLER'::user_role), "
-                    " ('ENVELOPE_HANDLER'::user_role), ('MANAGER'::user_role)) AS r(role) "
-                    "ON CONFLICT (user_id, role) DO NOTHING;"
-                ))
-                # Backfill existing non-CUSTOMER users
-                conn.execute(text(
-                    "INSERT INTO user_role_grants (user_id, role) "
-                    "SELECT id, role FROM users WHERE role != 'CUSTOMER' "
-                    "ON CONFLICT (user_id, role) DO NOTHING;"
-                ))
-                # Grant all portal roles to all ADMIN users
-                conn.execute(text(
-                    "WITH admins AS (SELECT id FROM users WHERE role = 'ADMIN') "
-                    "INSERT INTO user_role_grants (user_id, role) "
-                    "SELECT a.id, r.role FROM admins a, "
-                    "(VALUES ('GMF_HANDLER'::user_role), ('ENVELOPE_HANDLER'::user_role), ('MANAGER'::user_role)) AS r(role) "
-                    "ON CONFLICT (user_id, role) DO NOTHING;"
-                ))
-                conn.commit()
+                    );""",
+                    """INSERT INTO users (email, role, is_active)
+                    VALUES ('testuser016@intranet.slt.com.lk', 'ADMIN', true)
+                    ON CONFLICT (email) DO UPDATE SET role = 'ADMIN', is_active = true;""",
+                    """WITH u AS (SELECT id FROM users WHERE email = 'testuser016@intranet.slt.com.lk')
+                    INSERT INTO user_role_grants (user_id, role)
+                    SELECT u.id, r.role FROM u,
+                    (VALUES ('ADMIN'::user_role), ('GMF_HANDLER'::user_role),
+                     ('ENVELOPE_HANDLER'::user_role), ('MANAGER'::user_role)) AS r(role)
+                    ON CONFLICT (user_id, role) DO NOTHING;""",
+                    """INSERT INTO user_role_grants (user_id, role)
+                    SELECT id, role FROM users WHERE role != 'CUSTOMER'
+                    ON CONFLICT (user_id, role) DO NOTHING;""",
+                    """WITH admins AS (SELECT id FROM users WHERE role = 'ADMIN')
+                    INSERT INTO user_role_grants (user_id, role)
+                    SELECT a.id, r.role FROM admins a,
+                    (VALUES ('GMF_HANDLER'::user_role), ('ENVELOPE_HANDLER'::user_role), ('MANAGER'::user_role)) AS r(role)
+                    ON CONFLICT (user_id, role) DO NOTHING;""",
+                ]:
+                    try:
+                        conn.execute(text(stmt))
+                        conn.commit()
+                    except Exception as e:
+                        logging.getLogger("uvicorn").debug(f"DDL/Seed stmt skipped: {e}")
+
+            # Auto-seed envelope templates
+            from app.api.routers.envelope import _ensure_envelope_templates_seeded
+            from app.db.base import SessionLocal
+            with SessionLocal() as db:
+                _ensure_envelope_templates_seeded(db)
         except Exception as e:
             import logging
-            logging.getLogger("uvicorn").warning(f"Database enum migration skipped: {e}")
+            logging.getLogger("uvicorn").warning(f"Database schema initialization: {e}")
 
         try:
             from app.billing.worker_queue import start_worker_threads

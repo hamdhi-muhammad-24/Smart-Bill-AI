@@ -87,34 +87,38 @@ def _ensure_envelope_templates_seeded(db: DbSession):
     if _ENVELOPE_SEEDED:
         return
 
-    for etype, spec in ENVELOPE_SPECS.items():
-        tmpl = db.query(EnvelopeTemplate).filter(
-            EnvelopeTemplate.envelope_type == etype
-        ).first()
-        if not tmpl:
-            tmpl = EnvelopeTemplate(
-                envelope_type=etype,
-                display_name=spec["display_name"],
-                base_pdf_path=str(settings.envelope_base_dir / spec["base_pdf"]),
-                box_x0=spec["box"][0], box_y0=spec["box"][1],
-                box_x1=spec["box"][2], box_y1=spec["box"][3],
-                rotation_deg=spec.get("rotation_deg", 0),
-                fit_mode=spec.get("fit_mode", "cover"),
-                min_width=spec["min_width"],
-                min_height=spec["min_height"],
-                aspect_min=spec["aspect_min"],
-                aspect_max=spec["aspect_max"],
-            )
-            db.add(tmpl)
-        else:
-            # Sync coordinates to ensure exact placement
-            tmpl.box_x0 = spec["box"][0]
-            tmpl.box_y0 = spec["box"][1]
-            tmpl.box_x1 = spec["box"][2]
-            tmpl.box_y1 = spec["box"][3]
-            tmpl.base_pdf_path = str(settings.envelope_base_dir / spec["base_pdf"])
-    db.commit()
-    _ENVELOPE_SEEDED = True
+    try:
+        for etype, spec in ENVELOPE_SPECS.items():
+            tmpl = db.query(EnvelopeTemplate).filter(
+                EnvelopeTemplate.envelope_type == etype
+            ).first()
+            if not tmpl:
+                tmpl = EnvelopeTemplate(
+                    envelope_type=etype,
+                    display_name=spec["display_name"],
+                    base_pdf_path=str(settings.envelope_base_dir / spec["base_pdf"]),
+                    box_x0=spec["box"][0], box_y0=spec["box"][1],
+                    box_x1=spec["box"][2], box_y1=spec["box"][3],
+                    rotation_deg=spec.get("rotation_deg", 0),
+                    fit_mode=spec.get("fit_mode", "cover"),
+                    min_width=spec["min_width"],
+                    min_height=spec["min_height"],
+                    aspect_min=spec["aspect_min"],
+                    aspect_max=spec["aspect_max"],
+                )
+                db.add(tmpl)
+            else:
+                # Sync coordinates to ensure exact placement
+                tmpl.box_x0 = spec["box"][0]
+                tmpl.box_y0 = spec["box"][1]
+                tmpl.box_x1 = spec["box"][2]
+                tmpl.box_y1 = spec["box"][3]
+                tmpl.base_pdf_path = str(settings.envelope_base_dir / spec["base_pdf"])
+        db.commit()
+        _ENVELOPE_SEEDED = True
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Error seeding envelope templates: {e}")
 
 
 def _render_pdf_page_as_png(pdf_path: str, dpi: int = 250) -> bytes:
