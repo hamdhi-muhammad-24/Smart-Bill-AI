@@ -56,9 +56,7 @@ function RunCard({
   const isPartial = run.status === 'COMPLETED_WITH_ERRORS' || run.status === 'PARTIAL'
   
   const processedCount = (run.succeeded || 0) + (run.failed || 0)
-  const totalCount = isComplete 
-    ? (processedCount > 0 ? processedCount : Math.max(run.total_accounts || 1, 1))
-    : Math.max(run.total_accounts || 1, processedCount, 1)
+  const totalCount = Math.max(run.total_accounts || 1, processedCount, 1)
   
   const progress = isComplete 
     ? 100 
