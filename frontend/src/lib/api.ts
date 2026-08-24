@@ -44,17 +44,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (res.status === 401) {
     clearToken()
     localStorage.removeItem('slt-auth')
-    
-    // TEMPORARY DEBUGGING: Show a red screen instead of redirecting to /login
-    document.body.innerHTML = `
-      <div style="padding: 40px; text-align: center; font-family: sans-serif;">
-        <h1 style="color: red;">401 Unauthorized Error Caught!</h1>
-        <p>The backend rejected a request to: <strong>${path}</strong></p>
-        <p>This would normally cause a silent redirect to /login.</p>
-        <button onclick="window.location.href='/login'" style="padding: 10px 20px; margin-top: 20px;">Go to Login</button>
-      </div>
-    `
-    
     throw new ApiError(401, 'Session expired - please log in again.')
   }
 

@@ -235,7 +235,7 @@ class USDOpenItemRenderer(BaseRenderer):
         page_label = f"1  of  {total_pages}"
         self.text(
             555,
-            y + 12,
+            y + 17,
             page_label,
             size=ADDRESS_BOX["font_size"],
             bold=False,

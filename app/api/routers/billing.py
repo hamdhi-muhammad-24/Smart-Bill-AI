@@ -55,7 +55,7 @@ from processing.output_manager import (
     list_pdfs_in_batch,
     get_pdf_path,
 )
-from templates.registry import TEMPLATE_REGISTRY
+from templates.registry import TEMPLATE_REGISTRY, get_parser
 from app.billing.worker_queue import TEMPLATE_FOLDER_MAP
 
 router = APIRouter(prefix="/billing", tags=["billing"])
@@ -87,6 +87,16 @@ class GmfUploadOut(BaseModel):
         from_attributes = True
 
 
+class BillingRunFailureOut(BaseModel):
+    id: int
+    account_number: Optional[str]
+    error_message: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class BillingRunOut(BaseModel):
     id: int
     batch_name: str
@@ -98,7 +108,7 @@ class BillingRunOut(BaseModel):
     started_at: datetime
     finished_at: Optional[datetime]
     output_path: Optional[str]
-    failures: List[dict] = []
+    failures: List[BillingRunFailureOut] = []
 
     class Config:
         from_attributes = True
@@ -304,12 +314,31 @@ def get_stats(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1
 # GMF Uploads
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _resolve_upload_file_path(upload: GmfUpload) -> Optional[Path]:
+    """Find the existing file on disk across possible storage locations."""
+    if upload.file_path and os.path.exists(upload.file_path):
+        return Path(upload.file_path)
+    fn = upload.filename
+    possible_paths = [
+        settings.queue_pending_dir / fn,
+        settings.queue_incoming_dir / fn,
+        settings.gmf_drive_path / "Staged" / fn,
+        settings.gmf_drive_path / (upload.folder_type or "") / fn,
+        settings.gmf_drive_path / "Processed" / (upload.folder_type or "unknown") / fn,
+    ]
+    for p in possible_paths:
+        if p.exists():
+            return p
+    return None
+
 def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set) -> tuple:
     """
-    Returns (approved_total_records, approved_remaining_records, is_fully_approved).
+    Returns (approved_total_records, approved_remaining_records, is_fully_approved, active_batch_total, active_batch_processed).
     - approved_total_records: total customer records in this upload matching approved templates.
     - approved_remaining_records: records still pending generation for approved templates.
     - is_fully_approved: True if all detected templates in the upload are approved.
+    - active_batch_total: Target total records for the current active approved templates workload.
+    - active_batch_processed: Records processed so far for the current active approved templates workload.
     """
     f_type = upload.folder_type or ""
     processed = upload.processed_records_count or 0
@@ -325,42 +354,68 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
             "Customer_Migration_Letter": {"customer_letter_logo_v1print", "customer_migration_letter", "customer_letter"},
         }.get(f_type, set())
         
-        is_app = bool(mapped.intersection(approved_templates))
+        is_app = bool(mapped.intersection(approved_templates)) if mapped else True
         tot = upload.total_records_count or 1
         app_tot = tot if is_app else 0
         app_rem = max(0, app_tot - processed)
-        return app_tot, app_rem, is_app
+        active_batch_tot = tot if is_app else 0
+        active_batch_proc = max(0, active_batch_tot - app_rem) if is_app else 0
+        return app_tot, app_rem, is_app, active_batch_tot, active_batch_proc
 
-    # Case 2: Single GMF file (1 document / 1 record)
-    tot = upload.total_records_count or 1
-    if tot <= 1:
-        t_id = (upload.template_detected or "").strip()
-        is_app = t_id in approved_templates if t_id else False
-        app_tot = 1 if is_app else 0
-        app_rem = max(0, app_tot - processed)
-        return app_tot, app_rem, is_app
-
-    # Case 3: Bulk Multi-Document GMF file
+    # Case 2: Multi-Document GMF file with breakdown JSON
     if upload.template_breakdown:
         try:
             bd = json.loads(upload.template_breakdown)
             if isinstance(bd, dict) and bd:
                 tot_in_bd = sum(bd.values())
-                app_tot = sum(cnt for tid, cnt in bd.items() if tid in approved_templates)
+                
+                # Separate templates completed in past generation runs from the currently active approved workload
+                cum_processed = processed
+                past_completed_count = 0
+                active_tot = 0
+                
+                for tid, cnt in bd.items():
+                    if tid in approved_templates:
+                        if cum_processed >= cnt:
+                            past_completed_count += cnt
+                            cum_processed -= cnt
+                        else:
+                            active_tot += cnt
+                
+                app_tot = past_completed_count + active_tot
                 is_fully = (app_tot == tot_in_bd) and (tot_in_bd > 0)
                 app_rem = max(0, app_tot - processed)
-                return app_tot, app_rem, is_fully
+                
+                if active_tot > 0:
+                    active_batch_tot = active_tot
+                    active_batch_proc = max(0, active_batch_tot - app_rem)
+                else:
+                    active_batch_tot = 0
+                    active_batch_proc = 0
+                    
+                return app_tot, app_rem, is_fully, active_batch_tot, active_batch_proc
         except Exception:
             pass
 
-    # Fallback for bulk GMF without breakdown JSON
+    # Case 3: Single detected template
+    tot = upload.total_records_count or 1
+    t_id = (upload.template_detected or "").strip()
+    if t_id and "," not in t_id:
+        is_app = t_id in approved_templates
+        app_tot = tot if is_app else 0
+        app_rem = max(0, app_tot - processed)
+        active_batch_tot = tot if is_app else 0
+        active_batch_proc = max(0, active_batch_tot - app_rem) if is_app else 0
+        return app_tot, app_rem, is_app, active_batch_tot, active_batch_proc
+
+    # Case 4: Fallback for comma-separated template list without breakdown JSON
     raw_detected = str(upload.template_detected or "")
     for char in ['(', ')', "'", '"']:
         raw_detected = raw_detected.replace(char, '')
     detected_list = [t.strip() for t in raw_detected.split(",") if t.strip() and not t.strip().isdigit()]
     
     if not detected_list:
-        return 0, 0, False
+        return 0, 0, False, 0, 0
 
     matching = [t for t in detected_list if t in approved_templates]
     is_fully = len(matching) == len(detected_list)
@@ -372,7 +427,9 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
         app_tot = 0
 
     app_rem = max(0, app_tot - processed)
-    return app_tot, app_rem, is_fully
+    active_batch_tot = app_tot
+    active_batch_proc = max(0, active_batch_tot - app_rem)
+    return app_tot, app_rem, is_fully, active_batch_tot, active_batch_proc
 
 
 @router.get("/pending-batches")
@@ -396,42 +453,68 @@ def get_pending_batches(
         approved_templates.add("customer_migration_letter")
         approved_templates.add("customer_letter")
 
-    pending_uploads = db.query(GmfUpload).filter(
-        GmfUpload.status.in_([GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED]),
+    # Fetch all uploads in relevant states to accurately maintain batch total counts
+    all_cycle_uploads = db.query(GmfUpload).filter(
+        GmfUpload.status.in_([
+            GmfUploadStatus.APPROVED,
+            GmfUploadStatus.PARTIALLY_PROCESSED,
+            GmfUploadStatus.COMPLETED,
+            GmfUploadStatus.GENERATING,
+        ]),
         GmfUpload.folder_type != "Test_GMFs",
-        GmfUpload.billing_run_id.is_(None),
     ).order_by(GmfUpload.detected_at.asc()).all()
 
-    cycles = {}
-    dates = {}
-    for upload in pending_uploads:
-        app_tot, app_rem, _ = _calculate_upload_approved_counts(upload, approved_templates)
-        # ONLY include uploads that have remaining approved records ready for generation
-        if app_rem <= 0:
-            continue
-
+    # Group uploads by (cycle_number or folder_type, date)
+    cycle_groups = {}
+    for upload in all_cycle_uploads:
         c = upload.cycle_number or upload.folder_type
-        if c not in cycles:
-            cycles[c] = []
-            dates[c] = upload.detected_at.strftime("%Y-%m-%d")
-        cycles[c].append((upload, app_tot, app_rem))
+        d = upload.detected_at.strftime("%Y-%m-%d") if upload.detected_at else "Unknown"
+        group_key = (c, d)
+        if group_key not in cycle_groups:
+            cycle_groups[group_key] = []
+        cycle_groups[group_key].append(upload)
 
     batches = []
-    for c, items_list in sorted(cycles.items(), key=lambda x: str(x[0])):
-        upload_ids = [u.id for u, _, _ in items_list]
-        proc = sum(u.processed_records_count or 0 for u, _, _ in items_list)
-        tot = sum(app_tot for _, app_tot, _ in items_list)
-        rem = sum(app_rem for _, _, app_rem in items_list)
-        batches.append({
-            "cycle_number": c,
-            "date": dates[c],
-            "batch_index": 1,
-            "file_count": len(upload_ids),
-            "upload_ids": upload_ids,
-            "processed_records": proc,
-            "total_records": tot,
-            "remaining_records": rem
-        })
+    for (c, d), group_uploads in sorted(cycle_groups.items(), key=lambda x: (str(x[0][0]), str(x[0][1]))):
+        group_tot = 0
+        group_proc = 0
+        group_rem = 0
+        group_pending_ids = []
+
+        for upload in group_uploads:
+            # Check if upload is currently part of an active running billing run
+            is_active_generating = False
+            if upload.billing_run_id is not None:
+                active_run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
+                if active_run and active_run.status == RunStatus.RUNNING:
+                    is_active_generating = True
+                else:
+                    upload.billing_run_id = None
+
+            app_tot, app_rem, _, active_tot, active_proc = _calculate_upload_approved_counts(upload, approved_templates)
+
+            if app_rem > 0:
+                group_tot += active_tot
+                group_proc += active_proc
+                group_rem += app_rem
+                if (
+                    upload.status in (GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED)
+                    and not is_active_generating
+                ):
+                    group_pending_ids.append(upload.id)
+
+        # Only include in "Ready for Generation" if there are remaining records AND pending uploads to run
+        if group_rem > 0 and group_pending_ids:
+            batches.append({
+                "cycle_number": c,
+                "date": d,
+                "batch_index": 1,
+                "file_count": len(group_pending_ids),
+                "upload_ids": group_pending_ids,
+                "processed_records": group_proc,
+                "total_records": group_tot,
+                "remaining_records": group_rem
+            })
             
     return batches
 
@@ -543,11 +626,27 @@ def preview_invoice(
     if result.output_pdf and os.path.exists(result.output_pdf):
         _preview_template_id = result.template_id or (detected_templates[0] if detected_templates else "")
         _approved_self_seal_pdf = get_approved_self_seal_pdf()
-        if _approved_self_seal_pdf and _preview_template_id:
+        if _approved_self_seal_pdf and _preview_template_id in ("nonvat_home", "nonvat_enterprise"):
+            doc_data = None
+            try:
+                parser_func = get_parser(_preview_template_id)
+                preview_data = parser_func(upload.file_path, limit=1)
+                if isinstance(preview_data, list) and preview_data:
+                    doc_data = preview_data[0]
+                elif isinstance(preview_data, dict):
+                    if "records" in preview_data and isinstance(preview_data["records"], list) and preview_data["records"]:
+                        doc_data = preview_data["records"][0]
+                    else:
+                        doc_data = preview_data
+            except Exception as e:
+                logger.warning("Could not extract preview doc_data: %s", e)
+
             append_self_seal_if_needed(
                 result.output_pdf,
                 _preview_template_id,
                 _approved_self_seal_pdf,
+                doc_data=doc_data,
+                is_print=True,
             )
     # ───────────────────────────────────────────────────────────
 
@@ -922,6 +1021,10 @@ def generate_batch_endpoint(
         InvoiceTemplate.is_active == True
     ).all()
     approved_templates = {t.template_code for t in app_tmpls}
+    
+    # Always consider spreadsheet-based utility templates as approved for generation
+    approved_templates.update({"lod", "vat_confirmation", "final_notice"})
+
     if "customer_letter_logo_v1print" in approved_templates:
         approved_templates.add("customer_migration_letter")
         approved_templates.add("customer_letter")
@@ -938,12 +1041,17 @@ def generate_batch_endpoint(
             active_run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
             if active_run and active_run.status == RunStatus.RUNNING:
                 continue
+            else:
+                upload.billing_run_id = None
         if upload.status not in (GmfUploadStatus.APPROVED, GmfUploadStatus.PENDING_APPROVAL, GmfUploadStatus.PARTIALLY_PROCESSED):
             continue
-        if not os.path.exists(upload.file_path):
-            continue
 
-        app_tot, app_rem, _ = _calculate_upload_approved_counts(upload, approved_templates)
+        resolved_path = _resolve_upload_file_path(upload)
+        if not resolved_path:
+            continue
+        upload.file_path = str(resolved_path)
+
+        app_tot, app_rem, *_ = _calculate_upload_approved_counts(upload, approved_templates)
         if app_rem <= 0:
             continue
 
@@ -1347,7 +1455,7 @@ def output_pdfs(
     return {"date": date_str, "cycle": cycle, "batch": batch, "files": pdfs}
 
 
-@router.get("/output/{date_str}/{cycle}/{batch}/{filename}")
+@router.get("/output/{date_str}/{cycle}/{batch}/{filename:path}")
 def serve_pdf(
     date_str: str, cycle: str, batch: str, filename: str,
     _: UserOut = Depends(require_admin)
@@ -1504,7 +1612,7 @@ def update_template_status(
                 upload.rejection_reason = None
                 continue
 
-            app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, approved_templates)
+            app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(upload, approved_templates)
             proc = upload.processed_records_count or 0
 
             if is_fully:
@@ -1587,7 +1695,7 @@ def update_template_status(
                     upload.rejection_reason = body.reason
                 continue
 
-            app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, approved_templates)
+            app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(upload, approved_templates)
             if app_tot == 0:
                 upload.status = GmfUploadStatus.REJECTED
                 upload.rejection_reason = body.reason
@@ -1778,12 +1886,11 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
     import shutil
     from app.db.base import SessionLocal
     from app.db.models import GmfUpload, GmfUploadStatus, NotificationEvent, NotificationEventType, InvoiceTemplate, TemplateApprovalStatus
-    from app.uploads.watcher import _detect_template, _get_cycle
+    from app.uploads.watcher import _detect_template, _get_cycle, _resolve_folder_type
 
     logger = logging.getLogger("gmf_upload")
     logger.setLevel(logging.INFO)
 
-    cycle_number = _get_cycle(folder_type)
     is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
     registered_count = 0
     failed_count = 0
@@ -1801,6 +1908,13 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 failed_count += 1
                 logger.error("Staged upload disappeared before registration: %s", source_path)
                 continue
+
+            resolved_folder_type = _resolve_folder_type(folder_type, source_path)
+            if resolved_folder_type is None:
+                failed_count += 1
+                logger.error("Could not assign a billing cycle from BILLDATE: %s", filename)
+                continue
+            cycle_number = _get_cycle(resolved_folder_type)
 
             template_detected, total_records_count = _detect_template(str(source_path))
             template_status = templates_cache.get(template_detected)
@@ -1820,7 +1934,14 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     templates_cache[template_detected] = TemplateApprovalStatus.PENDING
 
             elif is_approved:
-                final_path = settings.queue_incoming_dir / filename
+                # Respect global billing_mode so we don't auto-generate if in manual mode
+                from app.db.models import SystemSetting
+                billing_mode_setting = db.query(SystemSetting).filter(SystemSetting.key == "billing_mode").first()
+                billing_mode = billing_mode_setting.value if billing_mode_setting else "auto"
+                if billing_mode == "auto":
+                    final_path = settings.queue_incoming_dir / filename
+                else:
+                    final_path = settings.queue_pending_dir / filename
                 final_status = GmfUploadStatus.APPROVED
             elif is_rejected:
                 final_path = settings.queue_pending_dir / filename
@@ -1831,7 +1952,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
 
             existing = db.query(GmfUpload).filter(
                 GmfUpload.filename == filename,
-                GmfUpload.folder_type == folder_type,
+                GmfUpload.folder_type == resolved_folder_type,
             ).first()
             if existing:
                 if existing.status == GmfUploadStatus.COMPLETED:
@@ -1859,7 +1980,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 db.add(GmfUpload(
                     filename=filename,
                     file_path=str(final_path),
-                    folder_type=folder_type,
+                    folder_type=resolved_folder_type,
                     cycle_number=cycle_number,
                     template_detected=template_detected,
                     status=final_status,
@@ -1884,7 +2005,7 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 logger.error("Failed to move staged GMF %s to %s: %s", filename, final_path, move_err)
                 upload = db.query(GmfUpload).filter(
                     GmfUpload.filename == filename,
-                    GmfUpload.folder_type == folder_type,
+                    GmfUpload.folder_type == resolved_folder_type,
                 ).first()
                 if upload:
                     upload.status = GmfUploadStatus.FAILED
@@ -1916,12 +2037,11 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
     import logging
     from app.db.base import SessionLocal
     from app.db.models import GmfUpload, GmfUploadStatus, NotificationEvent, NotificationEventType, InvoiceTemplate, TemplateApprovalStatus
-    from app.uploads.watcher import _detect_template, _get_cycle, _should_skip
+    from app.uploads.watcher import _detect_template, _get_cycle, _should_skip, _resolve_folder_type
     
     logger = logging.getLogger("gmf_upload")
     logger.setLevel(logging.INFO)
     
-    cycle_number = _get_cycle(folder_type)
     is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
     
     temp_extract_dir = tempfile.mkdtemp(prefix="slt_zip_extract_")
@@ -1943,22 +2063,42 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
             settings.queue_incoming_dir.mkdir(parents=True, exist_ok=True)
             settings.queue_pending_dir.mkdir(parents=True, exist_ok=True)
             
+            billing_mode_setting = db.query(SystemSetting).filter(SystemSetting.key == "billing_mode").first()
+            billing_mode = billing_mode_setting.value if billing_mode_setting else "auto"
             templates_cache = {t.template_code: t.approval_status for t in db.query(InvoiceTemplate).all()}
+            
+            from core.gmf_splitter import count_documents_with_breakdown
             
             for idx, file_path in enumerate(extracted_files):
                 filename = file_path.name
+
+                resolved_folder_type = _resolve_folder_type(folder_type, file_path)
+                if resolved_folder_type is None:
+                    logger.error("Could not assign a billing cycle from BILLDATE: %s", filename)
+                    continue
+                cycle_number = _get_cycle(resolved_folder_type)
                 
-                template_detected, total_records_count = _detect_template(str(file_path))
+                template_detected, detected_count = _detect_template(str(file_path))
+                total_cnt, breakdown = count_documents_with_breakdown(str(file_path))
+                total_records_count = total_cnt if total_cnt > 0 else (detected_count or 1)
+                
                 is_approved = templates_cache.get(template_detected) == TemplateApprovalStatus.APPROVED if template_detected else False
+                is_rejected = templates_cache.get(template_detected) == TemplateApprovalStatus.REJECTED if template_detected else False
                 
                 if is_test:
                     final_path = settings.gmf_drive_path / folder_type / filename
                     final_status = GmfUploadStatus.PENDING_APPROVAL
                     final_path.parent.mkdir(parents=True, exist_ok=True)
                 else:
-                    if is_approved:
+                    if is_approved and billing_mode == "auto":
                         final_path = settings.queue_incoming_dir / filename
                         final_status = GmfUploadStatus.APPROVED
+                    elif is_approved and billing_mode == "manual":
+                        final_path = settings.queue_pending_dir / filename
+                        final_status = GmfUploadStatus.APPROVED
+                    elif is_rejected:
+                        final_path = settings.queue_pending_dir / filename
+                        final_status = GmfUploadStatus.REJECTED
                     else:
                         final_path = settings.queue_pending_dir / filename
                         final_status = GmfUploadStatus.PENDING_APPROVAL
@@ -1966,7 +2106,7 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
                 # 1. Update/Insert DB record FIRST
                 existing = db.query(GmfUpload).filter(
                     GmfUpload.filename == filename,
-                    GmfUpload.folder_type == folder_type
+                    GmfUpload.folder_type == resolved_folder_type
                 ).first()
                 if existing:
                     existing.file_path = str(final_path)
@@ -1976,14 +2116,16 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
                     existing.billing_run_id = None
                     existing.template_detected = template_detected
                     existing.total_records_count = total_records_count
+                    existing.template_breakdown = json.dumps(breakdown) if breakdown else None
                 else:
                     upload = GmfUpload(
                         filename=filename,
                         file_path=str(final_path),
-                        folder_type=folder_type,
+                        folder_type=resolved_folder_type,
                         cycle_number=cycle_number,
                         template_detected=template_detected,
                         total_records_count=total_records_count,
+                        template_breakdown=json.dumps(breakdown) if breakdown else None,
                         status=final_status,
                     )
                     db.add(upload)
@@ -2025,7 +2167,7 @@ def upload_gmf(
     _: UserOut = Depends(require_admin1_or_admin)
 ):
     """Accept direct GMF file or ZIP uploads."""
-    if folder_type not in ("Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "Test_GMFs", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "Customer_Letter_Logo_V1Print"):
+    if folder_type not in ("Cycle", "Cycle_1", "Cycle_2", "Cycle_3", "Cycle_4", "No_Cycle", "Test_GMFs", "LOD", "VAT_Confirmation", "Final_Notice", "Customer_Letter", "Customer_Letter_Logo_V1Print"):
         raise HTTPException(status_code=400, detail="Invalid folder_type.")
 
     staged_files: list[tuple[str, str]] = []

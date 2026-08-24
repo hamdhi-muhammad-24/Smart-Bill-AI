@@ -5,7 +5,7 @@ from reportlab.lib.colors import black, white
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_tax_section_printable
-from templates.vat_enterprise.config import COORDS, CHARGES_TABLE, FONTS, POST_TC_COLUMNS
+from templates.vat_enterprise.config import COORDS, RED_COORDS, CHARGES_TABLE, FONTS, POST_TC_COLUMNS
 
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
@@ -18,6 +18,10 @@ class VATEnterpriseRenderer(BaseRenderer):
 
     def render(self, data):
         self.check_red_notice(data)
+        # Pick the coordinate set to use for every field this render pass -
+        # RED_COORDS against Template_RED.pdf's background, COORDS against
+        # this template's own layout.pdf.
+        self.active_coords = RED_COORDS if self.is_red else COORDS
         # 1. Apply masks to cover baked-in template text/numbers on page 1
         self._apply_page1_mask()
 
@@ -34,6 +38,7 @@ class VATEnterpriseRenderer(BaseRenderer):
 
         # 4. Draw page 1 static/slip footer elements (QR codes, barcodes, slip text)
         self._draw_page1_footer(data)
+        self._draw_currency_label(data)
 
         # 5. Draw dynamic charges table
         y = self._draw_charges(data["product_labels"])
@@ -56,25 +61,36 @@ class VATEnterpriseRenderer(BaseRenderer):
             self.canvases[0][1].setFillColor(white)
             self.canvases[0][1].rect(x0, y0, x1 - x0, y1 - y0, stroke=0, fill=1)
 
+    def get_page1_y_min(self, default=165.0):
+        """RED floor, converted from vat_home's pixel-measured RED_PAGE1_FLOOR
+        (630.0, in vat_home's fitz top-origin system) into this renderer's
+        reportlab bottom-origin system. Both templates share the identical
+        Template_RED.pdf background and the same PAGE_H (842.25), so the
+        measured top edge of the arrears/credit-control notice box converts
+        directly: 842.25 - 630.0 = 212.25. Replaces the generic, unmeasured
+        220.0 fallback from the base class."""
+        return 212.25 if self.is_red else default
+
     def _draw_header(self, data):
         f = FONTS["header"]
-        self.text(*COORDS["telephone_number"], data["telephone_number"], size=f["size"])
-        self.text(*COORDS["account_number"], data["account_number"], size=f["size"])
-        self.text(*COORDS["invoice_number"], data["invoice_number"], size=f["size"])
-        self.text(*COORDS["billing_date"], data["billing_date"], size=f["size"])
+        self.text(*self.active_coords["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
+        self.text(*self.active_coords["telephone_number"], data["telephone_number"], size=f["size"])
+        self.text(*self.active_coords["account_number"], data["account_number"], size=f["size"])
+        self.text(*self.active_coords["invoice_number"], data["invoice_number"], size=f["size"])
+        self.text(*self.active_coords["billing_date"], data["billing_date"], size=f["size"])
         period = f"{data['billing_period_start']} - {data['billing_period_end']}"
-        self.text(*COORDS["billing_period"], period, size=f["size"])
+        self.text(*self.active_coords["billing_period"], period, size=f["size"])
 
     def _draw_vat_lines(self, data):
         if not data.get("show_vat_lines"):
             return
         f = FONTS["header"]
         if data.get("slt_vat_reg"):
-            self.text(*COORDS["slt_vat_reg"],
+            self.text(*self.active_coords["slt_vat_reg"],
                       f"SLT VAT Registration Number: {data['slt_vat_reg']}",
                       size=f["size"])
         if data.get("customer_vat_reg"):
-            self.text(*COORDS["customer_vat_reg"],
+            self.text(*self.active_coords["customer_vat_reg"],
                       f"Customer VAT Registration Number: {data['customer_vat_reg']}",
                       size=f["size"])
 
@@ -103,68 +119,88 @@ class VATEnterpriseRenderer(BaseRenderer):
 
         fa = FONTS["customer_addr"]
         self.multiline_block(
-            COORDS["customer_addr_x"], COORDS["customer_addr_start"],
-            addr_lines, line_height=COORDS["customer_addr_line_h"],
+            self.active_coords["customer_addr_x"], self.active_coords["customer_addr_start"],
+            addr_lines, line_height=self.active_coords["customer_addr_line_h"],
             size=fa["size"], bold=fa["bold"]
         )
 
     def _draw_badge(self):
         f = FONTS["badge"]
-        self.text(*COORDS["badge_text"], "ENTERPRISE", size=f["size"], bold=f["bold"])
+        self.text(*self.active_coords["badge_text"], "ENTERPRISE", size=f["size"], bold=f["bold"])
 
     def _draw_generation_id(self, data):
         f = FONTS["gen_id"]
         due = data.get("payment_due_date", "")
         try:
             dd, mm, yyyy = due.split("/")
-            due_mmddyy = f"{mm}{dd}{yyyy[-2:]}"
+            due_mmddyy = f"{mm}{dd}{yyyy}"
         except ValueError:
             due_mmddyy = ""
         ts = datetime.now().strftime("%H:%M:%S")
-        line = f'{data["source_filename"]}_{ts}_{due_mmddyy}'
-        self.text(*COORDS["gen_id_line"], line, size=f["size"])
+
+        # Clean the source filename by removing the random suffix (e.g. __sqg099w7_1.gmf)
+        source_file = data.get("source_filename", "")
+        if "__" in source_file:
+            source_file = source_file.split("__")[0] + "_"
+
+        line = f'{source_file}_{ts}_{due_mmddyy}'
+        self.text(*self.active_coords["gen_id_line"], line, size=f["size"])
         if data.get("customer_segment"):
-            self.text(*COORDS["gen_id_line2"], data["customer_segment"], size=f["size"])
+            self.text(*self.active_coords["gen_id_line2"], data["customer_segment"], size=f["size"])
 
     def _draw_summary_boxes(self, data):
         f = FONTS["summary_box"]
-        self.number(*COORDS["balance_bf"], data["balance_bf"], size=f["size"], align="center")
-        self.number(*COORDS["payments_received"], data["payments_received"], size=f["size"], align="center")
-        self.number(*COORDS["charges_period"], data["charges_period"], size=f["size"], align="center")
+        self.number(*self.active_coords["balance_bf"], data["balance_bf"], size=f["size"], align="center")
+        self.number(*self.active_coords["payments_received"], data["payments_received"], size=f["size"], align="center")
+        self.number(*self.active_coords["charges_period"], data["charges_period"], size=f["size"], align="center")
         
         f_total = FONTS["summary_total"]
-        self.number(*COORDS["total_payable"], data["total_payable"], size=f_total["size"], bold=True, align="center")
-        self.text(*COORDS["payment_due_date"], data["payment_due_date"], size=f_total["size"], bold=True, align="center")
+        self.number(*self.active_coords["total_payable"], data["total_payable"], size=f_total["size"], bold=True, align="center")
+        self.text(*self.active_coords["payment_due_date"], data["payment_due_date"], size=f_total["size"], bold=True, align="center")
 
     def _draw_page1_footer(self, data):
-        self.draw_static_payonline_qr(*COORDS["payonline_qr"], size=COORDS["payonline_qr_size"])
+        self.draw_static_payonline_qr(*self.active_coords["payonline_qr"], size=self.active_coords["payonline_qr_size"])
         self.draw_qr(
-            *COORDS["qr_code"],
+            *self.active_coords["qr_code"],
             account_number=data["account_number"],
             total_charges=data["total_charges"],
-            size=COORDS["qr_size"],
+            size=self.active_coords["qr_size"],
         )
         self.draw_barcode(
-            *COORDS["barcode"], data["account_number"],
-            width=COORDS["barcode_width"], height=COORDS["barcode_height"],
+            *self.active_coords["barcode"], data["account_number"],
+            width=self.active_coords["barcode_width"], height=self.active_coords["barcode_height"],
         )
         self.draw_slip_barcode(
-            *COORDS["slip_barcode"],
+            *self.active_coords["slip_barcode"],
             bill_ref=data["invoice_number"],
             total_charges=data["total_charges"],
-            width=COORDS["slip_barcode_width"],
-            height=COORDS["slip_barcode_height"],
+            width=self.active_coords["slip_barcode_width"],
+            height=self.active_coords["slip_barcode_height"],
         )
         f = FONTS["slip"]
-        self.text(*COORDS["slip_telephone"], data["telephone_number"], size=f["size"])
-        self.text(*COORDS["slip_invoice"], data["invoice_number"], size=f["size"])
+        self.text(*self.active_coords["slip_telephone"], data["telephone_number"], size=f["size"])
+        self.text(*self.active_coords["slip_invoice"], data["invoice_number"], size=f["size"])
         slip_name = (
             data.get("business_name")
             if data.get("address_name_not_required")
             else (data.get("business_name") or data.get("customer_name", ""))
         )
-        self.text(*COORDS["slip_customer"], slip_name or "", size=f["size"])
-        self.text(*COORDS["slip_account"], data["account_number"], size=f["size"])
+        self.text(*self.active_coords["slip_customer"], slip_name or "", size=f["size"])
+        self.text(*self.active_coords["slip_account"], data["account_number"], size=f["size"])
+
+    def _draw_currency_label(self, data):
+        """Currency label above the charges column (e.g. "(Rs.)") - read from
+        the GMF's ACCCURRENCYCODE tag (data['currency_code']), never a fixed
+        string, since a different account can have a different currency.
+        Must NOT be sourced from SLTACCCURRENCYCODE - that's SLT's internal
+        accounting code (e.g. "LKR"), a different tag/value entirely,
+        confirmed distinct in the real GMF."""
+        code = data.get("currency_code", "")
+        if not code:
+            return
+        f = FONTS["header"]
+        self.text(CHARGES_TABLE["amount_x"], CHARGES_TABLE["page1_y_start"] + 11.0,
+                  f"({code}.)", size=f["size"], bold=True, align="right")
 
     def _draw_charges(self, product_labels):
         y = CHARGES_TABLE["page1_y_start"]
@@ -294,8 +330,8 @@ class VATEnterpriseRenderer(BaseRenderer):
             
         c = self.canvas
         f = FONTS["total"]
-        x = COORDS["total_charges_label_x"]
-        ax = COORDS["total_charges_amount_x"]
+        x = self.active_coords["total_charges_label_x"]
+        ax = self.active_coords["total_charges_amount_x"]
         
         # Draw the top and bottom horizontal black lines around the total charges row
         c.setLineWidth(0.5)
@@ -566,12 +602,12 @@ class VATEnterpriseRenderer(BaseRenderer):
         for idx in range(len(self.canvases)):
             c = self.canvases[idx][1]
             if idx == 0:
-                x, y = COORDS["page_indicator_p1"]
+                x, y = self.active_coords["page_indicator_p1"]
                 # Mask the pre-baked "1 of 2" on page 1
                 c.setFillColor(white)
                 c.rect(x - 30, y - 2, 50, 12, stroke=0, fill=1)
             else:
-                x, y = COORDS["page_indicator_p2"]
+                x, y = self.active_coords["page_indicator_p2"]
                 # Mask the pre-baked page number on page 2+
                 c.setFillColor(white)
                 c.rect(x - 30, y - 2, 50, 12, stroke=0, fill=1)
@@ -580,7 +616,7 @@ class VATEnterpriseRenderer(BaseRenderer):
             c.setFillColor(black)
             c.drawRightString(x, y, f"{idx + 1}  of  {total_pages}")
             if idx > 0:
-                ix, iy = COORDS["page_invoice_no_p2"]
+                ix, iy = self.active_coords["page_invoice_no_p2"]
                 # Mask the invoice number area on page 2+
                 c.setFillColor(white)
                 c.rect(ix, iy - 2, 180, 14, stroke=0, fill=1)

@@ -39,7 +39,7 @@ from .lod.parser import parse_lod
 
 # New imports for VAT Confirmation
 from .vat_confirmation.renderer import VATConfirmationRenderer
-from .vat_confirmation.parser import load_recipients as parse_vat_confirmation
+from .vat_confirmation.parser import parse_vat_confirmation
 
 # New imports for Final Notice
 from .final_notice.render import FinalNoticeRenderer

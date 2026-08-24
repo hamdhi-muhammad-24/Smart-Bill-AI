@@ -20,6 +20,16 @@ PAGE_W = 595.5
 PAGE_H = 842.25
 
 COORDS = {
+    # "Tax Invoice" label, top-left, above the telephone number field - same
+    # addition made to vat_enterprise. Despite this file's older comments
+    # below claiming layout.pdf has "Tax Invoice" baked in as vector text,
+    # a direct re-check (fitz get_text('words')) returns zero words on the
+    # current layout.pdf - nothing is actually printed today, so this is
+    # drawn fresh. Placed 17pt above telephone_number, mirroring the same
+    # offset used for vat_enterprise's tax_invoice_label - a placement
+    # estimate, not a measured value; nudge if it's off.
+    "tax_invoice_label": (43.0, 97.8),
+
     # Header fields (left column boxes) - from vat_enterprise COORDS, converted
     # telephone_number corrected (fix pass 7) to (183.6, 112.8): x=183.6
     # matches VAT_HOME.pdf golden's measured word position (183.6, 104.2)

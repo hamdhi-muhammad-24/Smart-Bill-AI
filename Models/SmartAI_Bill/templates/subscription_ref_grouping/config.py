@@ -2,13 +2,13 @@ COORDS = {
     "slt_vat_reg_label":      (273.6, 748.2),
     "customer_vat_reg_label": (273.6, 739.5),
 
-    "gen_id_line": (273, 590),
-    "gen_id_line2": (273, 580.4),
+    "gen_id_line": (273, 592),
+    "gen_id_line2": (273, 584.4),
 
-    "account_number":       (155, 701),
-    "invoice_number":       (155, 672),
-    "billing_date":         (155, 643),
-    "billing_period":       (155, 615),
+    "account_number":       (155, 705),
+    "invoice_number":       (155, 674),
+    "billing_date":         (155, 646),
+    "billing_period":       (150, 618),
 
     "customer_name":        (280, 725),
     "customer_business":    (280, 715),
@@ -16,13 +16,13 @@ COORDS = {
     "customer_addr_x":      280,
     "customer_addr_line_h": 11,
 
-    "badge_text":           (330, 612),
+    "badge_text":           (325, 614),
 
-    "balance_bf":           (83, 512),
-    "payments_received":    (188, 512),
-    "charges_period":       (293, 512),
-    "total_payable":        (406, 512),
-    "payment_due_date":     (508, 512),
+    "balance_bf":           (83, 514),
+    "payments_received":    (188, 514),
+    "charges_period":       (293, 514),
+    "total_payable":        (406, 514),
+    "payment_due_date":     (508, 514),
 
     "taxes_label":          (43.2, 300),
     "taxes_amount":         (553, 300),
@@ -34,23 +34,23 @@ COORDS = {
     "payments_amount_x":    288,
     "payments_line_h":      10,
 
-    "barcode":              (375, 638),
+    "barcode":              (372, 642),
     "barcode_width":        100,
     "barcode_height":       20,
 
-    "qr_code":       (511.2, 88.4),
+    "qr_code":       (512, 92),
     "qr_size":       48,
 
-    "payonline_qr":       (498, 689),
+    "payonline_qr":       (498, 692),
     "payonline_qr_size":  48,
 
     "slip_barcode": (309, 110),
     "slip_barcode_width": 138,
     "slip_barcode_height": 25,
-    "slip_telephone":       (157, 120),
-    "slip_invoice":         (157, 97),
-    "slip_customer":        (157, 75),
-    "slip_account":         (157, 50),
+    "slip_telephone":       (157, 122),
+    "slip_invoice":         (157, 100),
+    "slip_customer":        (157, 78),
+    "slip_account":         (157, 52),
 }
 
 # 3-level hierarchy: subscription_ref → product_label → charges
@@ -70,13 +70,37 @@ CHARGES_TABLE = {
     "desc_max_x":               500,
     "amount_x":                 553,
     "subtotal_indent":          65,
+
+    # Vertical divider drawn next to the payments block - x position of the
+    # rule, matching product_label_grouping's/vat_enterprise's convention.
+    "vert_line_x":              308,
+
+    # Page-1 floor for the payments block specifically - NOT the same as
+    # page1_y_min (330), which is the charges/subscription-ref section's
+    # floor. Payments was historically fixed at y=220, well below 330. The
+    # real physical limit is the payment-slip footer (slip_customer/
+    # slip_account sit at y=75/50) - 90 stays clear of that while still
+    # leaving genuine room for a realistic number of payment rows (a
+    # higher value like 150 was tried first but proved too conservative:
+    # a normal 4-tax-line bill plus a payment row needs to reach lower
+    # than that to avoid a spurious page break).
+    "payments_y_min":           90,
+
+    # Page-1 floor for Taxes & Levies / Total Charges specifically - NOT
+    # page1_y_min (330) either. These were historically fixed at y=300 and
+    # y=239 respectively. 200 (tried first) was still too high: a normal
+    # bill with 4 tax lines (CESS, SSCL, Telecom Levy, VAT) plus Total
+    # Charges needs to reach further down than that before handing off to
+    # the payments block below it. 140 leaves genuine room while staying
+    # clear of payments_y_min (90).
+    "taxes_total_y_min":        140,
 }
 
 FONTS = {
     "header":            {"size": 9,   "bold": False},
     "customer_name":     {"size": 9.5, "bold": True},
     "customer_addr":     {"size": 9,   "bold": True},
-    "badge":             {"size": 11,  "bold": True},
+    "badge":             {"size": 18,  "bold": True},
     "summary_box":       {"size": 10,  "bold": False},
     "summary_total":     {"size": 10,  "bold": True},
     "subscription_ref":  {"size": 10,  "bold": True},

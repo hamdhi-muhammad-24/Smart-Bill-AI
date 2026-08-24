@@ -1,9 +1,10 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { clearToken, setToken, getToken, authMe } from '../lib/api'
 import { useMsal } from '@azure/msal-react'
-import { loginRequest } from './msalConfig'
+import { InteractionStatus } from '@azure/msal-browser'
+import { loginRequest, clearStaleMsalInteractions } from './msalConfig'
 
 export interface Session {
   role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'customer'
@@ -56,45 +57,64 @@ function buildSessionFromMe(me: {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const { instance, accounts, inProgress } = useMsal()
   const navigate = useNavigate()
-  const [session, setSession] = useState<Session | null>(null)
-  const [isChecking, setIsChecking] = useState(true)
+  
+  const [session, setSession] = useState<Session | null>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
+  
+  const [isChecking, setIsChecking] = useState(() => {
+    if (typeof window === 'undefined') return false
+    const url = window.location.href
+    const hasAuth = url.includes('code=') || url.includes('error=') || url.includes('id_token=') || sessionStorage.getItem('msal-post-login') === 'pending'
+    return hasAuth || !getToken()
+  })
+  const hasHandledRedirect = useRef(false)
+  const isInitializing = useRef(false)
 
   useEffect(() => {
     // Wait until MSAL has finished its initial interactions (including redirect handling)
-    if (inProgress !== 'none') {
+    if (inProgress !== InteractionStatus.None || isInitializing.current) {
       return
     }
 
     async function init() {
+      if (isInitializing.current) return
+      isInitializing.current = true
+
       try {
-        // Handle the redirect response from Microsoft login
-        // This is called on the page load AFTER the user is redirected back from Microsoft
-        const redirectResult = await instance.handleRedirectPromise()
+        // Handle redirect only once if this is a redirect return
+        if (!hasHandledRedirect.current) {
+          const redirectResult = await instance.handleRedirectPromise()
 
-        if (redirectResult && redirectResult.accessToken) {
-          // User just completed Microsoft login redirect
-          setToken(redirectResult.accessToken)
-          sessionStorage.removeItem('msal-post-login')
+          if (redirectResult && redirectResult.accessToken) {
+            hasHandledRedirect.current = true
+            setToken(redirectResult.accessToken)
+            sessionStorage.removeItem('msal-post-login')
 
-          const me = await authMe()
-          const s = buildSessionFromMe(me)
-          setSession(s)
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+            const me = await authMe()
+            const s = buildSessionFromMe(me)
+            setSession(s)
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
 
-          // Navigate to the right page
-          if (me.is_new_user) {
-            navigate('/request-access', { replace: true })
-          } else {
-            navigate('/role-select', { replace: true })
+            if (me.is_new_user) {
+              navigate('/request-access', { replace: true })
+            } else {
+              navigate('/role-select', { replace: true })
+            }
+            return
           }
-          return
+          hasHandledRedirect.current = true
         }
 
-        // No redirect result — check existing token
+        // Check existing token
         const currentToken = getToken()
 
         if (currentToken) {
-          // Verify the stored token is still valid
           try {
             const me = await authMe()
             const s = buildSessionFromMe(me)
@@ -127,26 +147,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return
         }
 
-        // No stored token — try silent token acquisition if MSAL has a cached account
-        if (accounts.length > 0) {
-          try {
-            const silentResult = await instance.acquireTokenSilent({
-              ...loginRequest,
-              account: accounts[0],
-            })
-            setToken(silentResult.accessToken)
-            const me = await authMe()
-            const s = buildSessionFromMe(me)
-            setSession(s)
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-          } catch {
-            clearToken()
-            localStorage.removeItem(STORAGE_KEY)
-            setSession(null)
-          }
-        } else {
-          setSession(null)
-        }
+        // No stored token — do not auto-login; require explicit user interaction
+        setSession(null)
       } catch (err) {
         console.error('AuthProvider init error:', err)
         clearToken()
@@ -154,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(null)
       } finally {
         setIsChecking(false)
+        isInitializing.current = false
       }
     }
 
@@ -169,7 +172,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null)
     localStorage.removeItem(STORAGE_KEY)
     clearToken()
-    instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin })
+    clearStaleMsalInteractions()
+    if (accounts.length > 0) {
+      instance.logoutRedirect({
+        account: accounts[0],
+        postLogoutRedirectUri: window.location.origin + '/login',
+      }).catch(() => {
+        clearStaleMsalInteractions()
+        navigate('/login', { replace: true })
+      })
+    } else {
+      navigate('/login', { replace: true })
+    }
   }
 
   return (

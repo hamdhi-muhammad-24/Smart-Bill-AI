@@ -99,27 +99,27 @@ def test_calculate_upload_approved_counts():
     )
 
     # When only vat_home is approved:
-    app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, {"vat_home"})
+    app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(upload, {"vat_home"})
     assert app_tot == 40
     assert app_rem == 40
     assert is_fully is False
 
     # After 10 records are processed:
     upload.processed_records_count = 10
-    app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, {"vat_home"})
+    app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(upload, {"vat_home"})
     assert app_tot == 40
     assert app_rem == 30
     assert is_fully is False
 
     # After all 40 vat_home records are processed:
     upload.processed_records_count = 40
-    app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, {"vat_home"})
+    app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(upload, {"vat_home"})
     assert app_tot == 40
     assert app_rem == 0
     assert is_fully is False
 
     # When both are approved:
-    app_tot, app_rem, is_fully = _calculate_upload_approved_counts(upload, {"vat_home", "nonvat_home"})
+    app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(upload, {"vat_home", "nonvat_home"})
     assert app_tot == 100
     assert app_rem == 60  # 100 - 40 already processed
     assert is_fully is True
@@ -134,12 +134,12 @@ def test_calculate_upload_approved_counts():
         template_detected="vat_home"
     )
 
-    app_tot, app_rem, is_fully = _calculate_upload_approved_counts(single_upload, {"vat_home"})
+    app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(single_upload, {"vat_home"})
     assert app_tot == 1
     assert app_rem == 1
     assert is_fully is True
 
-    app_tot, app_rem, is_fully = _calculate_upload_approved_counts(single_upload, {"nonvat_home"})
+    app_tot, app_rem, is_fully, *_ = _calculate_upload_approved_counts(single_upload, {"nonvat_home"})
     assert app_tot == 0
     assert app_rem == 0
     assert is_fully is False
@@ -187,7 +187,7 @@ def test_batch_limit_budget_allocation():
     allocated_total = 0
 
     for upload in uploads:
-        app_tot, app_rem, _ = _calculate_upload_approved_counts(upload, approved_templates)
+        app_tot, app_rem, *_ = _calculate_upload_approved_counts(upload, approved_templates)
         if app_rem <= 0:
             continue
 

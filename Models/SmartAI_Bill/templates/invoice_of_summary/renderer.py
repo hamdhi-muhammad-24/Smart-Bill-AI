@@ -1,6 +1,7 @@
 """Invoice of Summary Renderer (Sheet 18, BILLSTYLE=18)."""
 import os
 from datetime import datetime
+from reportlab.lib.colors import black
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_vat_reg_printable, is_tax_section_printable
@@ -20,6 +21,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._on_page1 = True
 
     def render(self, data):
+        self.check_red_notice(data)
         self._draw_header(data)
         self._draw_vat_lines(data)
         self._draw_customer(data)
@@ -27,9 +29,10 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._draw_generation_id(data)
         self._draw_summary_boxes(data)
         self._draw_page1_footer(data)
+        self._draw_currency_label(data)
 
-        self._draw_summary_of_invoice_fixed(data)
-        self._draw_total_charges_fixed(data)
+        self._draw_summary_of_invoice_dynamic(data)
+        self._draw_total_charges_dynamic(data)
 
         self._draw_charges_in_detail_flowing(data)
         self._draw_adjustments_flowing(data)
@@ -108,11 +111,17 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         due = data.get("payment_due_date", "")
         try:
             dd, mm, yyyy = due.split("/")
-            due_mmddyy   = f"{mm}{dd}{yyyy[-2:]}"
+            due_mmddyy   = f"{mm}{dd}{yyyy}"
         except ValueError:
             due_mmddyy = ""
         ts   = datetime.now().strftime("%H:%M:%S")
-        line = f'{data["source_filename"]}_{ts}{due_mmddyy}'
+
+        # Clean the source filename by removing the random suffix (e.g. __ugn81e1a_1.gmf)
+        source_file = data.get("source_filename", "")
+        if "__" in source_file:
+            source_file = source_file.split("__")[0] + "_"
+
+        line = f'{source_file}_{ts}{due_mmddyy}'
         self.text(*COORDS["gen_id_line"], line, size=f["size"])
         if data.get("customer_segment"):
             self.text(*COORDS["gen_id_line2"], data["customer_segment"],
@@ -167,79 +176,104 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self.text(*COORDS["slip_account"],  data["account_number"],
                   size=f["size"])
 
-    def _draw_summary_of_invoice_fixed(self, data):
-        """Fixed position summary block on page 1."""
-        c     = self.canvases[0][1]
+    def _draw_currency_label(self, data):
+        """Currency label above the charges column (e.g. "(Rs.)") - read from
+        the GMF's ACCCURRENCYCODE tag (data['currency_code']), never a fixed
+        string, since a different account can have a different currency.
+        Must NOT be sourced from SLTACCCURRENCYCODE - that's SLT's internal
+        accounting code (e.g. "LKR"), a different tag/value entirely,
+        confirmed distinct in the real GMF."""
+        code = data.get("currency_code", "")
+        if not code:
+            return
+        f = FONTS["header"]
+        self.text(CHARGES_TABLE["amount_x"], 480,
+                  f"({code}.)", size=f["size"], bold=True, align="right")
+
+    def _draw_summary_of_invoice_dynamic(self, data):
+        """Summary block on page 1, following the running self._y cursor
+        instead of a fixed page position."""
         x     = COORDS["summary_x"]
         amt_x = COORDS["summary_amount_x"]
-        y     = COORDS["summary_y_start"]
         lh    = COORDS["summary_line_h"]
         f     = FONTS["taxes"]
         fc    = 7
 
-        c.setFont("Helvetica", f["size"])
+        self._y = COORDS["summary_y_start"]
+
+        # "Summary of Invoice" heading + underline, above the block
+        c = self.canvas
+        c.setFont("Helvetica-Bold", FONTS["total"]["size"])
+        c.drawString(x, self._y, "Summary of Invoice")
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(x, self._y - 3, amt_x, self._y - 3)
+        self._y -= lh + 6
+
+        def _line(text, amount=None, bold=False, size=None):
+            self._ensure_space(needed=lh)
+            c = self.canvas
+            c.setFont("Helvetica-Bold" if bold else "Helvetica",
+                      size if size is not None else f["size"])
+            c.drawString(x, self._y, text)
+            if amount is not None:
+                c.drawRightString(amt_x, self._y, f"{amount:,.2f}")
+            self._y -= lh
 
         # BPR: suppress rental/usage subtotal lines if zero
         if data['rental_subtotal']:
-            c.drawString(x, y, "Subtotal Rental and Other Charges")
-            c.drawRightString(amt_x, y,
-                              f"{data['rental_subtotal']:,.2f}")
-            y -= lh
+            _line("Subtotal Rental and Other Charges", data['rental_subtotal'])
 
         if data['usage_subtotal']:
-            c.drawString(x, y, "Subtotal Usage charges")
-            c.drawRightString(amt_x, y,
-                              f"{data['usage_subtotal']:,.2f}")
-            y -= lh
+            _line("Subtotal Usage charges", data['usage_subtotal'])
 
         if data['discounts']:
-            c.setFont("Helvetica-Bold", f["size"])
-            c.drawString(x, y, "Discounts")
-            y -= lh
-            c.setFont("Helvetica", fc)
+            _line("Discounts", bold=True)
             for d in data['discounts']:
-                c.drawString(x, y, d["description"])
-                c.drawRightString(amt_x, y, f"{d['amount']:,.2f}")
-                y -= lh
+                _line(d["description"], d["amount"], size=fc)
 
         if data.get('adjustments_subtotal'):
-            c.setFont("Helvetica-Bold", f["size"])
-            c.drawString(x, y, "Subtotal Adjustment charges")
-            c.drawRightString(amt_x, y,
-                              f"{data['adjustments_subtotal']:,.2f}")
-            y -= lh
-            c.setFont("Helvetica", f["size"])
+            _line("Subtotal Adjustment charges",
+                  data['adjustments_subtotal'], bold=True)
 
         # BPR11/24: gate taxes
         has_nonzero = any(t['amount'] for t in data["taxes"])
         if data["taxes"] and is_tax_section_printable(
                 data.get('tax_status'), has_nonzero):
-            c.setFont("Helvetica-Bold", f["size"])
-            c.drawString(x, y, "Taxes & Levies")
-            y -= lh
-            c.setFont("Helvetica", fc)
+            _line("Taxes & Levies", bold=True)
             for t in data["taxes"]:
                 if t['amount']:
-                    c.drawString(x, y, t["name"])
-                    c.drawRightString(amt_x, y, f"{t['amount']:,.2f}")
-                    y -= lh
+                    _line(t["name"], t['amount'], size=fc)
 
-    def _draw_total_charges_fixed(self, data):
-        """Fixed position total on page 1."""
-        c  = self.canvases[0][1]
+    def _draw_total_charges_dynamic(self, data):
+        """Total, drawn right after the summary block finishes, following
+        the running self._y cursor instead of a fixed page position."""
+        self._ensure_space(needed=CHARGES_TABLE["line_h"] * 2)
+        self._y -= 10
+
         f  = FONTS["total"]
+        c  = self.canvas
         x  = COORDS["total_charges_label_x"]
-        y  = COORDS["total_charges_label_y"]
         ax = COORDS["total_charges_amount_x"]
+        y  = self._y
+
+        # Top and bottom horizontal lines framing the total charges row
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(x, y + 11, ax, y + 11)   # Top horizontal line
+        c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
+
         c.setFont("Helvetica-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
         c.drawRightString(ax, y, f"{data['total_charges']:,.2f}")
+
+        self._y -= CHARGES_TABLE["line_h"]
 
     # flowing helpers
 
     def _ensure_space(self, needed=None):
         needed = needed if needed is not None else CHARGES_TABLE["line_h"]
-        y_min  = (CHARGES_TABLE["page1_y_min"] if self._on_page1
+        y_min  = (self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self._on_page1
                   else CHARGES_TABLE["otherpage_y_min"])
         if self._y - needed < y_min:
             self.new_page()
@@ -265,6 +299,19 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             return
         self._y        = COORDS["charges_detail_y_start"]
         self._on_page1 = True
+
+        # "Charges in Detail" heading + underline, aligned to the same
+        # left/right margins the group/product/charge lines below use
+        # (group_ref_x / amount_x), so the whole section lines up.
+        x     = CHARGES_TABLE["group_ref_x"]
+        amt_x = CHARGES_TABLE["amount_x"]
+        c = self.canvas
+        c.setFont("Helvetica-Bold", FONTS["total"]["size"])
+        c.drawString(x, self._y, "Charges in Detail")
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(x, self._y - 3, amt_x, self._y - 3)
+        self._y -= CHARGES_TABLE["line_h"] + 6
 
         for group in data["charge_groups"]:
             if group["ref"]:
@@ -327,15 +374,16 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                     self._write_line(t["name"],
                                      amount=t["amount"], x=grx)
 
-        # Total Charges with enclosing box
+        # Total Charges framed by top/bottom horizontal lines (not a box)
         self._y -= CHARGES_TABLE["line_h"] * 0.3
         self._ensure_space(CHARGES_TABLE["line_h"] * 1.5)
 
         try:
-            self.canvas.rect(
-                32.5, self._y - 3, 528,
-                CHARGES_TABLE["line_h"] + 2,
-            )
+            c = self.canvas
+            c.setLineWidth(0.5)
+            c.setStrokeColor(black)
+            c.line(32.5, self._y + 9, 560.5, self._y + 9)    # Top horizontal line
+            c.line(32.5, self._y - 5, 560.5, self._y - 5)    # Bottom horizontal line
         except AttributeError:
             pass
 
@@ -351,6 +399,13 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             return
         grx    = CHARGES_TABLE["group_ref_x"]
         f_size = FONTS["payments"]["size"]
+
+        # Remember where this block starts so the usage-table vertical
+        # divider can extend up to start here, instead of at its own
+        # header lower down the page.
+        self._ensure_space()
+        self._divider_top_y   = self._y
+        self._divider_top_page = self.page_count() - 1
 
         self._write_line("Details of Payments Received",
                          bold=True, x=grx)
@@ -451,23 +506,56 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._y -= u["line_h"] * 1.5
 
     def _draw_usage_subsection(self, subsection):
-        """2-up left/right CDR row layout."""
+        """2-up left/right CDR row layout, separated by a vertical divider.
+        Left and right rows are always drawn as matched pairs (same y), so
+        the divider on each page just needs to run from the header box
+        down to wherever content actually stopped on that page - drawn
+        after the fact, once that's known, rather than at a fixed length."""
         rows = subsection.get("rows", [])
         if not rows:
             return
         u = USAGE_TABLE_2COL
+        vert_x = u["vert_line_x"]
 
         self._ensure_space(u["line_h"] * 3)
         self._draw_usage_headers()
 
+        top_y  = self._y + u["line_h"]
+        last_y = self._y
+
+        # First divider drawn overall: extend its top up to where "Details
+        # of Payments Received" started, if that was on this same page and
+        # hasn't already been used by an earlier subsection/section.
+        divider_top_y = getattr(self, "_divider_top_y", None)
+        divider_top_page = getattr(self, "_divider_top_page", None)
+        if divider_top_y is not None and divider_top_page == self.page_count() - 1:
+            top_y = divider_top_y
+        self._divider_top_y = None
+
         i = 0
         while i < len(rows):
+            page_before = self.page_count()
             self._ensure_space(u["line_h"])
+            if self.page_count() != page_before:
+                self._draw_usage_vert_divider(vert_x, top_y, last_y)
+                top_y = self._y + u["line_h"]
+
             self._draw_usage_row(rows[i],   side="left")
             if i + 1 < len(rows):
                 self._draw_usage_row(rows[i + 1], side="right")
+            last_y = self._y
             self._y -= u["line_h"]
             i += 2
+
+        self._draw_usage_vert_divider(vert_x, top_y, last_y)
+
+    def _draw_usage_vert_divider(self, x, top_y, bottom_y):
+        if top_y <= bottom_y:
+            return
+        c = self.canvas
+        c.setLineWidth(0.5)
+        c.setStrokeColor(black)
+        c.line(x, top_y, x, bottom_y)
 
     def _draw_usage_headers(self):
         """Left column only: box + headers."""
@@ -516,7 +604,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             c = self.canvases[idx][1]
             if idx == 0:
                 c.setFont("Helvetica", 9)
-                c.drawRightString(540, 750, f"1  of  {total}")
+                c.drawRightString(540, 753, f"1  of  {total}")
             else:
                 c.setFont("Helvetica-Bold", 10)
                 c.drawString(45, 795,

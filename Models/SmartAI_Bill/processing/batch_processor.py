@@ -11,7 +11,10 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from core.template_identifier import identify_template
 from core.gmf_splitter import split_gmf_documents, write_doc_to_temp
+from core.gmf_reader import parse_filename, categorize_bill_handling_code
+from core.self_seal_appender import get_approved_self_seal_pdf, append_self_seal_if_needed
 from templates.registry import get_renderer, get_parser
+from templates.nonvat_print.renderer import NonVATPrintRenderer
 from config import (
     DEFAULT_WORKERS, PROCESSED_DIR, FAILED_DIR, MOVE_AFTER_PROCESS,
     OUTPUT_PDF_NAMES, OUTPUT_PDF_NAME_DEFAULT,
@@ -30,6 +33,9 @@ class ProcessingResult:
         self.duration = duration
         self.attempt = attempt
         self.doc_index = doc_index
+        # Populated for summary_statement template only.
+        # Format: {"customer_ref": "CRxxxxxxxxx", "account_nos": ["...", ...], "pdf_name": "..."}
+        self.summary_meta = None
 
 
 def process_single_file(args):
@@ -152,7 +158,16 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
                 elif isinstance(data, dict) and "records" in data and isinstance(data["records"], list) and len(data["records"]) > lim:
                     data["records"] = data["records"][off : (off + lim)]
 
-        renderer = RendererClass()
+        file_info = parse_filename(source_filename)
+        bill_handling = file_info.get("bill_handling", "")
+        category = categorize_bill_handling_code(bill_handling)
+        is_print_invoice = (category == "print")
+
+        if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):
+            renderer = NonVATPrintRenderer()
+        else:
+            renderer = RendererClass()
+
         renderer.render(data)
 
         os.makedirs(temp_pdf_dir, exist_ok=True)
@@ -163,6 +178,16 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
                 output_path = os.path.join(temp_pdf_dir, fname)
                 with open(output_path, "wb") as f:
                     f.write(pdf_bytes)
+                if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):
+                    approved_self_seal = get_approved_self_seal_pdf()
+                    if approved_self_seal:
+                        append_self_seal_if_needed(
+                            output_path,
+                            template_id,
+                            approved_self_seal,
+                            doc_data=data if isinstance(data, dict) else None,
+                            is_print=True,
+                        )
                 last_path = output_path
             result.output_pdf = last_path
             gen_count = len(renderer.generated_pdfs)
@@ -189,9 +214,36 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
 
             result.output_pdf = output_path
             renderer.save(output_path)
+
+            if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):
+                approved_self_seal = get_approved_self_seal_pdf()
+                if approved_self_seal:
+                    append_self_seal_if_needed(
+                        output_path,
+                        template_id,
+                        approved_self_seal,
+                        doc_data=data if isinstance(data, dict) else None,
+                        is_print=True,
+                    )
+
             gen_count = len(getattr(renderer, "generated_pdfs", []))
             result.output_pdf_count = max(1, gen_count) if gen_count > 0 else 1
             result.success = True
+
+        # Capture summary statement metadata for folder grouping
+        if template_id == "summary_statement" and result.success and isinstance(data, dict):
+            customer_ref = re.sub(r'[^A-Za-z0-9_-]+', '_', str(data.get("customer_ref_no", "") or "")).strip('_')
+            account_nos = [
+                str(a.get("account_no", "")).strip()
+                for a in data.get("accounts", [])
+                if a.get("account_no", "").strip()
+            ]
+            if customer_ref:
+                result.summary_meta = {
+                    "customer_ref": customer_ref,
+                    "account_nos": account_nos,
+                    "pdf_name": os.path.basename(result.output_pdf) if result.output_pdf else "",
+                }
 
     except Exception as e:
         result.error = f"Doc {doc_index}: {type(e).__name__}: {str(e)}"

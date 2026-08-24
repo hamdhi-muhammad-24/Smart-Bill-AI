@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, LogOut, Moon, Sun, FileSearch, Eye, Zap, Archive, Bell, LayoutTemplate } from 'lucide-react'
+import { LayoutDashboard, Menu, LogOut, Moon, Sun, FileSearch, Eye, Zap, Archive, Bell, LayoutTemplate, LayoutGrid } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../auth/AuthProvider'
@@ -8,7 +8,7 @@ import { authMe } from '../lib/api'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
-import { useTheme } from 'next-themes'
+import { useTheme } from '@/components/ThemeProvider'
 import Brand from './Brand'
 
 interface NavItem {
@@ -96,7 +96,7 @@ export default function AdminLayout() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const { logout } = useAuth()
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
+  const { toggleTheme } = useTheme()
 
   const { data: me } = useQuery({
     queryKey: ['me'],
@@ -149,11 +149,23 @@ export default function AdminLayout() {
 
           <span className="flex-1" />
 
+          {/* Switch Portal Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8.5 gap-2 rounded-lg border-border/80 bg-background/50 hover:bg-accent text-xs font-semibold shadow-xs transition-all text-foreground"
+            onClick={() => navigate('/role-select')}
+            title="Switch to another portal"
+          >
+            <LayoutGrid size={14} className="text-[#0066b3] dark:text-[#00b2e3]" />
+            <span className="hidden sm:inline">Switch Portal</span>
+          </Button>
+
           <Button
             variant="ghost"
             size="icon"
             className="rounded-full"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            onClick={toggleTheme}
             title="Toggle theme"
           >
             <Sun className="h-5 w-5 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
@@ -162,7 +174,7 @@ export default function AdminLayout() {
           </Button>
 
           {me?.email && (
-            <span className="hidden rounded-full border border-border bg-muted/45 px-3 py-1 text-xs font-medium text-muted-foreground sm:block">{me.email}</span>
+            <span className="hidden rounded-full border border-border bg-muted/45 px-3 py-1 text-xs font-medium text-muted-foreground lg:block">{me.email}</span>
           )}
 
           <Button
