@@ -163,24 +163,24 @@ def _lookup_upload_record(filename, meta_upload_id=None, run_id=None):
         time.sleep(1)
     return upload
 
-def _update_billing_run(db, run_id, generated_count, cycle_base_dir=None):
+def _update_billing_run(db, run_id, generated_count=0, cycle_base_dir=None):
     """Update BillingRun with generated count and check completion status."""
     if not run_id:
         return
     
-    db.execute(
-        sql_update(BillingRun)
-        .where(BillingRun.id == run_id)
-        .values(succeeded=BillingRun.succeeded + generated_count)
-    )
-    db.flush()
+    if generated_count > 0:
+        db.execute(
+            sql_update(BillingRun)
+            .where(BillingRun.id == run_id)
+            .values(succeeded=BillingRun.succeeded + generated_count)
+        )
+        db.flush()
     
     run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
     if run:
         if cycle_base_dir:
             run.output_path = str(cycle_base_dir)
         if run.succeeded + run.failed >= run.total_accounts:
-            run.total_accounts = run.succeeded + run.failed
             run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
             run.finished_at = datetime.now()
 
@@ -569,20 +569,12 @@ def _worker_process(worker_id):
                     if upload:
                         upload.processed_records_count = (upload.processed_records_count or 0) + generated_count
                         
-                        if is_eof:
-                            # True EOF reached: override initial estimate with precise processed count
-                            upload.total_records_count = upload.processed_records_count
-                            run_id_to_update = run_id or upload.billing_run_id
-                            if run_id_to_update:
-                                run = db.query(BillingRun).filter(BillingRun.id == run_id_to_update).first()
-                                if run:
-                                    run.total_accounts = run.succeeded + run.failed
-                        elif not upload.total_records_count or upload.total_records_count <= 1:
+                        if not upload.total_records_count or upload.total_records_count <= 1:
                             try:
                                 real_total = count_documents(str(working_path))
-                                upload.total_records_count = max(real_total, total_count)
+                                upload.total_records_count = max(real_total, upload.processed_records_count, total_count)
                             except Exception:
-                                upload.total_records_count = max(upload.total_records_count or 0, total_count)
+                                upload.total_records_count = max(upload.total_records_count or 0, upload.processed_records_count, total_count)
 
                         if upload.processed_records_count >= upload.total_records_count and upload.total_records_count > 0:
                             processed_dest = settings.gmf_drive_path / "Processed" / (cycle_label or "unknown")
@@ -663,7 +655,7 @@ def _worker_process(worker_id):
                         
                         run_id_to_update = run_id or upload.billing_run_id
                         if run_id_to_update:
-                            _update_billing_run(db, run_id_to_update, generated_count, cycle_base_dir)
+                            _update_billing_run(db, run_id_to_update, 0, cycle_base_dir)
                         
                         db.commit()
             except Exception as move_err:
