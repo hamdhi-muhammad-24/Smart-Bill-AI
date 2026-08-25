@@ -3,6 +3,8 @@ import os
 from datetime import datetime
 
 from reportlab.lib.colors import black, white
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_tax_section_printable
@@ -11,11 +13,37 @@ from templates.nonvat_enterprise.config import COORDS, CHARGES_TABLE, FONTS, POS
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template), registered under names distinct from Helvetica so no other
+# template is affected.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
+    pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
+
 
 class NonVATEnterpriseRenderer(BaseRenderer):
+    FONT_NAME = "Calibri"
 
     def __init__(self):
         super().__init__(TEMPLATE_PDF)
+
+    def text(self, x, y, value, size=10, bold=False, align="left"):
+        """Override the base Helvetica text() with Calibri, scoped to this
+        template only."""
+        if value is None or value == "":
+            return
+        c = self.canvas
+        font = "Calibri-Bold" if bold else "Calibri"
+        c.setFont(font, size)
+        c.setFillColor(black)
+        text = str(value)
+        if align == "right":
+            c.drawRightString(x, y, text)
+        elif align == "center":
+            c.drawCentredString(x, y, text)
+        else:
+            c.drawString(x, y, text)
 
     def render(self, data):
         self.check_red_notice(data)
@@ -291,7 +319,7 @@ class NonVATEnterpriseRenderer(BaseRenderer):
         c.line(x, y + 11, ax, y + 11)   # Top horizontal line
         c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
         
-        c.setFont("Helvetica-Bold", f["size"])
+        c.setFont("Calibri-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
         c.drawRightString(ax, y, f"{data['total_charges']:,.2f}")
 
@@ -344,7 +372,7 @@ class NonVATEnterpriseRenderer(BaseRenderer):
             col_width = cd["x_end"] - cd["x_start"]
             xs = [cd["x_start"], cd["x_start"] + col_width * 0.35,
                   cd["x_start"] + col_width * 0.60]
-            c.setFont("Helvetica-Bold", 7)
+            c.setFont("Calibri-Bold", 7)
             for i, h in enumerate(["Date &Time", "Dialled No.", "Duration"]):
                 c.drawString(xs[i], state["y"], h)
             c.drawRightString(cd["x_end"], state["y"], "Charge")
@@ -364,7 +392,7 @@ class NonVATEnterpriseRenderer(BaseRenderer):
         def draw_text(text, bold=False, size=9, x=None):
             c = self.canvas
             cd = col_def()
-            c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+            c.setFont("Calibri-Bold" if bold else "Calibri", size)
             c.setFillColor(black)
             c.drawString(x if x is not None else cd["x_start"], state["y"], text)
             record(state["y"])
@@ -372,7 +400,7 @@ class NonVATEnterpriseRenderer(BaseRenderer):
         def draw_amount(value, bold=False, size=9, fmt="{:,.2f}"):
             c = self.canvas
             cd = col_def()
-            c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+            c.setFont("Calibri-Bold" if bold else "Calibri", size)
             c.drawRightString(cd["x_end"], state["y"], fmt.format(value))
             record(state["y"])
 
@@ -463,7 +491,7 @@ class NonVATEnterpriseRenderer(BaseRenderer):
                     duration = row[3] if len(row) > 3 else ""
                     charge = row[4] if len(row) > 4 else "0"
                     c = self.canvas
-                    c.setFont("Helvetica", 7)
+                    c.setFont("Calibri", 7)
                     c.setFillColor(black)
                     c.drawString(cd["x_start"], state["y"], f"{date} {time_}".strip())
                     c.drawString(cd["x_start"] + col_width * 0.35, state["y"], str(dialled))
@@ -533,10 +561,10 @@ class NonVATEnterpriseRenderer(BaseRenderer):
                 x, y = COORDS["page_indicator_p1"]
             else:
                 x, y = COORDS["page_indicator_p2"]
-            c.setFont("Helvetica", f["size"])
+            c.setFont("Calibri", f["size"])
             c.drawRightString(x, y, f"{idx + 1}  of  {total_pages}")
             if idx > 0:
                 ix, iy = COORDS["page_invoice_no_p2"]
-                c.setFont("Helvetica-Bold", inv_f["size"])
+                c.setFont("Calibri-Bold", inv_f["size"])
                 c.drawString(ix, iy,
                              f'Invoice No.{data["invoice_number"]}')
