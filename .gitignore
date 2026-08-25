@@ -69,3 +69,7 @@ local_gmf_uploads/
 Models/SmartAI_Bill/templates/envelope/Image/*.jpg
 Models/SmartAI_Bill/templates/envelope/Image/*.png
 Models/SmartAI_Bill/templates/envelope/Image/*.jpeg
+
+# Licensed fonts (Calibri) - not redistributable, kept local-only
+Models/SmartAI_Bill/templates/vat_enterprise/fonts/calibri.ttf
+Models/SmartAI_Bill/templates/vat_enterprise/fonts/calibrib.ttf
