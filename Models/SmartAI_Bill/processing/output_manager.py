@@ -12,7 +12,7 @@ from config import BATCH_FOLDER_SIZE, OUTPUT_BASE_DIR
 
 
 def get_output_roots():
-    """Return list of valid output root paths (checking ./output and drive Output)."""
+    """Return list of valid output root paths."""
     roots = []
     try:
         from app.core.config import settings
@@ -22,11 +22,11 @@ def get_output_roots():
     except Exception:
         pass
 
-    if os.path.exists("./output") and "./output" not in roots:
-        roots.append("./output")
-
     if os.path.exists(OUTPUT_BASE_DIR) and OUTPUT_BASE_DIR not in roots:
         roots.append(OUTPUT_BASE_DIR)
+
+    if os.path.exists("./output") and "./output" not in roots:
+        roots.append("./output")
 
     return roots if roots else [OUTPUT_BASE_DIR]
 
@@ -34,8 +34,7 @@ def get_output_roots():
 def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None):
     """
     Move generated PDFs from temp_pdf_dir into organised date/cycle/batch folders.
-
-    Returns a list of batch folder paths that were created.
+    Direct single move without duplicate copies.
     """
     if cycle_label == "Test_GMFs":
         if log_callback:
@@ -72,9 +71,9 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
         cycle_label = "Cycle_1"
 
     today = datetime.now().strftime("%Y-%m-%d")
-    base = os.path.join(OUTPUT_BASE_DIR, today, cycle_label)
+    target_root = get_output_roots()[0]
+    base = os.path.join(target_root, today, cycle_label)
     os.makedirs(base, exist_ok=True)
-
 
     if log_callback:
         log_callback(
@@ -90,47 +89,18 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
         batch_dir = os.path.join(base, f"Batch_{current_batch_num}")
         os.makedirs(batch_dir, exist_ok=True)
         
-        existing_files = [f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")]
-        existing_count = len(existing_files)
-        
-        space_left = BATCH_FOLDER_SIZE - existing_count
-        
-        if space_left <= 0:
+        existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
+        if existing_count >= BATCH_FOLDER_SIZE:
             current_batch_num += 1
             continue
             
         moved_in_this_batch = 0
-        while pdf_index < len(pdfs):
-            existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
-            if existing_count >= BATCH_FOLDER_SIZE:
-                current_batch_num += 1
-                batch_dir = os.path.join(base, f"Batch_{current_batch_num}")
-                os.makedirs(batch_dir, exist_ok=True)
-                existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
-
+        while pdf_index < len(pdfs) and existing_count < BATCH_FOLDER_SIZE:
             pdf_path = pdfs[pdf_index]
             dest = os.path.join(batch_dir, os.path.basename(pdf_path))
-            
-            try:
-                local_base = os.path.join("./output", today, cycle_label)
-                # Find local batch dir with < 10 PDFs
-                b_num = 1
-                while True:
-                    local_vm_batch_dir = os.path.join(local_base, f"Batch_{b_num}")
-                    os.makedirs(local_vm_batch_dir, exist_ok=True)
-                    local_cnt = len([f for f in os.listdir(local_vm_batch_dir) if f.lower().endswith(".pdf")])
-                    if local_cnt < BATCH_FOLDER_SIZE:
-                        break
-                    b_num += 1
-                target_copy = os.path.join(local_vm_batch_dir, os.path.basename(pdf_path))
-                if os.path.abspath(pdf_path) != os.path.abspath(target_copy):
-                    shutil.copy2(pdf_path, target_copy)
-            except Exception as copy_err:
-                if log_callback:
-                    log_callback(f"  Warning: failed to duplicate copy to VM local folder: {copy_err}")
-                    
             if os.path.abspath(pdf_path) != os.path.abspath(dest):
                 shutil.move(pdf_path, dest)
+            existing_count += 1
             moved_in_this_batch += 1
             pdf_index += 1
             

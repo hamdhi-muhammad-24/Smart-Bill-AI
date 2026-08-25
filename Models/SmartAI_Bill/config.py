@@ -14,7 +14,7 @@ FAILED_DIR    = os.path.join(GMF_DRIVE_PATH, "Failed")
 LOGS_DIR      = os.path.join(BASE_DIR, "logs")
 
 # ── Output — organised as Output/<date>/<Cycle_N>/Batch_N/ ────────────────────
-OUTPUT_BASE_DIR = os.path.join(GMF_DRIVE_PATH, "Output")
+OUTPUT_BASE_DIR = os.environ.get("OUTPUT_DIR", os.path.join(ROOT_DIR, "output"))
 
 # Legacy ZIP output dir (kept for backwards compat, not used by default)
 OUTPUT_ZIP_DIR = os.path.join(GMF_DRIVE_PATH, "Output_ZIPs")
