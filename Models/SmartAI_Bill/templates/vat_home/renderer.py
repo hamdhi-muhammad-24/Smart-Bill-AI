@@ -243,13 +243,18 @@ class VATHomeRenderer:
                       size=8)
 
     def _draw_customer(self, data):
+        # Show every existing field, in order: ADDRESSNAME -> POSITION ->
+        # DEPARTMENT -> BUSINESSNAME -> address lines -> zip code, same as
+        # vat_enterprise. customer_name was previously never drawn at all.
         addr_lines = []
+        if data.get("customer_name"):
+            addr_lines.append(data["customer_name"])
         if data.get("position"):
             addr_lines.append(data["position"])
-        if data.get("business_name"):
-            addr_lines.append(data["business_name"])
         if data.get("department"):
             addr_lines.append(data["department"])
+        if data.get("business_name") and data["business_name"] != data.get("customer_name"):
+            addr_lines.append(data["business_name"])
         addr_lines.extend(data.get("address_lines", []))
         if data.get("zip_code"):
             addr_lines.append(data["zip_code"])

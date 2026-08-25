@@ -123,22 +123,21 @@ class VATEnterpriseRenderer(BaseRenderer):
                       size=f["size"])
 
     def _draw_customer(self, data):
-        # Build address block dynamically
+        # Build address block dynamically - show every existing field, in
+        # order, regardless of address_name_not_required. That flag used to
+        # suppress customer_name/position/department entirely and only show
+        # business_name; now every non-empty field prints in the standard
+        # ADDRESSNAME -> POSITION -> DEPARTMENT -> BUSINESSNAME order.
         addr_lines = []
-        if data.get("address_name_not_required"):
-            top = data.get("business_name") or data.get("customer_name", "")
-            if top:
-                addr_lines.append(top)
-        else:
-            if data.get("customer_name"):
-                addr_lines.append(data["customer_name"])
-            if data.get("position"):
-                addr_lines.append(data["position"])
-            if data.get("department"):
-                addr_lines.append(data["department"])
-            if data.get("business_name") and data["business_name"] != data.get("customer_name"):
-                addr_lines.append(data["business_name"])
-        
+        if data.get("customer_name"):
+            addr_lines.append(data["customer_name"])
+        if data.get("position"):
+            addr_lines.append(data["position"])
+        if data.get("department"):
+            addr_lines.append(data["department"])
+        if data.get("business_name") and data["business_name"] != data.get("customer_name"):
+            addr_lines.append(data["business_name"])
+
         # Add the parsed address lines
         addr_lines.extend(data.get("address_lines", []))
         
