@@ -167,6 +167,15 @@ def create_app() -> FastAPI:
             except Exception as e:
                 import logging
                 logging.getLogger("uvicorn").warning(f"Worker threads startup skipped: {e}")
+
+        # Start SFTP inbound poller if enabled
+        if os.environ.get("SFTP_ENABLED", "false").lower() == "true":
+            try:
+                from app.sftp.sftp_poller import start_sftp_poller
+                start_sftp_poller()
+            except Exception as e:
+                import logging
+                logging.getLogger("uvicorn").warning(f"SFTP Poller startup skipped: {e}")
         
     return application
 

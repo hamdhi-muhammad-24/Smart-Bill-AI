@@ -55,6 +55,14 @@ services:
       OUTPUT_DIR: /app/output
       QUEUE_INCOMING_DIR: /app/queue/incoming
       QUEUE_PENDING_DIR: /app/queue/pending
+      SFTP_ENABLED: ${SFTP_ENABLED:-false}
+      SFTP_HOST: ${SFTP_HOST:-127.0.0.1}
+      SFTP_PORT: ${SFTP_PORT:-22}
+      SFTP_USERNAME: ${SFTP_USERNAME:-root}
+      SFTP_PASSWORD: ${SFTP_PASSWORD:-}
+      SFTP_KEY_PATH: ${SFTP_KEY_PATH:-}
+      SFTP_REMOTE_DIR: ${SFTP_REMOTE_DIR:-/var/slt-billing/mock_remote_slt}
+      SFTP_POLL_INTERVAL_SECONDS: ${SFTP_POLL_INTERVAL_SECONDS:-1}
       TZ: Asia/Colombo
     ports:
       - "8000:8000"

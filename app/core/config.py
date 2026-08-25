@@ -60,6 +60,16 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
 
+    # ── SFTP Remote Inbound Poller ─────────────────────────────
+    sftp_enabled: bool = False
+    sftp_host: str = "127.0.0.1"
+    sftp_port: int = 22
+    sftp_username: str = "root"
+    sftp_password: str = ""
+    sftp_key_path: str = ""
+    sftp_remote_dir: str = "/var/slt-billing/mock_remote_slt"
+    sftp_poll_interval_seconds: int = 1
+
     # AWS — region + S3 bucket for PDF storage and SES email
     aws_region: str = "ap-southeast-1"
     s3_bucket: str = "slt-bill-pdfs-prod"
