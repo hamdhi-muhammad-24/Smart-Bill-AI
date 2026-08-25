@@ -240,17 +240,23 @@ export default function GenerationHub() {
     }
   }
   
-  const { data: pendingBatches, isLoading: loadingBatches } = useQuery({
-    queryKey: ['billing-pending-batches'],
-    queryFn: () => getPendingBatches(),
-    refetchInterval: 3000,
-    placeholderData: (prev) => prev,
-  })
-
   const { data: runs, isLoading: loadingRuns } = useQuery({
     queryKey: ['billing-runs'],
     queryFn: () => getRuns(),
-    refetchInterval: 3000,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      const isActive = data?.some((r: any) => r.status === 'RUNNING' || r.status === 'PENDING')
+      return isActive ? 3000 : 8000
+    },
+    placeholderData: (prev) => prev,
+  })
+
+  const hasActiveRun = runs?.some(r => r.status === 'RUNNING' || r.status === 'PENDING')
+
+  const { data: pendingBatches, isLoading: loadingBatches } = useQuery({
+    queryKey: ['billing-pending-batches'],
+    queryFn: () => getPendingBatches(),
+    refetchInterval: hasActiveRun ? 3000 : 8000,
     placeholderData: (prev) => prev,
   })
 

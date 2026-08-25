@@ -271,9 +271,15 @@ def download_base_template_pdf(template_id: int, db: DbSession = Depends(get_db)
     )
 
 
+_BASE_PREVIEW_CACHE: dict[int, bytes] = {}
+
+
 @router.get("/templates/{template_id}/preview-base")
 def preview_base_template(template_id: int, db: DbSession = Depends(get_db)):
-    """Render the empty base envelope PDF as a PNG image."""
+    """Render the empty base envelope PDF as a PNG image (with memory caching)."""
+    if template_id in _BASE_PREVIEW_CACHE:
+        return StreamingResponse(io.BytesIO(_BASE_PREVIEW_CACHE[template_id]), media_type="image/png")
+
     _ensure_envelope_templates_seeded(db)
     tmpl = db.query(EnvelopeTemplate).filter(EnvelopeTemplate.id == template_id).first()
     if not tmpl:
@@ -282,6 +288,7 @@ def preview_base_template(template_id: int, db: DbSession = Depends(get_db)):
         raise HTTPException(404, f"Base PDF not found on disk: {tmpl.base_pdf_path}")
 
     png_bytes = _render_pdf_page_as_png(tmpl.base_pdf_path, dpi=120)
+    _BASE_PREVIEW_CACHE[template_id] = png_bytes
     return StreamingResponse(io.BytesIO(png_bytes), media_type="image/png")
 
 

@@ -42,7 +42,7 @@ export default function EnvelopeDashboard() {
   const { data: templates, isLoading, refetch } = useQuery({
     queryKey: ['envelopeTemplates'],
     queryFn: fetchEnvelopeTemplates,
-    refetchInterval: 10000,
+    refetchInterval: 15000,
   })
 
   // Full Screen PDF Modal State

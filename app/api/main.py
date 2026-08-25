@@ -159,12 +159,14 @@ def create_app() -> FastAPI:
             import logging
             logging.getLogger("uvicorn").warning(f"Database schema initialization: {e}")
 
-        try:
-            from app.billing.worker_queue import start_worker_threads
-            start_worker_threads(4)
-        except Exception as e:
-            import logging
-            logging.getLogger("uvicorn").warning(f"Worker threads startup skipped: {e}")
+        import os
+        if os.environ.get("RUN_IN_PROCESS_WORKER", "true").lower() == "true":
+            try:
+                from app.billing.worker_queue import start_worker_threads
+                start_worker_threads(4)
+            except Exception as e:
+                import logging
+                logging.getLogger("uvicorn").warning(f"Worker threads startup skipped: {e}")
         
     return application
 

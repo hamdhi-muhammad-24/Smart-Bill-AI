@@ -37,6 +37,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 4
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/slt_ebill
       CELERY_BROKER_URL: redis://redis:6379/0
@@ -49,6 +50,7 @@ services:
       EMAIL_FROM: "SLT Billing <billing@slt.lk>"
       CORS_ORIGINS: '["http://localhost", "http://127.0.0.1", "http://206.189.159.175", "http://206.189.159.175:8080", "https://smartbills.sltdigitallab.lk"]'
       LOG_LEVEL: INFO
+      RUN_IN_PROCESS_WORKER: "false"
       GMF_DRIVE_PATH: /app/gmf_uploads
       OUTPUT_DIR: /app/output
       QUEUE_INCOMING_DIR: /app/queue/incoming

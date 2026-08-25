@@ -57,13 +57,13 @@ export default function Dashboard() {
   const { data: stats, isLoading: loadingStats } = useQuery({
     queryKey: ['billing-stats'],
     queryFn: getStats,
-    refetchInterval: 3000,
+    refetchInterval: 8000,
   })
 
   const { data: events, isLoading: loadingEvents } = useQuery({
     queryKey: ['billing-events'],
     queryFn: () => getNotifications(false),
-    refetchInterval: 3000,
+    refetchInterval: 8000,
   })
 
   return (

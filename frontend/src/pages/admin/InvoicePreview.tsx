@@ -39,7 +39,7 @@ export default function InvoicePreview() {
   const { data: submittedEnvelopes, isLoading: loadingEnvelopes, refetch: refetchEnvelopes } = useQuery({
     queryKey: ['submittedEnvelopes'],
     queryFn: fetchSubmittedEnvelopes,
-    refetchInterval: 5000,
+    refetchInterval: 15000,
   })
 
   const approveEnvelopeMutation = useMutation({
@@ -77,7 +77,7 @@ export default function InvoicePreview() {
   const { data: uploads, isLoading } = useQuery({
     queryKey: ['billing-uploads'],
     queryFn: () => getUploads(undefined, undefined),
-    refetchInterval: 5000,
+    refetchInterval: 10000,
   })
 
   const { data: settingsData } = useQuery({
@@ -102,7 +102,7 @@ export default function InvoicePreview() {
   const { data: historyData } = useQuery({
     queryKey: ['template-history'],
     queryFn: getTemplateHistory,
-    refetchInterval: 5000,
+    refetchInterval: 15000,
   })
 
   const testGmfs = (uploads || []).filter(u => u.folder_type === 'Test_GMFs')

@@ -474,6 +474,9 @@ def get_pending_batches(
             cycle_groups[group_key] = []
         cycle_groups[group_key].append(upload)
 
+    # Pre-fetch active running billing run IDs in a single query
+    running_run_ids = {r[0] for r in db.query(BillingRun.id).filter(BillingRun.status == RunStatus.RUNNING).all()}
+
     batches = []
     for (c, d), group_uploads in sorted(cycle_groups.items(), key=lambda x: (str(x[0][0]), str(x[0][1]))):
         group_tot = 0
@@ -483,13 +486,9 @@ def get_pending_batches(
 
         for upload in group_uploads:
             # Check if upload is currently part of an active running billing run
-            is_active_generating = False
-            if upload.billing_run_id is not None:
-                active_run = db.query(BillingRun).filter(BillingRun.id == upload.billing_run_id).first()
-                if active_run and active_run.status == RunStatus.RUNNING:
-                    is_active_generating = True
-                else:
-                    upload.billing_run_id = None
+            is_active_generating = upload.billing_run_id in running_run_ids if upload.billing_run_id is not None else False
+            if upload.billing_run_id is not None and not is_active_generating:
+                upload.billing_run_id = None
 
             app_tot, app_rem, _, active_tot, active_proc = _calculate_upload_approved_counts(upload, approved_templates)
 
@@ -590,7 +589,8 @@ def preview_invoice(
     preview_dir = settings.output_dir / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
 
-    args = (upload.file_path, str(preview_dir), 1, True)
+    # Pass limit=1 and offset=0 so the splitter immediately stops after the first document
+    args = (upload.file_path, str(preview_dir), 1, True, None, 0, 1)
     results = process_single_file(args)
 
     if isinstance(results, list):

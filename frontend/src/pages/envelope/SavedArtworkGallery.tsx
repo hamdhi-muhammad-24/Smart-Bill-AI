@@ -55,7 +55,7 @@ export default function SavedArtworkGallery() {
   const { data: artworks, isLoading, refetch } = useQuery({
     queryKey: ['savedArtworks', selectedType, selectedStatus],
     queryFn: () => fetchSavedArtworks(selectedType, selectedStatus),
-    refetchInterval: 5000,
+    refetchInterval: 12000,
   })
 
   // Submit Draft to Admin Mutation

@@ -143,6 +143,9 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
             if stripped.upper().startswith("DOCSTART"):
                 if current_block:
                     doc_blocks.append("\n".join(current_block))
+                    if limit is not None and len(doc_blocks) >= (offset + limit) and approved_templates is None:
+                        current_block = []
+                        break
                 current_block = [line]
                 in_doc = True
             elif stripped.upper().startswith("DOCEND"):
@@ -150,6 +153,8 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
                 doc_blocks.append("\n".join(current_block))
                 current_block = []
                 in_doc = False
+                if limit is not None and len(doc_blocks) >= (offset + limit) and approved_templates is None:
+                    break
             elif in_doc:
                 current_block.append(line)
 
