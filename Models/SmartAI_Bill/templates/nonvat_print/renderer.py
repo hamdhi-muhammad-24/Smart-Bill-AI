@@ -60,6 +60,21 @@ class NonVATPrintRenderer(BaseRenderer):
         period = f"{data.get('billing_period_start', '')} - {data.get('billing_period_end', '')}"
         self.text(*COORDS["billing_period"],   period,                           size=f["size"], align="left")
 
+        # HOME / ENTERPRISE badge in the blue box
+        fb = FONTS["badge"]
+        badge = data.get("badge", "")
+        if badge:
+            self.text(*COORDS["badge_text"], badge, size=fb["size"], bold=fb["bold"], align="center")
+
+        # TIN numbers above the badge box
+        ft = FONTS["tin"]
+        customer_tin = data.get("customer_vat_reg", "")
+        slt_tin      = data.get("slt_vat_reg", "")
+        if customer_tin:
+            self.text(*COORDS["customer_tin"], f"Customer TIN: {customer_tin}", size=ft["size"], align="left")
+        if slt_tin:
+            self.text(*COORDS["slt_tin"], f"SLT TIN: {slt_tin}", size=ft["size"], align="left")
+
     def _draw_summary_boxes(self, data):
         """Draw summary boxes on page 1"""
         f = FONTS["summary_box"]

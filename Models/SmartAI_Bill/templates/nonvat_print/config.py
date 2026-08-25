@@ -10,11 +10,16 @@ PAGE_H = 841.89
 # Exact coordinates provided by the specification
 COORDS = {
     # Header Section (Row 1: Telephone Number, Row 2: Account Number & Billing Date, Row 3: Invoice Number & Billing Period)
-    "telephone_number": (355.0, 724.0),
+    "telephone_number": (180.0, 728.0),
     "account_number":   (140.0, 696.0),
     "billing_date":     (355.0, 696.0),
     "invoice_number":   (140.0, 670.0),
     "billing_period":   (355.0, 670.0),
+
+    # Badge box (HOME / ENTERPRISE) and TIN numbers above it
+    "badge_text":       (410.0, 723.0),   # centre of the blue badge box
+    "customer_tin":     (355.0, 752.0),   # Customer TIN: above the badge
+    "slt_tin":          (355.0, 742.0),   # SLT TIN: between customer TIN and badge
 
     # Summary Section (5 horizontal boxes)
     "balance_bf":             (80.0, 593.0),
@@ -61,6 +66,8 @@ CHARGES_TABLE = {
 
 FONTS = {
     "header":         {"size": 9,   "bold": False},
+    "badge":          {"size": 14,  "bold": True},
+    "tin":            {"size": 7.5, "bold": False},
     "customer_name":  {"size": 9,   "bold": True},
     "summary_box":    {"size": 9,   "bold": False},
     "summary_total":  {"size": 9.5, "bold": True},
