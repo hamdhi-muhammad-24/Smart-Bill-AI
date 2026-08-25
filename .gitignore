@@ -73,3 +73,5 @@ Models/SmartAI_Bill/templates/envelope/Image/*.jpeg
 # Licensed fonts (Calibri) - not redistributable, kept local-only
 Models/SmartAI_Bill/templates/vat_enterprise/fonts/calibri.ttf
 Models/SmartAI_Bill/templates/vat_enterprise/fonts/calibrib.ttf
+Models/SmartAI_Bill/templates/fonts/calibri.ttf
+Models/SmartAI_Bill/templates/fonts/calibrib.ttf

@@ -46,6 +46,31 @@ from templates.vat_home.config import (
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template). fitz has no built-in Calibri, so it's embedded via
+# fontfile= on every insert_text() call (harmless if already embedded) and
+# set_simple=1 (needed - without it, this font's simple-encoding cmap makes
+# fitz.get_text() misreport spaces as replacement characters). Width
+# measurement can't use fitz.get_text_length() for a custom font (it only
+# knows base14 names) - a fitz.Font object's text_length() is used instead.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+_CALIBRI_PATH = os.path.join(_FONTS_DIR, "calibri.ttf")
+_CALIBRI_BOLD_PATH = os.path.join(_FONTS_DIR, "calibrib.ttf")
+_CALIBRI_FONT = fitz.Font(fontfile=_CALIBRI_PATH)
+_CALIBRI_BOLD_FONT = fitz.Font(fontfile=_CALIBRI_BOLD_PATH)
+
+
+def _calibri_text_length(s, bold, size):
+    font_obj = _CALIBRI_BOLD_FONT if bold else _CALIBRI_FONT
+    return font_obj.text_length(s, fontsize=size)
+
+
+def _calibri_insert_text(page, point, text, fontsize, bold=False):
+    fontname = "Calibri-Bold" if bold else "Calibri"
+    fontfile = _CALIBRI_BOLD_PATH if bold else _CALIBRI_PATH
+    page.insert_text(point, text, fontname=fontname, fontsize=fontsize,
+                      fontfile=fontfile, set_simple=1)
+
 
 class VATHomeRenderer:
 
@@ -65,9 +90,9 @@ class VATHomeRenderer:
         page = self.doc.new_page(width=PAGE_W, height=PAGE_H)
         if is_continuation:
             # Blank page - no template background at all (section 9.1).
-            page.insert_text(CONT_PAGE_INVOICE_NO,
-                              f"Invoice No.{self._invoice_number}",
-                              fontname="hebo", fontsize=11)
+            _calibri_insert_text(page, CONT_PAGE_INVOICE_NO,
+                                  f"Invoice No.{self._invoice_number}",
+                                  fontsize=11, bold=True)
         else:
             page.show_pdf_page(page.rect, self.template_doc, 0)
         self.page = page
@@ -79,13 +104,12 @@ class VATHomeRenderer:
     def text(self, x, y, value, size=9, bold=False, align="left"):
         if value is None or value == "":
             return
-        font = "hebo" if bold else "helv"
         s = str(value)
         draw_x = x
         if align in ("right", "center"):
-            width = fitz.get_text_length(s, fontname=font, fontsize=size)
+            width = _calibri_text_length(s, bold, size)
             draw_x = x - width if align == "right" else x - width / 2
-        self.page.insert_text((draw_x, y), s, fontname=font, fontsize=size)
+        _calibri_insert_text(self.page, (draw_x, y), s, fontsize=size, bold=bold)
 
     def number(self, x, y, value, decimals=2, align="right", size=9, bold=False):
         self.text(x, y, f"{value:,.{decimals}f}", size=size, bold=bold, align=align)
@@ -98,11 +122,10 @@ class VATHomeRenderer:
         would overflow into the next column."""
         if value is None or value == "":
             return
-        font = "hebo" if bold else "helv"
         s = str(value)
         fitted_size = size
         while fitted_size > min_size:
-            if fitz.get_text_length(s, fontname=font, fontsize=fitted_size) <= max_width:
+            if _calibri_text_length(s, bold, fitted_size) <= max_width:
                 break
             fitted_size -= 0.25
         self.text(x, y, s, size=fitted_size, bold=bold, align=align)
@@ -333,15 +356,15 @@ class VATHomeRenderer:
             text = f"{idx + 1}  of  {total_pages}"
             if idx == 0:
                 x, y = COORDS["page_indicator"]
-                page.insert_text((x, y), text, fontname="helv", fontsize=f["size"])
+                _calibri_insert_text(page, (x, y), text, fontsize=f["size"])
             else:
                 # Continuation pages: right-aligned to the page margin, per
                 # golden evidence (section 9.1) - a different, minimal layout
                 # decoupled from page 1's badge/logo-relative position.
-                width = fitz.get_text_length(text, fontname="helv", fontsize=f["size"])
+                width = _calibri_text_length(text, False, f["size"])
                 x = CONT_PAGE_PAGE_INDICATOR_X - width
-                page.insert_text((x, CONT_PAGE_PAGE_INDICATOR_Y), text,
-                                  fontname="helv", fontsize=f["size"])
+                _calibri_insert_text(page, (x, CONT_PAGE_PAGE_INDICATOR_Y), text,
+                                      fontsize=f["size"])
 
 
 # ---------------------------------------------------------------------------
@@ -685,9 +708,7 @@ def _cells_with_fit(positions, amount_x, values, last_cell_text="", size=7,
     amount_x, so its own left edge is well before amount_x, and treating
     amount_x itself as the boundary let long last-cells (e.g. "List Price")
     overlap the last left column (e.g. "Subscription Type")."""
-    font = "hebo" if bold else "helv"
-    last_width = (fitz.get_text_length(str(last_cell_text), fontname=font,
-                                        fontsize=size)
+    last_width = (_calibri_text_length(str(last_cell_text), bold, size)
                   if last_cell_text else 0.0)
     last_boundary = amount_x - last_width - pad
     cells = []
