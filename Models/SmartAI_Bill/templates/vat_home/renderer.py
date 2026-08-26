@@ -511,19 +511,49 @@ def _table_col_positions(col, num_cols):
 
 # ---- content-sequence drawers (section 4's exact order) -------------------
 
-def _draw_charges_flow(flow, data):
-    for product in data.get("product_labels", []):
-        flow.ensure_space(LINE_HEIGHT * 2)  # orphan control: header + 1 line
+def _draw_charge_group(flow, group, indent=0, gap_before=False):
+    # `indent`: 0 for an SLTSUBSCRIPTIONREF (SB-ref) header only. Every
+    # other group header - a nested SLTPRODUCTLABEL child under an SB-ref,
+    # or a standalone top-level product/phone group - sits one indent
+    # level in (confirmed against the real bill: D99223, a child, and
+    # 0112027096, a standalone group, print at the SAME indent). Charges
+    # under any header sit one further level in. `gap_before` adds a
+    # blank line ahead of a child group's header so consecutive children
+    # (e.g. D76288, 0572281283) don't run together.
+    if gap_before:
+        flow.ensure_space(LINE_HEIGHT * 3)
+        flow.draw_line([])
+    flow.ensure_space(LINE_HEIGHT * 2)
+    col = flow.col_def()
+    flow.draw_line([(col["x_start"] + indent, group["label"], "left")], bold=True, size=9)
+    for charge in group["charges"]:
+        flow.ensure_space(LINE_HEIGHT)
         col = flow.col_def()
-        flow.draw_line([(col["x_start"], product["label"], "left")], bold=True, size=9)
-        for charge in product["charges"]:
-            flow.ensure_space(LINE_HEIGHT)
-            col = flow.col_def()
-            amt = f"{charge['amount']:,.2f}" if charge["amount"] else ""
-            flow.draw_line([
-                (col["x_start"] + 8, charge["description"], "left"),
-                (col["amount_x"], amt, "right"),
-            ], size=8)
+        amt = f"{charge['amount']:,.2f}" if charge["amount"] else ""
+        flow.draw_line([
+            (col["x_start"] + indent + 8, charge["description"], "left"),
+            (col["amount_x"], amt, "right"),
+        ], size=8)
+
+
+def _draw_charges_flow(flow, data):
+    prev_was_subscription_ref = False
+    for product in data.get("product_labels", []):
+        # Presence of "children" marks an SLTSUBSCRIPTIONREF (SB-ref) entry
+        # (see parser.py) - the only group that prints at the left margin.
+        is_subscription_ref = "children" in product
+        indent = 0 if is_subscription_ref else 8
+        # One blank line marks the transition out of an SB-ref's children
+        # into the next standalone group - not between consecutive
+        # standalone groups (0112027096, 0112027187, ... run back-to-back).
+        gap_before = prev_was_subscription_ref and not is_subscription_ref
+        _draw_charge_group(flow, product, indent=indent, gap_before=gap_before)
+        # SB-prefixed subscription-ref groups can carry nested
+        # SLTPRODUCTLABEL child groups, drawn right after their parent
+        # with a small gap between each child.
+        for i, child in enumerate(product.get("children", [])):
+            _draw_charge_group(flow, child, indent=8, gap_before=(i > 0))
+        prev_was_subscription_ref = is_subscription_ref
 
 
 def _draw_adjustments_flow(flow, data):

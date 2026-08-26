@@ -107,6 +107,8 @@ def parse_vat_home(file_path: str) -> dict:
     in_promo_group         = False
     current_promo_product  = None
     current_product        = None
+    in_subscription_ref         = False
+    current_subscription_group  = None
 
     with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
         for line in f:
@@ -122,6 +124,13 @@ def parse_vat_home(file_path: str) -> dict:
             if (line.startswith('BENDSLTSUBSCRIPTIONREF') or
                     line.startswith('BSTARTSLTSUBSCRIPTIONREF')):
                 phone_finder.exit_block()
+                continue
+            if line.startswith('TSTARTSLTSUBSCRIPTIONREF'):
+                in_subscription_ref = True
+                continue
+            if line.startswith('TENDSLTSUBSCRIPTIONREF'):
+                in_subscription_ref        = False
+                current_subscription_group = None
                 continue
 
             if (line.startswith('BSTARTGROUPPROMO') or
@@ -332,7 +341,15 @@ def parse_vat_home(file_path: str) -> dict:
             elif key == 'SLTPRODUCTLABEL':
                 label = apply_label_override(value)
                 current_product = {"label": label, "charges": []}
-                data['product_labels'].append(current_product)
+                # Nested under a SB subscription-ref group (BSTARTSLTPRODUCTLABEL
+                # block inside TSTARTSLTSUBSCRIPTIONREF/TENDSLTSUBSCRIPTIONREF):
+                # attach as a child so the subscription header only prints when
+                # the group (itself or a child) actually has content - see the
+                # empty-group filter below.
+                if in_subscription_ref and current_subscription_group is not None:
+                    current_subscription_group['children'].append(current_product)
+                else:
+                    data['product_labels'].append(current_product)
                 phone_finder.candidate(value)
 
             # SB-prefixed charge-group refs (e.g. SB000030381) live under this
@@ -346,14 +363,19 @@ def parse_vat_home(file_path: str) -> dict:
             # GMF encounter order (no separate collection/re-insertion step).
             elif key == 'SLTSUBSCRIPTIONREF':
                 label = apply_label_override(value)
-                current_product = {"label": label, "charges": []}
+                current_product = {"label": label, "charges": [], "children": []}
+                current_subscription_group = current_product
                 data['product_labels'].append(current_product)
                 phone_finder.candidate(value)
 
             elif key == 'SLTSUBSDETAIL':
                 raw       = rest.split('|')
                 all_parts = [value] + raw
-                if current_product and len(all_parts) > 5:
+                # BPR18: SLTSUBSDETAIL must be ignored entirely (no line
+                # printed at all) when its amount - the value before the
+                # first '|' - is zero. Not just a blank amount column.
+                amt = to_float(all_parts[0]) if all_parts else 0
+                if current_product and len(all_parts) > 5 and amt:
                     prefix = all_parts[1].split('_')[-1].strip()
                     suffix = all_parts[2].split('_')[-1].strip()
                     desc   = f"{prefix} {suffix}".strip()
@@ -371,11 +393,9 @@ def parse_vat_home(file_path: str) -> dict:
                         desc += " [One Time]"
                     elif flag == 'I':
                         desc += " [Initiation]"
-                    amt = to_float(all_parts[0])
                     current_product['charges'].append(
                         {'description': desc, 'amount': amt})
-                    if amt:
-                        phone_finder.confirm_charge()
+                    phone_finder.confirm_charge()
 
             elif key == 'SLTPRODLABELDET':
                 raw       = rest.split('|')
@@ -501,7 +521,13 @@ def parse_vat_home(file_path: str) -> dict:
     data['telephone_number']    = phone_finder.result
     data['top_level_discounts'] = top_discounts.discounts
 
-    data['product_labels'] = [p for p in data['product_labels'] if p['charges']]
+    for p in data['product_labels']:
+        if 'children' in p:
+            p['children'] = [c for c in p['children'] if c['charges']]
+    data['product_labels'] = [
+        p for p in data['product_labels']
+        if p['charges'] or p.get('children')
+    ]
 
     from core.customer_type_mapper import get_badge
     data['badge'] = get_badge(data['customer_type']) or "HOME"
