@@ -119,7 +119,7 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/slt_ebill
       LOG_LEVEL: INFO
-      BILLING_WORKERS: 12
+      BILLING_WORKERS: ${BILLING_WORKERS:-2}
       GMF_DRIVE_PATH: /app/gmf_uploads
       OUTPUT_DIR: /app/output
       QUEUE_INCOMING_DIR: /app/queue/incoming

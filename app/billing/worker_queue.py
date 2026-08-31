@@ -723,7 +723,7 @@ def start_worker_threads(num_workers=None):
     Starts worker daemon threads directly inside the application process.
     """
     if num_workers is None:
-        num_workers = int(os.getenv("BILLING_WORKERS", max(4, (os.cpu_count() or 4))))
+        num_workers = int(os.getenv("BILLING_WORKERS", max(2, os.cpu_count() or 2)))
     threads = []
     for i in range(num_workers):
         t = threading.Thread(target=_worker_process, args=(i,), daemon=True)
@@ -738,7 +738,7 @@ def start_workers(num_workers=None):
     Starts the parallel worker pool and archiver daemon.
     """
     if num_workers is None:
-        num_workers = int(os.getenv("BILLING_WORKERS", max(8, (os.cpu_count() or 4) * 2)))
+        num_workers = int(os.getenv("BILLING_WORKERS", max(2, os.cpu_count() or 2)))
     processes = []
     
     # Start Archiver

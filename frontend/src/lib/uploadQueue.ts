@@ -15,8 +15,8 @@ export interface UploadJob {
 }
 
 const STORAGE_KEY = 'slt-upload-jobs'
-const CHUNK_SIZE = 10
-const CONCURRENCY = 4
+const CHUNK_SIZE = 50
+const CONCURRENCY = 6
 
 const listeners = new Set<() => void>()
 
