@@ -70,6 +70,8 @@ services:
       - /var/slt-billing/gmf_uploads:/app/gmf_uploads
       - /var/slt-billing/output_invoices:/app/output
       - slt_queue_data:/app/queue
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
