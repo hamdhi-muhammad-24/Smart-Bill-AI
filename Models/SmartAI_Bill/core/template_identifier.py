@@ -1,4 +1,4 @@
-from core.gmf_reader import read_gmf_header, parse_filename
+from core.gmf_reader import read_gmf_header, parse_filename, GMFHeader
 from core.customer_type_mapper import get_badge, is_vat_registered
 
 
@@ -32,6 +32,118 @@ class IdentificationResult:
     def __repr__(self):
         return (f"<Identification template={self.template_id} "
                 f"badge={self.badge} supported={self.is_supported}>")
+
+
+def identify_template_from_header(header: GMFHeader, original_filename: str = None) -> IdentificationResult:
+    """Identify template directly from an in-memory GMFHeader object (0ms disk I/O)."""
+    result = IdentificationResult()
+    result.header = header
+    fname = (original_filename or header.filename or "").lower()
+    if fname.endswith('.processing'):
+        fname = fname[:-11]
+
+    # Special filename matching
+    if "lod" in fname or "letter of demand" in fname:
+        result.template_id = "lod"
+        result.is_supported = True
+        result.reasons.append("Filename matches LOD template")
+        return result
+    if "vat" in fname and ("confirm" in fname or "customer" in fname or "recipients" in fname or "list" in fname or "002" in fname):
+        result.template_id = "vat_confirmation"
+        result.is_supported = True
+        result.reasons.append("Filename matches VAT Confirmation template")
+        return result
+    if "final" in fname and "notice" in fname:
+        result.template_id = "final_notice"
+        result.is_supported = True
+        result.reasons.append("Filename matches Final Notice template")
+        return result
+    if "letter" in fname or "migration" in fname or "v1print" in fname:
+        result.template_id = "customer_letter_logo_v1print"
+        result.is_supported = True
+        result.reasons.append("Filename matches Customer Letter template")
+        return result
+
+    result.filename_info = parse_filename(header.filename)
+
+    # Exclusion checks
+    if header.billtype == 5:
+        is_vat = is_vat_registered(header.customer_vat_ref or "")
+        if is_vat:
+            result.template_id = TEMPLATE_VAT_CREDITNOTE
+            result.reasons.append("BILLTYPE=5 → VAT Credit Note")
+        else:
+            result.template_id = TEMPLATE_NONVAT_CREDITNOTE
+            result.reasons.append("BILLTYPE=5 → NonVAT Credit Note")
+        result.is_supported = True
+        return result
+
+    if header.acc_currency_code and header.acc_currency_code.strip().upper() != "RS":
+        if header.billstyle != 21:
+            result.template_id = UNSUPPORTED_FOREIGN_CURRENCY
+            result.reasons.append(f"ACCCURRENCYCODE={header.acc_currency_code} → Foreign currency")
+            return result
+
+    # DOCTYPE routing
+    if header.doctype == "SUMMARYSTATEMENT":
+        result.template_id = TEMPLATE_SUMMARY_STATEMENT
+        result.reasons.append("DOCTYPE=SUMMARYSTATEMENT → Summary Statement")
+        result.is_supported = True
+        return result
+
+    if header.doctype not in ("BILL", "BCR"):
+        result.reasons.append(f"Unrecognized DOCTYPE: {header.doctype}")
+        result.warnings.append("Manual review needed")
+        return result
+
+    # BILLSTYLE routing
+    style = header.billstyle
+    is_vat = is_vat_registered(header.customer_vat_ref or "")
+
+    if style == 19:
+        result.template_id = TEMPLATE_PRODUCT_LABEL_GROUPING
+        result.reasons.append("BILLSTYLE=19 → Product Label Grouping")
+        result.is_supported = True
+    elif style == 20:
+        result.template_id = TEMPLATE_SUBSCRIPTION_REF_GROUPING
+        result.reasons.append("BILLSTYLE=20 → Subscription Ref Grouping")
+        result.is_supported = True
+    elif style == 21:
+        result.template_id = TEMPLATE_USD_OPEN_ITEM
+        result.reasons.append("BILLSTYLE=21 → USD Open Item")
+        result.is_supported = True
+    elif style == 1:
+        if is_vat:
+            badge = get_badge(header.customer_type or "")
+            if badge == "HOME":
+                result.template_id = TEMPLATE_VAT_HOME
+                result.reasons.append("BILLSTYLE=1, VAT Customer, Home → VAT Home")
+            else:
+                result.template_id = TEMPLATE_VAT_ENTERPRISE
+                result.reasons.append("BILLSTYLE=1, VAT Customer → VAT Enterprise")
+        else:
+            badge = get_badge(header.customer_type or "")
+            if badge == "HOME":
+                result.template_id = TEMPLATE_NONVAT_HOME
+                result.reasons.append(f"BILLSTYLE=1, non-VAT, {header.customer_type} → NonVAT Home")
+            else:
+                result.template_id = TEMPLATE_NONVAT_ENTERPRISE
+                result.reasons.append(f"BILLSTYLE=1, non-VAT, {header.customer_type} → NonVAT Enterprise")
+        result.is_supported = True
+    elif style == 18:
+        result.template_id = TEMPLATE_INVOICE_OF_SUMMARY
+        result.reasons.append("BILLSTYLE=18 → Invoice of Summary")
+        result.is_supported = True
+    else:
+        result.reasons.append(f"Unrecognized BILLSTYLE: {style}")
+        result.warnings.append("Manual review needed")
+        return result
+
+    result.badge = get_badge(header.customer_type or "")
+    if result.badge == "UNKNOWN":
+        result.warnings.append(f"CUSTOMERTYPE={header.customer_type} not mapped")
+
+    return result
 
 
 def identify_template(gmf_file_path: str, original_filename: str = None) -> IdentificationResult:

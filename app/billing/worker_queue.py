@@ -118,17 +118,38 @@ def _resolve_cycle_folder(upload):
             return TEMPLATE_FOLDER_MAP[t_id]
         return f_type.replace(" ", "_") if f_type else "Cycle_1"
 
-def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
-    """Get next available batch folder with space for more PDFs."""
-    b_num = 1
-    while True:
-        b_dir = base_dir / f"Batch_{b_num}"
-        b_dir.mkdir(parents=True, exist_ok=True)
-        # Recursively count PDFs in the batch folder
-        pdf_count = sum(1 for _ in b_dir.rglob("*.pdf"))
-        if pdf_count < max_per_batch:
-            return b_dir
-        b_num += 1
+_BATCH_TRACKER = {}  # str(base_dir) -> [current_batch_num, current_count]
+_BATCH_LOCK = threading.Lock()
+
+def _get_batch_folder(base_dir: Path, max_per_batch: int = 1500) -> Path:
+    """O(1) high-speed batch folder resolver without recursive disk scans."""
+    key = str(base_dir)
+    with _BATCH_LOCK:
+        if key not in _BATCH_TRACKER:
+            b_num = 1
+            while (base_dir / f"Batch_{b_num}").exists():
+                b_num += 1
+            active_num = max(1, b_num - 1)
+            active_dir = base_dir / f"Batch_{active_num}"
+            active_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                count = sum(1 for _ in active_dir.glob("*.pdf"))
+            except OSError:
+                count = 0
+            if count >= max_per_batch:
+                active_num += 1
+                count = 0
+                (base_dir / f"Batch_{active_num}").mkdir(parents=True, exist_ok=True)
+            _BATCH_TRACKER[key] = [active_num, count]
+
+        tracker = _BATCH_TRACKER[key]
+        if tracker[1] >= max_per_batch:
+            tracker[0] += 1
+            tracker[1] = 0
+            (base_dir / f"Batch_{tracker[0]}").mkdir(parents=True, exist_ok=True)
+
+        tracker[1] += 1
+        return base_dir / f"Batch_{tracker[0]}"
 
 def _read_metadata_file(incoming_dir, filename):
     """Read and parse metadata JSON file if it exists."""
@@ -672,17 +693,12 @@ def _worker_process(worker_id):
             _delete_from_remote(cycle_label, filename)
                 
             logger.info(f"Worker {worker_id} successfully generated {generated_count} PDF(s) for {filename}")
-            
-            # Throttle
-            elapsed = time.time() - start_time
-            if elapsed < 0.2:
-                time.sleep(0.2 - elapsed)
                 
         except Exception as e:
             logger.error(f"Worker {worker_id} error: {e}", exc_info=True)
             if filename and working_path is not None and working_path.exists():
                 _handle_failed_upload(filename, str(working_path), upload_id, run_id, str(e))
-            time.sleep(1)
+            time.sleep(0.5)
 
 
 def _archiver_process():
@@ -702,10 +718,12 @@ def _archiver_process():
             time.sleep(5)
 
 
-def start_worker_threads(num_workers=4):
+def start_worker_threads(num_workers=None):
     """
     Starts worker daemon threads directly inside the application process.
     """
+    if num_workers is None:
+        num_workers = int(os.getenv("BILLING_WORKERS", max(4, (os.cpu_count() or 4))))
     threads = []
     for i in range(num_workers):
         t = threading.Thread(target=_worker_process, args=(i,), daemon=True)
@@ -715,10 +733,12 @@ def start_worker_threads(num_workers=4):
     return threads
 
 
-def start_workers(num_workers=10):
+def start_workers(num_workers=None):
     """
     Starts the parallel worker pool and archiver daemon.
     """
+    if num_workers is None:
+        num_workers = int(os.getenv("BILLING_WORKERS", max(8, (os.cpu_count() or 4) * 2)))
     processes = []
     
     # Start Archiver

@@ -374,7 +374,7 @@ export default function GmfMonitor() {
   const { data: uploads, isLoading } = useQuery({
     queryKey: ['billing-uploads'],
     queryFn: () => getUploads(),
-    refetchInterval: 3000,
+    refetchInterval: 1500,
   })
 
   const deleteMutation = useMutation({

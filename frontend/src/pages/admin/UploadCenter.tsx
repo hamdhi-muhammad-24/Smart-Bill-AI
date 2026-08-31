@@ -3,14 +3,35 @@ import { useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Upload, File, Archive, X, Trash2, CheckCircle2, Loader2, AlertTriangle } from 'lucide-react'
+import { Upload, File, Archive, X, Trash2, CheckCircle2, Loader2, AlertTriangle, Clock, Timer, Calendar, FolderCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { clearCompletedUploadJobs, getUploadJobsSnapshot, startUploadJob, subscribeUploadJobs, type UploadJob } from '../../lib/uploadQueue'
 
-function formatDate(value: string | null): string {
+function formatDateTime(value: string | null): string {
   if (!value) return '-'
-  return new Date(value).toLocaleString()
+  return new Date(value).toLocaleString([], {
+    dateStyle: 'short',
+    timeStyle: 'medium',
+  })
+}
+
+function formatDuration(startedAt: string, finishedAt: string | null): string {
+  if (!startedAt) return '-'
+  const start = new Date(startedAt).getTime()
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now()
+  const diffMs = Math.max(0, end - start)
+
+  if (diffMs < 1000) {
+    return `${diffMs} ms`
+  }
+  const seconds = (diffMs / 1000).toFixed(1)
+  if (Number(seconds) < 60) {
+    return `${seconds}s`
+  }
+  const mins = Math.floor(diffMs / 60000)
+  const remSecs = Math.round((diffMs % 60000) / 1000)
+  return `${mins}m ${remSecs}s`
 }
 
 function UploadJobBadge({ job }: { job: UploadJob }) {
@@ -64,7 +85,7 @@ export default function UploadCenter() {
     const ext = name.substring(lastDot).toLowerCase()
     const extClean = ext.startsWith('.') ? ext.substring(1) : ext
     const isNumeric = /^\d+$/.test(extClean)
-    return ext === '.zip' || ext === '.gmf' || ext === '.xlsx' || ext === '.csv' || isNumeric
+    return ext === '.zip' || ext === '.gmf' || ext === '.xlsx' || ext === '.xls' || ext === '.csv' || isNumeric
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -123,7 +144,7 @@ export default function UploadCenter() {
     done.then((job) => {
       queryClient.invalidateQueries({ queryKey: ['billing-uploads'] })
       if (job.status === 'completed') {
-        toast.success(`Uploaded ${job.uploadedCount} file(s). Registration continues in background.`)
+        toast.success(`Uploaded ${job.uploadedCount} file(s) in ${formatDuration(job.startedAt, job.finishedAt)}.`)
       } else {
         toast.error(job.message || `Upload failed for ${job.failedCount} file(s).`)
       }
@@ -183,7 +204,7 @@ export default function UploadCenter() {
             </div>
             <span className="text-lg font-bold bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-700 dark:from-slate-100 dark:via-blue-100 dark:to-indigo-300 bg-clip-text text-transparent">Drag & Drop files here</span>
             <span className="text-sm text-muted-foreground mt-2 text-center">
-              Supports GMF files (no extension, .1, .6, .gmf), Excel spreadsheets (.xlsx), CSV files (.csv), or ZIP archives.<br/>
+              Supports GMF files (no extension, .1, .6, .gmf), Excel spreadsheets (.xlsx, .xls), CSV files (.csv), or ZIP archives.<br/>
               Or click to browse from your device.
             </span>
           </div>
@@ -275,7 +296,7 @@ export default function UploadCenter() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-base font-extrabold">Upload Sessions</h3>
-              <p className="text-xs text-muted-foreground">Current and recent Upload Center transfers stay visible after navigation.</p>
+              <p className="text-xs text-muted-foreground">Current and recent Upload Center transfers with live timing and status breakdown.</p>
             </div>
             {uploadJobs.some(job => job.status !== 'uploading') && (
               <Button variant="outline" size="sm" onClick={clearCompletedUploadJobs} className="w-fit">
@@ -289,28 +310,94 @@ export default function UploadCenter() {
               No Upload Center sessions yet.
             </div>
           ) : (
-            <div className="max-h-72 overflow-y-auto divide-y rounded-lg border">
+            <div className="max-h-96 overflow-y-auto space-y-3 pr-1">
               {uploadJobs.map(job => {
                 const doneCount = job.uploadedCount + job.failedCount
                 const progress = Math.round((doneCount / job.fileCount) * 100)
                 return (
-                  <div key={job.id} className="space-y-2 p-4">
+                  <div key={job.id} className="rounded-xl border bg-card/60 p-4 space-y-3 shadow-xs hover:border-border transition-colors">
+                    {/* Header: Title & Status */}
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-bold">{job.fileCount} file(s) to {job.folderType.replace('_', ' ')}</span>
-                        <span className="text-xs text-muted-foreground">{formatDate(job.startedAt)}</span>
+                      <div className="flex items-center gap-2.5">
+                        <div className="size-9 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0 font-bold border border-indigo-200/50 dark:border-indigo-800/30">
+                          <FolderCheck size={18} />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-extrabold text-foreground">
+                              {job.fileCount} file(s) to {job.folderType.replace('_', ' ')}
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <Calendar size={12} className="text-muted-foreground/70" />
+                            {formatDateTime(job.startedAt)}
+                          </span>
+                        </div>
                       </div>
                       <UploadJobBadge job={job} />
                     </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-muted">
-                      <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
+
+                    {/* Progress Bar */}
+                    <div className="space-y-1">
+                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <div 
+                          className={cn(
+                            "h-full rounded-full transition-all duration-300",
+                            job.status === 'completed' ? "bg-emerald-500" : job.status === 'failed' ? "bg-red-500" : "bg-amber-500"
+                          )} 
+                          style={{ width: `${progress}%` }} 
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-xs text-muted-foreground font-medium">
+                        <span>{job.uploadedCount} uploaded / {job.failedCount} failed</span>
+                        <span className="font-bold text-foreground">{progress}%</span>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{job.uploadedCount} uploaded / {job.failedCount} failed</span>
-                      <span>{progress}%</span>
+
+                    {/* Timings & Summary Grid (Start Time, End Time, Total Time Taken) */}
+                    <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/40 text-xs">
+                      {/* Start Time */}
+                      <div className="rounded-lg bg-muted/30 p-2 border border-border/30">
+                        <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[11px]">
+                          <Clock size={12} className="text-blue-500 shrink-0" />
+                          <span>Start Time</span>
+                        </div>
+                        <div className="font-mono font-bold text-foreground text-xs mt-0.5 truncate" title={job.startedAt}>
+                          {new Date(job.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </div>
+                      </div>
+
+                      {/* End Time */}
+                      <div className="rounded-lg bg-muted/30 p-2 border border-border/30">
+                        <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[11px]">
+                          <Clock size={12} className={job.finishedAt ? "text-emerald-500 shrink-0" : "text-amber-500 shrink-0"} />
+                          <span>End Time</span>
+                        </div>
+                        <div className="font-mono font-bold text-foreground text-xs mt-0.5 truncate" title={job.finishedAt || 'In progress'}>
+                          {job.finishedAt ? (
+                            new Date(job.finishedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                          ) : (
+                            <span className="text-amber-600 dark:text-amber-400 italic text-[11px] flex items-center gap-1 font-sans font-medium">
+                              <Loader2 size={10} className="animate-spin shrink-0" /> In progress
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Total Time Taken (Duration) */}
+                      <div className="rounded-lg bg-indigo-50/50 dark:bg-indigo-950/20 p-2 border border-indigo-200/40 dark:border-indigo-800/30">
+                        <div className="flex items-center gap-1 text-indigo-700 dark:text-indigo-300 font-semibold text-[11px]">
+                          <Timer size={12} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                          <span>Total Time</span>
+                        </div>
+                        <div className="font-mono font-extrabold text-indigo-900 dark:text-indigo-200 text-xs mt-0.5">
+                          {formatDuration(job.startedAt, job.finishedAt)}
+                        </div>
+                      </div>
                     </div>
+
                     {job.message && job.status === 'failed' && (
-                      <div className="rounded-md bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 dark:bg-red-950/20 dark:text-red-300">
+                      <div className="rounded-md bg-red-50 px-2.5 py-1.5 text-xs font-semibold text-red-700 dark:bg-red-950/20 dark:text-red-300 border border-red-200/60">
                         {job.message}
                       </div>
                     )}
@@ -324,3 +411,4 @@ export default function UploadCenter() {
     </div>
   )
 }
+

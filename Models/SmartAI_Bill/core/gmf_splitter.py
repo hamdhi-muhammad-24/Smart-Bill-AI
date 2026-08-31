@@ -55,7 +55,7 @@ def count_documents(file_path: str) -> int:
 
 
 def count_documents_with_breakdown(file_path: str) -> tuple[int, dict[str, int]]:
-    """Returns (total_customer_count, template_breakdown_dict) for any GMF file."""
+    """Returns (total_customer_count, template_breakdown_dict) for any GMF file with zero disk temp files."""
     if not file_path or not os.path.exists(file_path):
         return 0, {}
 
@@ -67,55 +67,73 @@ def count_documents_with_breakdown(file_path: str) -> tuple[int, dict[str, int]]
         from core.template_identifier import identify_template
         tid = identify_template(file_path).template_id or "spreadsheet"
         return total, {tid: total}
-    else:
+
+    from core.template_identifier import identify_template_from_header
+    from core.gmf_reader import GMFHeader
+
+    breakdown: dict[str, int] = {}
+    total_docs = 0
+    in_docstart = False
+    current_header: GMFHeader | None = None
+    source_filename = os.path.basename(file_path)
+
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            stripped = line.strip()
+            if stripped.startswith("DOCSTART"):
+                in_docstart = True
+                current_header = GMFHeader()
+                current_header.file_path = file_path
+                current_header.filename = source_filename
+                continue
+            elif stripped.startswith("DOCEND"):
+                if current_header is not None:
+                    res = identify_template_from_header(current_header)
+                    tid = res.template_id or "unknown"
+                    breakdown[tid] = breakdown.get(tid, 0) + 1
+                    total_docs += 1
+                current_header = None
+                in_docstart = False
+            elif in_docstart:
+                if stripped.startswith("SUBDOCSTART") or stripped.startswith("BSTARTBFSTATEMENT"):
+                    in_docstart = False
+                    continue
+                if "|" in stripped:
+                    parts = stripped.split("|", 1)
+                    tokens = parts[0].strip().split(None, 1)
+                    if len(tokens) >= 2 and current_header is not None:
+                        key = tokens[0].upper()
+                        value = tokens[1].strip()
+                        current_header.raw_tags[key] = value
+                        if key == "DOCTYPE":
+                            current_header.doctype = value
+                        elif key == "BILLSTYLE":
+                            try:
+                                current_header.billstyle = int(value)
+                            except ValueError:
+                                current_header.billstyle = value
+                        elif key == "BILLTYPE":
+                            try:
+                                current_header.billtype = int(value)
+                            except ValueError:
+                                current_header.billtype = value
+                        elif key == "CUSTOMERVATREF":
+                            current_header.customer_vat_ref = value if value else None
+                        elif key == "CUSTOMERTYPE":
+                            current_header.customer_type = value
+                        elif key == "ACCTAXSTATUS":
+                            current_header.acc_tax_status = value
+                        elif key == "ACCCURRENCYCODE":
+                            current_header.acc_currency_code = value
+
+    if not breakdown:
         from core.template_identifier import identify_template
-        doc_blocks = []
-        current_block = []
-        in_doc = False
+        total = count_documents(file_path)
+        res = identify_template(file_path)
+        tid = res.template_id or "unknown"
+        return total, {tid: total}
 
-        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-            for line in f:
-                stripped = line.strip()
-                if stripped.upper().startswith("DOCSTART"):
-                    if current_block:
-                        doc_blocks.append("\n".join(current_block))
-                    current_block = [line]
-                    in_doc = True
-                elif stripped.upper().startswith("DOCEND"):
-                    current_block.append(line)
-                    doc_blocks.append("\n".join(current_block))
-                    current_block = []
-                    in_doc = False
-                elif in_doc:
-                    current_block.append(line)
-
-        if current_block:
-            doc_blocks.append("\n".join(current_block))
-
-        if not doc_blocks:
-            total = count_documents(file_path)
-            res = identify_template(file_path)
-            tid = res.template_id or "unknown"
-            return total, {tid: total}
-
-        breakdown = {}
-        for block in doc_blocks:
-            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".gmf", encoding="utf-8") as tf:
-                tf.write(block)
-                tmp_name = tf.name
-            try:
-                res = identify_template(tmp_name)
-                tid = res.template_id or "unknown"
-                breakdown[tid] = breakdown.get(tid, 0) + 1
-            finally:
-                if os.path.exists(tmp_name):
-                    try:
-                        os.remove(tmp_name)
-                    except OSError:
-                        pass
-
-        total = sum(breakdown.values())
-        return total, breakdown
+    return total_docs, breakdown
 
 
 def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, original_filename: str = None, approved_templates: set = None) -> list[str]:
@@ -166,23 +184,44 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
 
     # Filter for approved templates in multi-document bulk files
     if approved_templates is not None and len(doc_blocks) > 1:
-        from core.template_identifier import identify_template
+        from core.template_identifier import identify_template_from_header
+        from core.gmf_reader import GMFHeader
         filtered_blocks = []
+        source_name = original_filename or os.path.basename(file_path)
         for block in doc_blocks:
-            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".gmf", encoding="utf-8") as tf:
-                tf.write(block)
-                tmp_name = tf.name
-            try:
-                res = identify_template(tmp_name)
-                tid = res.template_id
-                if tid and tid in approved_templates:
-                    filtered_blocks.append(block)
-            finally:
-                if os.path.exists(tmp_name):
-                    try:
-                        os.remove(tmp_name)
-                    except OSError:
-                        pass
+            hdr = GMFHeader()
+            hdr.filename = source_name
+            in_hdr = False
+            for line in block.splitlines():
+                st = line.strip()
+                if st.startswith("DOCSTART"):
+                    in_hdr = True
+                    continue
+                if in_hdr:
+                    if st.startswith("SUBDOCSTART") or st.startswith("BSTARTBFSTATEMENT") or st.startswith("DOCEND"):
+                        break
+                    if "|" in st:
+                        parts = st.split("|", 1)
+                        tokens = parts[0].strip().split(None, 1)
+                        if len(tokens) >= 2:
+                            k = tokens[0].upper()
+                            v = tokens[1].strip()
+                            hdr.raw_tags[k] = v
+                            if k == "DOCTYPE": hdr.doctype = v
+                            elif k == "BILLSTYLE":
+                                try: hdr.billstyle = int(v)
+                                except ValueError: hdr.billstyle = v
+                            elif k == "BILLTYPE":
+                                try: hdr.billtype = int(v)
+                                except ValueError: hdr.billtype = v
+                            elif k == "CUSTOMERVATREF": hdr.customer_vat_ref = v if v else None
+                            elif k == "CUSTOMERTYPE": hdr.customer_type = v
+                            elif k == "ACCTAXSTATUS": hdr.acc_tax_status = v
+                            elif k == "ACCCURRENCYCODE": hdr.acc_currency_code = v
+            res = identify_template_from_header(hdr, original_filename=source_name)
+            tid = res.template_id
+            if tid and tid in approved_templates:
+                filtered_blocks.append(block)
         doc_blocks = filtered_blocks
 
     if offset > 0:

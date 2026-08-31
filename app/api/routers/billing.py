@@ -1960,21 +1960,17 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     if source_path.exists():
                         try:
                             source_path.unlink()
-                        except Exception as rm_err:
-                            logger.warning(f"Could not remove duplicate staged file {source_path}: {rm_err}")
+                        except Exception:
+                            pass
                     registered_count += 1
                     continue
 
-            from core.gmf_splitter import count_documents_with_breakdown
-            total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
-
-            if existing:
                 existing.file_path = str(final_path)
                 existing.status = final_status
                 existing.error_message = None
                 existing.rejection_reason = None
                 existing.billing_run_id = None
-                existing.total_records_count = total_cnt
+                existing.total_records_count = total_records_count
                 existing.template_breakdown = json.dumps(breakdown) if breakdown else None
             else:
                 db.add(GmfUpload(
@@ -1984,17 +1980,11 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                     cycle_number=cycle_number,
                     template_detected=template_detected,
                     status=final_status,
-                    total_records_count=total_cnt,
+                    total_records_count=total_records_count,
                     template_breakdown=json.dumps(breakdown) if breakdown else None,
                 ))
 
-
-            registered_count += 1
-            move_plan.append((source_path, final_path, filename))
-
-        db.commit()
-
-        for source_path, final_path, filename in move_plan:
+            # Move physical file to destination immediately
             try:
                 final_path.parent.mkdir(parents=True, exist_ok=True)
                 if final_path.exists():
@@ -2003,13 +1993,10 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
             except Exception as move_err:
                 failed_count += 1
                 logger.error("Failed to move staged GMF %s to %s: %s", filename, final_path, move_err)
-                upload = db.query(GmfUpload).filter(
-                    GmfUpload.filename == filename,
-                    GmfUpload.folder_type == resolved_folder_type,
-                ).first()
-                if upload:
-                    upload.status = GmfUploadStatus.FAILED
-                    upload.error_message = f"Failed to stage uploaded file: {move_err}"
+
+            # Commit EACH file immediately so GMF Monitor shows it in real time
+            db.commit()
+            registered_count += 1
 
         db.add(NotificationEvent(
             event_type=NotificationEventType.TEST_GMF_RECEIVED if is_test else NotificationEventType.GMF_DETECTED,

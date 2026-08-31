@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileText, Play, CheckCircle2, Zap, Loader2, XCircle, AlertTriangle, Download, Eye, Trash2 } from 'lucide-react'
+import { FileText, Play, CheckCircle2, Zap, Loader2, XCircle, AlertTriangle, Download, Eye, Trash2, Clock, Timer } from 'lucide-react'
 import { 
   getPendingBatches, 
   getRuns, 
@@ -39,6 +39,67 @@ function formatRunTitle(batchName: string): { title: string; subtitle?: string }
   return { title: batchName }
 }
 
+function formatDateTime(isoStr?: string | null): string {
+  if (!isoStr) return 'N/A'
+  try {
+    const d = new Date(isoStr)
+    if (isNaN(d.getTime())) return 'N/A'
+    return d.toLocaleString([], {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  } catch {
+    return 'N/A'
+  }
+}
+
+function formatTimeOnly(isoStr?: string | null): string {
+  if (!isoStr) return 'N/A'
+  try {
+    const d = new Date(isoStr)
+    if (isNaN(d.getTime())) return 'N/A'
+    return d.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    })
+  } catch {
+    return 'N/A'
+  }
+}
+
+function formatDuration(startedAt?: string | null, finishedAt?: string | null): string {
+  if (!startedAt) return '—'
+  const start = new Date(startedAt).getTime()
+  if (isNaN(start)) return '—'
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now()
+  if (isNaN(end)) return '—'
+  const diffMs = Math.max(0, end - start)
+  if (diffMs < 1000) {
+    return `${diffMs} ms`
+  }
+  if (diffMs < 60000) {
+    const seconds = (diffMs / 1000).toFixed(1)
+    return `${seconds}s`
+  }
+  const mins = Math.floor(diffMs / 60000)
+  const remSecs = Math.round((diffMs % 60000) / 1000)
+  return `${mins}m ${remSecs}s`
+}
+
+function calculateSpeed(succeeded: number, startedAt?: string | null, finishedAt?: string | null): string | null {
+  if (!startedAt || succeeded <= 0) return null
+  const start = new Date(startedAt).getTime()
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now()
+  const diffSec = (end - start) / 1000
+  if (diffSec <= 0.05) return null
+  const rate = succeeded / diffSec
+  return `${rate.toFixed(1)} inv/s`
+}
+
 function RunCard({ 
   run, 
   onRetry, 
@@ -66,6 +127,7 @@ function RunCard({
 
   const { title, subtitle } = formatRunTitle(run.batch_name)
   const cycleLabel = formatCycleDisplayName(run.cycle_number || run.batch_name)
+  const speed = calculateSpeed(run.succeeded || 0, run.started_at, run.finished_at)
 
   return (
     <div 
@@ -170,6 +232,55 @@ function RunCard({
             </span>
           )}
         </div>
+
+        {/* Live Timing & Metrics Summary Grid */}
+        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/40 text-xs">
+          {/* Start Time */}
+          <div className="rounded-lg bg-muted/40 p-2 border border-border/40 flex flex-col justify-between">
+            <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[11px]">
+              <Clock size={12} className="text-blue-500 shrink-0" />
+              <span>Start Time</span>
+            </div>
+            <div className="font-mono font-bold text-foreground text-xs mt-1 truncate" title={formatDateTime(run.started_at)}>
+              {formatTimeOnly(run.started_at)}
+            </div>
+          </div>
+
+          {/* End Time */}
+          <div className="rounded-lg bg-muted/40 p-2 border border-border/40 flex flex-col justify-between">
+            <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[11px]">
+              <Clock size={12} className={run.finished_at ? "text-emerald-500 shrink-0" : "text-amber-500 shrink-0"} />
+              <span>End Time</span>
+            </div>
+            <div className="font-mono font-bold text-foreground text-xs mt-1 truncate" title={run.finished_at ? formatDateTime(run.finished_at) : 'In progress'}>
+              {run.finished_at ? (
+                formatTimeOnly(run.finished_at)
+              ) : (
+                <span className="text-amber-600 dark:text-amber-400 italic text-[11px] flex items-center gap-1 font-sans font-medium">
+                  <Loader2 size={10} className="animate-spin shrink-0" /> In progress
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Total Time / Duration & Speed */}
+          <div className="rounded-lg bg-indigo-50/50 dark:bg-indigo-950/20 p-2 border border-indigo-200/40 dark:border-indigo-800/30 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-indigo-700 dark:text-indigo-300 font-semibold text-[11px]">
+              <div className="flex items-center gap-1">
+                <Timer size={12} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span>Total Time</span>
+              </div>
+              {speed && isComplete && (
+                <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/60 px-1 py-0.2 rounded font-mono font-bold text-indigo-800 dark:text-indigo-200">
+                  {speed}
+                </span>
+              )}
+            </div>
+            <div className="font-mono font-extrabold text-indigo-900 dark:text-indigo-200 text-xs mt-1">
+              {formatDuration(run.started_at, run.finished_at)}
+            </div>
+          </div>
+        </div>
         
         {onRetry && run.failed > 0 && (
           <Button
@@ -187,7 +298,7 @@ function RunCard({
           </Button>
         )}
         
-        <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-border/30">
+        <div className="flex justify-end gap-2 mt-1 pt-2 border-t border-border/30">
           <Button
             type="button"
             variant="outline"
@@ -567,17 +678,45 @@ export default function GenerationHub() {
                     <span className="text-xs text-muted-foreground font-bold">Status</span>
                     <span className="font-bold text-blue-600 dark:text-blue-400 mt-0.5 uppercase">{run.status}</span>
                   </div>
-                  <div className="flex flex-col col-span-2 border-t pt-2.5">
-                    <span className="text-xs text-muted-foreground font-bold">Started At</span>
-                    <span className="font-medium text-foreground mt-0.5">
-                      {run.started_at ? new Date(run.started_at).toLocaleString() : 'N/A'}
+                  <div className="flex flex-col border-t pt-2.5">
+                    <span className="text-xs text-muted-foreground font-bold flex items-center gap-1">
+                      <Clock size={12} className="text-blue-500" /> Started At
+                    </span>
+                    <span className="font-medium text-foreground mt-0.5 text-xs">
+                      {formatDateTime(run.started_at)}
                     </span>
                   </div>
-                  {run.finished_at && (
+                  <div className="flex flex-col border-t pt-2.5">
+                    <span className="text-xs text-muted-foreground font-bold flex items-center gap-1">
+                      <Clock size={12} className={run.finished_at ? "text-emerald-500" : "text-amber-500"} /> Finished At
+                    </span>
+                    <span className="font-medium text-foreground mt-0.5 text-xs">
+                      {run.finished_at ? formatDateTime(run.finished_at) : (
+                        <span className="text-amber-600 italic">In progress...</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex flex-col border-t pt-2.5">
+                    <span className="text-xs text-muted-foreground font-bold flex items-center gap-1">
+                      <Timer size={12} className="text-indigo-500" /> Total Duration
+                    </span>
+                    <span className="font-bold font-mono text-indigo-700 dark:text-indigo-300 mt-0.5 text-xs">
+                      {formatDuration(run.started_at, run.finished_at)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col border-t pt-2.5">
+                    <span className="text-xs text-muted-foreground font-bold flex items-center gap-1">
+                      <Zap size={12} className="text-amber-500" /> Generation Speed
+                    </span>
+                    <span className="font-bold font-mono text-foreground mt-0.5 text-xs">
+                      {calculateSpeed(run.succeeded || 0, run.started_at, run.finished_at) || '—'}
+                    </span>
+                  </div>
+                  {run.output_path && (
                     <div className="flex flex-col col-span-2 border-t pt-2.5">
-                      <span className="text-xs text-muted-foreground font-bold">Finished At</span>
-                      <span className="font-medium text-foreground mt-0.5">
-                        {new Date(run.finished_at).toLocaleString()}
+                      <span className="text-xs text-muted-foreground font-bold">Output Location</span>
+                      <span className="font-mono text-xs text-muted-foreground mt-0.5 break-all">
+                        {run.output_path}
                       </span>
                     </div>
                   )}
