@@ -1877,7 +1877,7 @@ def delete_schedule(
 def _is_valid_gmf_upload_name(filename: str) -> bool:
     ext = os.path.splitext(filename)[1].lower()
     ext_clean = ext[1:] if ext.startswith(".") else ext
-    return ext_clean in ("", "gmf", "zip", "xlsx", "csv") or ext_clean.isdigit()
+    return ext_clean in ("", "gmf", "zip", "xlsx", "xls", "csv") or ext_clean.isdigit()
 
 
 def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder_type: str, cleanup_dir: str):
@@ -1886,12 +1886,13 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
     import shutil
     from app.db.base import SessionLocal
     from app.db.models import GmfUpload, GmfUploadStatus, NotificationEvent, NotificationEventType, InvoiceTemplate, TemplateApprovalStatus
-    from app.uploads.watcher import _detect_template, _get_cycle, _resolve_folder_type
+    from app.uploads.watcher import _get_cycle, _resolve_folder_type
+    from core.gmf_splitter import count_documents_with_breakdown
 
     logger = logging.getLogger("gmf_upload")
     logger.setLevel(logging.INFO)
 
-    is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
+    is_test = (folder_type == "Test_GMFs")
     registered_count = 0
     failed_count = 0
 
@@ -1910,28 +1911,27 @@ def _background_register_staged_gmfs(staged_files: list[tuple[str, str]], folder
                 continue
 
             resolved_folder_type = _resolve_folder_type(folder_type, source_path)
-            if resolved_folder_type is None:
-                failed_count += 1
-                logger.error("Could not assign a billing cycle from BILLDATE: %s", filename)
-                continue
             cycle_number = _get_cycle(resolved_folder_type)
 
-            template_detected, total_records_count = _detect_template(str(source_path))
-            template_status = templates_cache.get(template_detected)
-            is_approved = (template_status == TemplateApprovalStatus.APPROVED)
-            is_rejected = (template_status == TemplateApprovalStatus.REJECTED)
+            total_cnt, breakdown = count_documents_with_breakdown(str(source_path))
+            detected_list = sorted(list(breakdown.keys())) if breakdown else []
+            template_detected = ", ".join(detected_list) if detected_list else None
+            total_records_count = total_cnt if total_cnt > 0 else 1
+
+            is_approved = bool(detected_list) and any(templates_cache.get(t) == TemplateApprovalStatus.APPROVED for t in detected_list)
+            is_rejected = bool(detected_list) and any(templates_cache.get(t) == TemplateApprovalStatus.REJECTED for t in detected_list)
 
             if is_test:
                 final_path = settings.gmf_drive_path / folder_type / filename
                 final_status = GmfUploadStatus.PENDING_APPROVAL
                 final_path.parent.mkdir(parents=True, exist_ok=True)
-                if template_detected:
-                    t_obj = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == template_detected).first()
+                for t_code in detected_list:
+                    t_obj = db.query(InvoiceTemplate).filter(InvoiceTemplate.template_code == t_code).first()
                     if not t_obj:
-                        t_obj = InvoiceTemplate(template_code=template_detected, name=template_detected, is_system_template=True)
+                        t_obj = InvoiceTemplate(template_code=t_code, name=t_code, is_system_template=True)
                         db.add(t_obj)
                     t_obj.approval_status = TemplateApprovalStatus.PENDING
-                    templates_cache[template_detected] = TemplateApprovalStatus.PENDING
+                    templates_cache[t_code] = TemplateApprovalStatus.PENDING
 
             elif is_approved:
                 # Respect global billing_mode so we don't auto-generate if in manual mode
@@ -2037,12 +2037,13 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
     import logging
     from app.db.base import SessionLocal
     from app.db.models import GmfUpload, GmfUploadStatus, NotificationEvent, NotificationEventType, InvoiceTemplate, TemplateApprovalStatus
-    from app.uploads.watcher import _detect_template, _get_cycle, _should_skip, _resolve_folder_type
+    from app.uploads.watcher import _get_cycle, _should_skip, _resolve_folder_type
+    from core.gmf_splitter import count_documents_with_breakdown
     
     logger = logging.getLogger("gmf_upload")
     logger.setLevel(logging.INFO)
     
-    is_test = folder_type in ("Test_GMFs", "LOD", "VAT_Confirmation")
+    is_test = (folder_type == "Test_GMFs")
     
     temp_extract_dir = tempfile.mkdtemp(prefix="slt_zip_extract_")
     try:
@@ -2067,23 +2068,19 @@ def _background_process_gmf_zip(temp_zip_path: str, folder_type: str):
             billing_mode = billing_mode_setting.value if billing_mode_setting else "auto"
             templates_cache = {t.template_code: t.approval_status for t in db.query(InvoiceTemplate).all()}
             
-            from core.gmf_splitter import count_documents_with_breakdown
-            
             for idx, file_path in enumerate(extracted_files):
                 filename = file_path.name
 
                 resolved_folder_type = _resolve_folder_type(folder_type, file_path)
-                if resolved_folder_type is None:
-                    logger.error("Could not assign a billing cycle from BILLDATE: %s", filename)
-                    continue
                 cycle_number = _get_cycle(resolved_folder_type)
                 
-                template_detected, detected_count = _detect_template(str(file_path))
                 total_cnt, breakdown = count_documents_with_breakdown(str(file_path))
-                total_records_count = total_cnt if total_cnt > 0 else (detected_count or 1)
+                detected_list = sorted(list(breakdown.keys())) if breakdown else []
+                template_detected = ", ".join(detected_list) if detected_list else None
+                total_records_count = total_cnt if total_cnt > 0 else 1
                 
-                is_approved = templates_cache.get(template_detected) == TemplateApprovalStatus.APPROVED if template_detected else False
-                is_rejected = templates_cache.get(template_detected) == TemplateApprovalStatus.REJECTED if template_detected else False
+                is_approved = bool(detected_list) and any(templates_cache.get(t) == TemplateApprovalStatus.APPROVED for t in detected_list)
+                is_rejected = bool(detected_list) and any(templates_cache.get(t) == TemplateApprovalStatus.REJECTED for t in detected_list)
                 
                 if is_test:
                     final_path = settings.gmf_drive_path / folder_type / filename

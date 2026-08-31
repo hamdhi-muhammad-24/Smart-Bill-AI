@@ -110,28 +110,44 @@ def _get_cycle(folder_name: str) -> int | None:
 
 
 def _get_cycle_from_billdate(file_path: str | Path) -> int | None:
-    """Return the cycle assigned to the first BILLDATE in a GMF file."""
+    """Return the cycle assigned to the first BILLDATE in a GMF file or from filename."""
     try:
+        fname = Path(file_path).name.upper()
+        c_match = re.search(r'(?:CYCLE[_\-\s]?|C)([1-4])\b', fname)
+        if c_match:
+            return int(c_match.group(1))
+
         with Path(file_path).open("r", encoding="utf-8", errors="replace") as file:
             for line in file:
                 match = re.match(r"^BILLDATE\s+([^|\s]+)", line.strip())
                 if match:
-                    bill_day = datetime.strptime(match.group(1), "%d/%m/%Y").day
-                    for cycle, days in ((1, range(1, 4)), (2, range(8, 11)), (3, range(16, 19)), (4, range(24, 27))):
-                        if bill_day in days:
-                            return cycle
-                    return None
+                    date_str = match.group(1).replace("-", "/").replace(".", "/")
+                    parts = date_str.split("/")
+                    if len(parts) >= 3:
+                        bill_day = int(parts[0]) if len(parts[0]) <= 2 else int(parts[2])
+                        for cycle, days in ((1, range(1, 4)), (2, range(8, 11)), (3, range(16, 19)), (4, range(24, 27))):
+                            if bill_day in days:
+                                return cycle
+                        if bill_day <= 7:
+                            return 1
+                        elif bill_day <= 14:
+                            return 2
+                        elif bill_day <= 21:
+                            return 3
+                        else:
+                            return 4
+                    return 1
     except (OSError, ValueError):
-        return None
-    return None
+        return 1
+    return 1
 
 
 def _resolve_folder_type(folder_name: str, file_path: str | Path) -> str:
-    """Normalize the incoming Cycle folder to a stored cycle or No_Cycle folder type."""
+    """Normalize the incoming Cycle folder to a stored cycle or fallback folder type."""
     if folder_name != INCOMING_CYCLE_FOLDER:
         return folder_name
     cycle_number = _get_cycle_from_billdate(file_path)
-    return f"Cycle_{cycle_number}" if cycle_number else NO_CYCLE_FOLDER
+    return f"Cycle_{cycle_number}" if cycle_number else "Cycle_1"
 
 
 def _get_billing_mode() -> str:
@@ -156,7 +172,7 @@ def _should_skip(filename: str) -> bool:
         return True
     ext = os.path.splitext(name)[1].lower()
     ext_clean = ext[1:] if ext.startswith(".") else ext
-    if ext_clean and ext_clean not in ("gmf", "xlsx", "csv", "zip") and not ext_clean.isdigit():
+    if ext_clean and ext_clean not in ("gmf", "xlsx", "xls", "csv", "zip") and not ext_clean.isdigit():
         return True
     return False
 
