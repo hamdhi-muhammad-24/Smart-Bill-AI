@@ -38,7 +38,7 @@ OUTPUT_PDF_NAMES = {
     "vat_home":                  "{account_number}_VAT_HOME.pdf",
     "product_label_grouping":    "{account_number}_ProductLevel.pdf",
     "subscription_ref_grouping": "{account_number}_SubscriptionLevel.pdf",
-    "summary_statement":         "SUMMARY.pdf",
+    "summary_statement":         "{account_number}_SUMMARY.pdf",
     "invoice_of_summary":        "{account_number}_InvoiceOfSummary.pdf",
     "usd_open_item":             "{account_number}_USD_OPEN_Item.pdf",
     "vat_creditnote":            "CreditNote_VAT.pdf",

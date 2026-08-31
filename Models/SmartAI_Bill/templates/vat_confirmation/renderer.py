@@ -160,7 +160,7 @@ class VATConfirmationRenderer:
             pdf_bytes = pdf_buf.getvalue()
 
             identifier = (record.get("account_number") or record.get("reference") or record.get("vat_no") or record.get("recipient_name") or "unknown").strip()
-            ref_clean = safe_filename(identifier) or "unknown"
+            ref_clean = safe_filename(identifier).replace("_", "") or "unknown"
             
             fname = f"{ref_clean}_Vat_confirmation.pdf"
             counter = 1

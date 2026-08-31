@@ -193,7 +193,7 @@ class LODRenderer:
             pdf_out_bytes = doc.tobytes()
             doc.close()
 
-            acc_no = str(record.get("account_number", "unknown")).strip().replace(" ", "")
+            acc_no = str(record.get("account_number", "unknown")).strip().replace(" ", "").replace("_", "")
             fname = f"{acc_no}_LOD.pdf"
             self.generated_pdfs.append((fname, pdf_out_bytes, record))
 
