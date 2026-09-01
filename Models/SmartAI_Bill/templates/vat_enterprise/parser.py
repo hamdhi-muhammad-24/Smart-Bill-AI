@@ -375,8 +375,18 @@ def parse_vat_enterprise(file_path: str) -> dict:
                                   if len(all_parts) > 9 else '')
                         unit   = (all_parts[10].strip()
                                   if len(all_parts) > 10 else '')
+                        # A quantity of "0" with no unit text means "no real
+                        # quantity to show" (same rule as vat_home's parser -
+                        # `count` is a truthy non-empty STRING even when its
+                        # value is "0", so a bare `if count:` never catches
+                        # it). BPR: quantity must print for PARPROD too (was
+                        # previously omitted for flag P/S entirely).
+                        has_qty = count not in ('', '0') or unit not in ('', None)
                         if flag in ('P', 'S'):  # S = Suspension Override, rendered as Rental
                             desc += " [Rental]"
+                            if has_qty:
+                                cu = f"{count} {unit}".strip() if unit else count
+                                desc += f" [{cu}]"
                             if start and end and (
                                 start != data['billing_period_start'] or
                                 end   != data['billing_period_end']
