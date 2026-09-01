@@ -224,7 +224,11 @@ def parse_usd_open_item(file_path: str) -> dict:
                         current_ref["phone"] = value
                 elif tag == 'EVENTSTEXT':
                     if current_family_id in usage_families:
-                        label = value[2:] if value.startswith('P_') else value
+                        # BPR21: strip everything before the first '_' in
+                        # event names, same generic rule used for tariff,
+                        # product, discount, and adjustment-type names -
+                        # not just a literal "P_" prefix.
+                        label = strip_before_underscore(value)
                         usage_families[current_family_id]["label"] = label
                 elif tag == 'EVENTHEADING':
                     cols = [value] + [p.strip() for p in rest.split('|')
@@ -323,23 +327,32 @@ def parse_usd_open_item(file_path: str) -> dict:
                 data["charge_blocks"].append(current_subref_block)
 
             elif key == 'SLTPRODUCTLABEL':
-                start_product_block(value)
+                # BPR21: strip everything before the first '_' in product
+                # names - same rule already applied to tariff/discount/
+                # adjustment-type names.
+                start_product_block(strip_before_underscore(value))
 
             elif key == 'SLTPRODLABELDET':
                 raw       = rest.split('|')
                 all_parts = [value] + raw
                 # Confirmed pipe-index mapping (0-based), verified against
                 # all 3 real occurrences in the GMF - see BUILD_NOTE.md:
-                #   0=amount 1=prefix 2=suffix(raw, NOT underscore-stripped -
-                #   this field's own text legitimately contains "_", e.g.
-                #   "In Advance Monthly Charge BW_ 10Gbps") 3=const/unused
-                #   4=sequence id (not decoded - no lookup table exists
-                #   anywhere in this codebase for it) 5=flag(P/O/I/S)
-                #   6=start 7=end 8=source-system marker(unused) 9=count
-                #   10=unit (absent in all 3 real samples - no bracket shown)
+                #   0=amount 1=prefix(tariff name) 2=suffix(product name)
+                #   3=const/unused 4=sequence id (not decoded - no lookup
+                #   table exists anywhere in this codebase for it)
+                #   5=flag(P/O/I/S) 6=start 7=end 8=source-system marker
+                #   (unused) 9=count 10=unit (absent in all 3 real samples -
+                #   no bracket shown).
+                # BPR21: strip everything before the first '_' in BOTH the
+                # tariff name AND the product name independently (confirmed
+                # against the real GMF: "G_Capacity Bearer" + "In Advance
+                # Monthly Charge BW_ 10Gbps" must render as just "Capacity
+                # Bearer 10Gbps", not the raw "...Charge BW_ 10Gbps" tail -
+                # the earlier assumption that field 2 must stay raw because
+                # it "legitimately contains _" was wrong).
                 if current_product is not None and len(all_parts) > 7:
                     prefix = strip_before_underscore(all_parts[1])
-                    suffix = all_parts[2].strip()
+                    suffix = strip_before_underscore(all_parts[2])
                     desc   = f"{prefix} {suffix}".strip()
                     flag   = all_parts[5].strip().upper()
                     start  = all_parts[6].strip()
@@ -359,7 +372,7 @@ def parse_usd_open_item(file_path: str) -> dict:
                     # labeled block, per section 2's explicit ordering rule.
                     if len(all_parts) > 7:
                         prefix = strip_before_underscore(all_parts[1])
-                        suffix = all_parts[2].strip()
+                        suffix = strip_before_underscore(all_parts[2])
                         desc   = f"{prefix} {suffix}".strip()
                         flag   = all_parts[5].strip().upper()
                         start  = all_parts[6].strip()
