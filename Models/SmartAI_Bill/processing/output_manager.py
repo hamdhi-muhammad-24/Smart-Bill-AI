@@ -12,7 +12,7 @@ from config import BATCH_FOLDER_SIZE, OUTPUT_BASE_DIR
 
 
 def get_output_roots():
-    """Return list of valid output root paths."""
+    """Return list of valid output root paths (checking ./output and drive Output)."""
     roots = []
     try:
         from app.core.config import settings
@@ -22,11 +22,11 @@ def get_output_roots():
     except Exception:
         pass
 
-    if os.path.exists(OUTPUT_BASE_DIR) and OUTPUT_BASE_DIR not in roots:
-        roots.append(OUTPUT_BASE_DIR)
-
     if os.path.exists("./output") and "./output" not in roots:
         roots.append("./output")
+
+    if os.path.exists(OUTPUT_BASE_DIR) and OUTPUT_BASE_DIR not in roots:
+        roots.append(OUTPUT_BASE_DIR)
 
     return roots if roots else [OUTPUT_BASE_DIR]
 
@@ -34,7 +34,8 @@ def get_output_roots():
 def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None):
     """
     Move generated PDFs from temp_pdf_dir into organised date/cycle/batch folders.
-    Direct single move without duplicate copies.
+
+    Returns a list of batch folder paths that were created.
     """
     if cycle_label == "Test_GMFs":
         if log_callback:
@@ -71,9 +72,9 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
         cycle_label = "Cycle_1"
 
     today = datetime.now().strftime("%Y-%m-%d")
-    target_root = get_output_roots()[0]
-    base = os.path.join(target_root, today, cycle_label)
+    base = os.path.join(OUTPUT_BASE_DIR, today, cycle_label)
     os.makedirs(base, exist_ok=True)
+
 
     if log_callback:
         log_callback(
@@ -89,18 +90,47 @@ def create_output_batches(temp_pdf_dir, cycle_label="Cycle_1", log_callback=None
         batch_dir = os.path.join(base, f"Batch_{current_batch_num}")
         os.makedirs(batch_dir, exist_ok=True)
         
-        existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
-        if existing_count >= BATCH_FOLDER_SIZE:
+        existing_files = [f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")]
+        existing_count = len(existing_files)
+        
+        space_left = BATCH_FOLDER_SIZE - existing_count
+        
+        if space_left <= 0:
             current_batch_num += 1
             continue
             
         moved_in_this_batch = 0
-        while pdf_index < len(pdfs) and existing_count < BATCH_FOLDER_SIZE:
+        while pdf_index < len(pdfs):
+            existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
+            if existing_count >= BATCH_FOLDER_SIZE:
+                current_batch_num += 1
+                batch_dir = os.path.join(base, f"Batch_{current_batch_num}")
+                os.makedirs(batch_dir, exist_ok=True)
+                existing_count = len([f for f in os.listdir(batch_dir) if f.lower().endswith(".pdf")])
+
             pdf_path = pdfs[pdf_index]
             dest = os.path.join(batch_dir, os.path.basename(pdf_path))
+            
+            try:
+                local_base = os.path.join("./output", today, cycle_label)
+                # Find local batch dir with < 10 PDFs
+                b_num = 1
+                while True:
+                    local_vm_batch_dir = os.path.join(local_base, f"Batch_{b_num}")
+                    os.makedirs(local_vm_batch_dir, exist_ok=True)
+                    local_cnt = len([f for f in os.listdir(local_vm_batch_dir) if f.lower().endswith(".pdf")])
+                    if local_cnt < BATCH_FOLDER_SIZE:
+                        break
+                    b_num += 1
+                target_copy = os.path.join(local_vm_batch_dir, os.path.basename(pdf_path))
+                if os.path.abspath(pdf_path) != os.path.abspath(target_copy):
+                    shutil.copy2(pdf_path, target_copy)
+            except Exception as copy_err:
+                if log_callback:
+                    log_callback(f"  Warning: failed to duplicate copy to VM local folder: {copy_err}")
+                    
             if os.path.abspath(pdf_path) != os.path.abspath(dest):
                 shutil.move(pdf_path, dest)
-            existing_count += 1
             moved_in_this_batch += 1
             pdf_index += 1
             
@@ -219,7 +249,45 @@ def get_pdf_path(date_str, cycle_label, batch_name, filename):
     return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, basename)
 
 
-def create_summary_groups(date_base_dir, processing_results, log_callback=None):
+def normalize_account_number(acc_no: str) -> str:
+    """
+    Strip all whitespace, underscores, hyphens, and punctuation from an account number,
+    and convert to uppercase. Handles values with spaces like '005 341 6491' -> '0053416491'.
+    """
+    import re
+    if not acc_no:
+        return ""
+    return re.sub(r'[^A-Za-z0-9]+', '', str(acc_no)).upper()
+
+
+def extract_account_from_filename(filename: str) -> str:
+    """
+    Extract the account number from a generated bill filename, ignoring template type.
+    Examples:
+      '0005842786_NONVAT_HOME.pdf' -> '0005842786'
+      '0053416491_VAT_ENTERPRISE.pdf' -> '0053416491'
+      '005104340X_NONVAT_HOME.pdf' -> '005104340X'
+      '0053416491_ProductLevel.pdf' -> '0053416491'
+      '0053416491_InvoiceOfSummary.pdf' -> '0053416491'
+      '0053416491_NONVAT_HOME_dup1.pdf' -> '0053416491'
+      'SLT20eBill-0005842786.pdf' -> '0005842786'
+      '0005842786.pdf' -> '0005842786'
+    """
+    if not filename:
+        return ""
+    base = os.path.splitext(filename)[0]
+    u_base = base.upper()
+    if u_base.startswith("00_") or u_base == "SUMMARY" or u_base.endswith("_SUMMARY") or u_base.startswith("SUMMARY_"):
+        return ""
+    if base.startswith("SLT20eBill-"):
+        base = base[len("SLT20eBill-"):]
+    
+    # Split on the first underscore to separate account number from template type
+    parts = base.split("_", 1)
+    return normalize_account_number(parts[0])
+
+
+def create_summary_groups(date_base_dir, processing_results=None, log_callback=None):
     """
     Create a summary/ folder under date_base_dir that groups each Summary Statement
     with all its sub-account bills, searching across ALL cycle folders for that date.
@@ -228,90 +296,175 @@ def create_summary_groups(date_base_dir, processing_results, log_callback=None):
         output/YYYY-MM-DD/
         ├── Summary_Statement/     ← cycle folders unchanged
         ├── VAT_Enterprise/
-        └── summary/               ← NEW: sits at the date level
+        └── summary/               ← sits at the date level
             └── CRxxxxxxxxx/       ← one folder per summary statement
+                ├── manifest.json      ← cached account mapping for future runs
                 ├── 00_<summary>.pdf   ← summary statement first (00_ prefix)
                 ├── <account1>.pdf
                 └── <account2>.pdf
 
     Args:
         date_base_dir (str|Path): The dated output folder (e.g. output/2026-08-21/).
-        processing_results (list[ProcessingResult]): Results from process_single_file / process_batch.
+        processing_results (list[ProcessingResult]|None): Results from process_single_file / process_batch.
         log_callback (callable|None): Optional logging function.
     """
+    import json
+    import re
     date_base_dir = str(date_base_dir)
-
-    # Filter results that carry summary metadata
-    summary_results = [r for r in processing_results if getattr(r, "summary_meta", None)]
-    if not summary_results:
+    if not os.path.exists(date_base_dir):
         return
 
-    # Collect ALL PDFs under date_base_dir across every cycle folder,
-    # but skip the summary/ folder itself to avoid circular copying.
-    all_pdfs = {}  # filename -> absolute path
+    summary_root = os.path.join(date_base_dir, "summary")
+    os.makedirs(summary_root, exist_ok=True)
+
+    # 1. Gather all summary metadata (from current processing_results + existing manifests)
+    # Mapping: customer_ref -> {"account_nos": set(...), "pdf_names": set(...)}
+    summary_map = {}
+
+    # Load existing manifests from disk if present
+    if os.path.exists(summary_root):
+        for cr_name in os.listdir(summary_root):
+            cr_dir = os.path.join(summary_root, cr_name)
+            manifest_p = os.path.join(cr_dir, "manifest.json")
+            if os.path.isdir(cr_dir) and os.path.exists(manifest_p):
+                try:
+                    with open(manifest_p, "r", encoding="utf-8") as mf:
+                        mdata = json.load(mf)
+                        c_ref = mdata.get("customer_ref", cr_name)
+                        accs = {normalize_account_number(a) for a in mdata.get("account_nos", []) if normalize_account_number(a)}
+                        pdf_n = mdata.get("pdf_name", "")
+                        summary_map[c_ref] = {
+                            "account_nos": accs,
+                            "pdf_names": {pdf_n} if pdf_n else set(),
+                        }
+                except Exception:
+                    pass
+
+    # Incorporate incoming processing_results
+    if processing_results:
+        for r in processing_results:
+            meta = getattr(r, "summary_meta", None)
+            if not meta or not isinstance(meta, dict):
+                continue
+            c_ref = re.sub(r'[^A-Za-z0-9_-]+', '_', str(meta.get("customer_ref", "") or "")).strip('_')
+            if not c_ref:
+                continue
+            accs = {normalize_account_number(a) for a in meta.get("account_nos", []) if normalize_account_number(a)}
+            pdf_n = meta.get("pdf_name", "")
+
+            if c_ref not in summary_map:
+                summary_map[c_ref] = {"account_nos": set(), "pdf_names": set()}
+            summary_map[c_ref]["account_nos"].update(accs)
+            if pdf_n:
+                summary_map[c_ref]["pdf_names"].add(pdf_n)
+
+    if not summary_map:
+        return
+
+    # 2. Persist updated manifest.json for each CR group
+    for c_ref, info in summary_map.items():
+        cr_dir = os.path.join(summary_root, c_ref)
+        os.makedirs(cr_dir, exist_ok=True)
+        manifest_p = os.path.join(cr_dir, "manifest.json")
+        try:
+            with open(manifest_p, "w", encoding="utf-8") as mf:
+                json.dump({
+                    "customer_ref": c_ref,
+                    "account_nos": sorted(list(info["account_nos"])),
+                    "pdf_names": sorted(list(info["pdf_names"])),
+                }, mf, indent=2)
+        except Exception:
+            pass
+
+    # 3. Discover all candidate PDF files under date_base_dir (excluding summary/ folder)
+    discovered_pdfs = []
     for dirpath, dirnames, filenames in os.walk(date_base_dir):
         rel = os.path.relpath(dirpath, date_base_dir)
-        # Skip the summary folder itself
         if rel == "summary" or rel.startswith("summary" + os.sep):
-            dirnames[:] = []  # don't descend further
+            dirnames[:] = []  # Do not descend into summary/
             continue
         for fname in filenames:
             if fname.lower().endswith(".pdf"):
-                # First occurrence wins (avoids Batch_2 overwriting Batch_1 copy)
-                if fname not in all_pdfs:
-                    all_pdfs[fname] = os.path.join(dirpath, fname)
+                discovered_pdfs.append((fname, os.path.join(dirpath, fname)))
 
-    summary_root = os.path.join(date_base_dir, "summary")
+    # 4. Inverted map: norm_account_no -> list of c_ref
+    account_to_cr = {}
+    for c_ref, info in summary_map.items():
+        for acc in info["account_nos"]:
+            account_to_cr.setdefault(acc, []).append(c_ref)
 
-    for result in summary_results:
-        meta = result.summary_meta
-        customer_ref = meta.get("customer_ref", "unknown")
-        account_nos = meta.get("account_nos", [])
-        summary_pdf_name = meta.get("pdf_name", "")
+    # All summary PDF names across all groups
+    all_summary_pdf_names = set()
+    for info in summary_map.values():
+        all_summary_pdf_names.update(info["pdf_names"])
 
-        group_dir = os.path.join(summary_root, customer_ref)
-        os.makedirs(group_dir, exist_ok=True)
+    moved_count_by_cr = {c_ref: 0 for c_ref in summary_map}
+    errors_by_cr = {c_ref: 0 for c_ref in summary_map}
 
-        copied = 0
-        errors = 0
+    # First move summary statements
+    for c_ref, info in summary_map.items():
+        cr_dir = os.path.join(summary_root, c_ref)
+        summary_targets = set(info["pdf_names"])
+        summary_targets.add(f"{c_ref}_SUMMARY.pdf")
 
-        # 1. Move the summary statement PDF first (prefixed with 00_ to sort to top)
-        if summary_pdf_name and summary_pdf_name in all_pdfs:
-            src = all_pdfs[summary_pdf_name]
-            dest_name = f"00_{summary_pdf_name}"
-            dest = os.path.join(group_dir, dest_name)
-            try:
-                if os.path.exists(src):
-                    shutil.move(src, dest)
-                    copied += 1
-            except Exception as e:
-                errors += 1
-                if log_callback:
-                    log_callback(f"  Summary group warning: could not move summary PDF {summary_pdf_name}: {e}")
-
-        # 2. Move matching sub-account bills (account number must appear in filename)
-        for acc_no in account_nos:
-            if not acc_no:
+        for fname, src_path in discovered_pdfs:
+            if not os.path.exists(src_path):
                 continue
-            matched = [
-                (fname, path)
-                for fname, path in all_pdfs.items()
-                if acc_no in fname and fname != summary_pdf_name
-            ]
-            for fname, src in matched:
-                dest = os.path.join(group_dir, fname)
-                if os.path.exists(dest) or not os.path.exists(src):
-                    continue  # already moved (e.g. account appears in multiple summaries)
-                try:
-                    shutil.move(src, dest)
-                    copied += 1
-                except Exception as e:
-                    errors += 1
-                    if log_callback:
-                        log_callback(f"  Summary group warning: could not move {fname}: {e}")
+            is_match = False
+            if fname in summary_targets:
+                is_match = True
+            elif f"{c_ref}_SUMMARY" in fname.upper():
+                is_match = True
 
-        if log_callback:
-            status = f"({errors} errors)" if errors else "OK"
-            log_callback(
-                f"  Summary group [{customer_ref}]: {copied} file(s) -> {group_dir} {status}"
-            )
+            if is_match:
+                dest_name = f"00_{fname}" if not fname.startswith("00_") else fname
+                dest_path = os.path.join(cr_dir, dest_name)
+                try:
+                    if os.path.exists(src_path) and os.path.abspath(src_path) != os.path.abspath(dest_path):
+                        shutil.move(src_path, dest_path)
+                        moved_count_by_cr[c_ref] += 1
+                except Exception as e:
+                    errors_by_cr[c_ref] += 1
+                    if log_callback:
+                        log_callback(f"  Summary group warning: could not move summary PDF {fname}: {e}")
+
+    # Next move matching account bills
+    for fname, src_path in discovered_pdfs:
+        if not os.path.exists(src_path):
+            continue
+        # Skip summary files themselves
+        if fname in all_summary_pdf_names or fname.startswith("00_") or "SUMMARY" in fname.upper():
+            continue
+
+        extracted_acc = extract_account_from_filename(fname)
+        if not extracted_acc:
+            continue
+
+        matching_crs = account_to_cr.get(extracted_acc, [])
+        if not matching_crs:
+            continue
+
+        for target_cr in matching_crs:
+            cr_dir = os.path.join(summary_root, target_cr)
+            dest_path = os.path.join(cr_dir, fname)
+            if os.path.exists(dest_path):
+                continue
+            try:
+                if os.path.exists(src_path):
+                    shutil.move(src_path, dest_path)
+                    moved_count_by_cr[target_cr] += 1
+                    break  # File moved to this CR folder
+            except Exception as e:
+                errors_by_cr[target_cr] += 1
+                if log_callback:
+                    log_callback(f"  Summary group warning: could not move {fname} to {target_cr}: {e}")
+
+    if log_callback:
+        for c_ref in summary_map:
+            moved = moved_count_by_cr.get(c_ref, 0)
+            errs = errors_by_cr.get(c_ref, 0)
+            if moved > 0 or errs > 0:
+                status = f"({errs} errors)" if errs else "OK"
+                log_callback(
+                    f"  Summary group [{c_ref}]: {moved} file(s) moved -> {os.path.join(summary_root, c_ref)} {status}"
+                )

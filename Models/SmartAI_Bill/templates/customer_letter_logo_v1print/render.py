@@ -244,10 +244,10 @@ class CustomerLetterRenderer:
                 for k in [C.FILENAME_COLUMN, "ACCOUNT", "ACCOUNT_NO", "ACC_NO", "ACCOUNT_NUMBER", "Account No", "Account", "SERIAL_NUM", "CUSTOMER_REF", "TELEPHONE"]:
                     val = cust.raw.get(k)
                     if val is not None and str(val).strip() not in ("", "None", "0"):
-                        acc = str(val).strip().replace(" ", "")
+                        acc = str(val).strip().replace(" ", "").replace("_", "")
                         break
             if not acc and getattr(cust, "telephone", None):
-                acc = str(cust.telephone).strip().replace(" ", "")
+                acc = str(cust.telephone).strip().replace(" ", "").replace("_", "")
             if not acc:
                 acc = f"cust_{i:04d}"
 

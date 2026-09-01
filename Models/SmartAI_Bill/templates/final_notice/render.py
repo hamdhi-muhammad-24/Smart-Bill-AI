@@ -119,7 +119,7 @@ class FinalNoticeRenderer:
             writer.write(buf)
             pdf_bytes = buf.getvalue()
 
-            acc = str(cust.raw.get(C.FILENAME_COLUMN) or cust.fields.get("account") or f"cust_{i:04d}").strip().replace(" ", "")
+            acc = str(cust.raw.get(C.FILENAME_COLUMN) or cust.fields.get("account") or f"cust_{i:04d}").strip().replace(" ", "").replace("_", "")
             fname = f"{acc}_Final_Notice.pdf"
             self.generated_pdfs.append((fname, pdf_bytes, cust))
         return self.generated_pdfs

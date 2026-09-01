@@ -196,8 +196,8 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
         else:
             account_number = "unknown"
             if isinstance(data, dict):
-                account_number = str(data.get("account_number", "unknown"))
-            account_number = re.sub(r'[^A-Za-z0-9_-]+', '_', account_number).strip('_')
+                account_number = str(data.get("account_number") or data.get("customer_ref_no") or "unknown")
+            account_number = re.sub(r'[^A-Za-z0-9_-]+', '_', account_number).strip('_').replace('_', '')
             if not account_number:
                 account_number = "unknown"
 
@@ -232,12 +232,13 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
 
         # Capture summary statement metadata for folder grouping
         if template_id == "summary_statement" and result.success and isinstance(data, dict):
+            from processing.output_manager import normalize_account_number
             customer_ref = re.sub(r'[^A-Za-z0-9_-]+', '_', str(data.get("customer_ref_no", "") or "")).strip('_')
-            account_nos = [
-                str(a.get("account_no", "")).strip()
-                for a in data.get("accounts", [])
-                if a.get("account_no", "").strip()
-            ]
+            account_nos = []
+            for a in data.get("accounts", []):
+                norm_a = normalize_account_number(a.get("account_no", ""))
+                if norm_a and norm_a not in account_nos:
+                    account_nos.append(norm_a)
             if customer_ref:
                 result.summary_meta = {
                     "customer_ref": customer_ref,

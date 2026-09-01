@@ -2,6 +2,8 @@
 import os
 from datetime import datetime
 from reportlab.lib.colors import black
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_vat_reg_printable, is_tax_section_printable
@@ -12,13 +14,39 @@ from templates.invoice_of_summary.config import (
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template), registered under names distinct from Helvetica so no other
+# template is affected.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
+    pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
+
 
 class InvoiceOfSummaryRenderer(BaseRenderer):
+    FONT_NAME = "Calibri"
 
     def __init__(self):
         super().__init__(TEMPLATE_PDF)
         self._y        = CHARGES_TABLE["otherpage_y_start"]
         self._on_page1 = True
+
+    def text(self, x, y, value, size=10, bold=False, align="left"):
+        """Override the base Helvetica text() with Calibri, scoped to this
+        template only."""
+        if value is None or value == "":
+            return
+        c = self.canvas
+        font = "Calibri-Bold" if bold else "Calibri"
+        c.setFont(font, size)
+        c.setFillColor(black)
+        text = str(value)
+        if align == "right":
+            c.drawRightString(x, y, text)
+        elif align == "center":
+            c.drawCentredString(x, y, text)
+        else:
+            c.drawString(x, y, text)
 
     def render(self, data):
         self.check_red_notice(data)
@@ -203,7 +231,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
 
         # "Summary of Invoice" heading + underline, above the block
         c = self.canvas
-        c.setFont("Helvetica-Bold", FONTS["total"]["size"])
+        c.setFont("Calibri-Bold", FONTS["total"]["size"])
         c.drawString(x, self._y, "Summary of Invoice")
         c.setLineWidth(0.5)
         c.setStrokeColor(black)
@@ -213,7 +241,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         def _line(text, amount=None, bold=False, size=None):
             self._ensure_space(needed=lh)
             c = self.canvas
-            c.setFont("Helvetica-Bold" if bold else "Helvetica",
+            c.setFont("Calibri-Bold" if bold else "Calibri",
                       size if size is not None else f["size"])
             c.drawString(x, self._y, text)
             if amount is not None:
@@ -263,7 +291,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         c.line(x, y + 11, ax, y + 11)   # Top horizontal line
         c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
 
-        c.setFont("Helvetica-Bold", f["size"])
+        c.setFont("Calibri-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
         c.drawRightString(ax, y, f"{data['total_charges']:,.2f}")
 
@@ -306,7 +334,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         x     = CHARGES_TABLE["group_ref_x"]
         amt_x = CHARGES_TABLE["amount_x"]
         c = self.canvas
-        c.setFont("Helvetica-Bold", FONTS["total"]["size"])
+        c.setFont("Calibri-Bold", FONTS["total"]["size"])
         c.drawString(x, self._y, "Charges in Detail")
         c.setLineWidth(0.5)
         c.setStrokeColor(black)
@@ -603,13 +631,13 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         for idx in range(total):
             c = self.canvases[idx][1]
             if idx == 0:
-                c.setFont("Helvetica", 9)
+                c.setFont("Calibri", 9)
                 c.drawRightString(540, 753, f"1  of  {total}")
             else:
-                c.setFont("Helvetica-Bold", 10)
+                c.setFont("Calibri-Bold", 10)
                 c.drawString(45, 795,
                              f'Invoice No.{data["invoice_number"]}')
-                c.setFont("Helvetica", 9)
+                c.setFont("Calibri", 9)
                 c.drawRightString(540, 795,
                                   f"{idx + 1}  of  {total}")
 
