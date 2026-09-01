@@ -229,37 +229,77 @@ class VATEnterpriseRenderer(BaseRenderer):
         self.text(CHARGES_TABLE["amount_x"], CHARGES_TABLE["page1_y_start"] + 11.0,
                   f"({code}.)", size=f["size"], bold=True, align="right")
 
-    def _draw_charges(self, product_labels):
-        y = CHARGES_TABLE["page1_y_start"]
-        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"])
+    def _draw_charge_group(self, group, y, y_min, label_x, desc_x):
         line_h = CHARGES_TABLE["line_h"]
         lp_gap = CHARGES_TABLE["product_label_y_gap"]
-        f = FONTS["product_label"]
+        f  = FONTS["product_label"]
         fc = FONTS["charge_line"]
 
-        for product in product_labels:
-            space = lp_gap + len(product["charges"]) * line_h
-            if y - space < y_min:
+        space = lp_gap + len(group["charges"]) * line_h
+        if y - space < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+            y_min = CHARGES_TABLE["otherpage_y_min"]
+
+        self.text(label_x, y, group["label"], size=f["size"], bold=f["bold"])
+        y -= lp_gap
+
+        for charge in group["charges"]:
+            if y < y_min:
                 self.new_page()
                 y = CHARGES_TABLE["otherpage_y_start"]
                 y_min = CHARGES_TABLE["otherpage_y_min"]
+            self.text(desc_x, y, charge["description"], size=fc["size"])
+            if charge["amount"]:
+                self.number(CHARGES_TABLE["amount_x"], y,
+                            charge["amount"], size=fc["size"],
+                            align="right")
+            y -= line_h
+        return y, y_min
 
-            self.text(CHARGES_TABLE["product_label_x"], y,
-                      product["label"], size=f["size"], bold=f["bold"])
-            y -= lp_gap
+    def _draw_charges(self, product_labels):
+        y = CHARGES_TABLE["page1_y_start"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"])
+        line_h    = CHARGES_TABLE["line_h"]
+        label_x   = CHARGES_TABLE["product_label_x"]
+        desc_x    = CHARGES_TABLE["desc_x"]
+        indent    = desc_x - label_x
 
-            for charge in product["charges"]:
-                if y < y_min:
+        # Indent levels (see vat_home's parser/renderer for the same rule):
+        # level 0 (label_x) - only an SLTSUBSCRIPTIONREF (SB-ref) header.
+        # level 1 (desc_x)  - every other group header: a nested
+        #   SLTPRODUCTLABEL child under an SB-ref, or a standalone
+        #   top-level product/phone group - both print at this same indent.
+        # level 2 (desc_x + indent) - charge/description lines under any
+        #   group header.
+        prev_was_subscription_ref = False
+        for product in product_labels:
+            is_subscription_ref = "children" in product
+            base_x = label_x if is_subscription_ref else desc_x
+            # One blank line marks the transition out of an SB-ref's
+            # children into the next standalone group - not between
+            # consecutive standalone groups.
+            if prev_was_subscription_ref and not is_subscription_ref:
+                if y - line_h < y_min:
                     self.new_page()
                     y = CHARGES_TABLE["otherpage_y_start"]
                     y_min = CHARGES_TABLE["otherpage_y_min"]
-                self.text(CHARGES_TABLE["desc_x"], y,
-                          charge["description"], size=fc["size"])
-                if charge["amount"]:
-                    self.number(CHARGES_TABLE["amount_x"], y,
-                                charge["amount"], size=fc["size"],
-                                align="right")
                 y -= line_h
+
+            y, y_min = self._draw_charge_group(
+                product, y, y_min, base_x, base_x + indent)
+
+            for i, child in enumerate(product.get("children", [])):
+                if i > 0:
+                    if y - line_h < y_min:
+                        self.new_page()
+                        y = CHARGES_TABLE["otherpage_y_start"]
+                        y_min = CHARGES_TABLE["otherpage_y_min"]
+                    y -= line_h
+                y, y_min = self._draw_charge_group(
+                    child, y, y_min, desc_x, desc_x + indent)
+
+            prev_was_subscription_ref = is_subscription_ref
         return y
 
     def _draw_adjustments(self, data, y):
