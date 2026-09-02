@@ -241,28 +241,29 @@ class NonVATEnterpriseRenderer(BaseRenderer):
         has_nonzero = any(t['amount'] for t in data.get("taxes", []))
         if not is_tax_section_printable(data.get("tax_status"), has_nonzero):
             return y
-        f      = FONTS["taxes"]
+    
+        f = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
-        y_min  = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+    
         if y - line_h * 2 < y_min:
             self.new_page()
             y = CHARGES_TABLE["otherpage_y_start"]
             y_min = CHARGES_TABLE["otherpage_y_min"]
 
+    # Header line
         self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies",
-                  size=f["size"], bold=True)
+              size=f["size"], bold=True)
         y -= line_h
-        for t in data.get("taxes", []):
-            if t["amount"]:
-                if y - line_h < y_min:
-                    self.new_page()
-                    y = CHARGES_TABLE["otherpage_y_start"]
-                    y_min = CHARGES_TABLE["otherpage_y_min"]
-                self.text(CHARGES_TABLE["desc_x"], y,
-                          t["name"], size=f["size"])
-                self.number(CHARGES_TABLE["amount_x"], y,
-                            t["amount"], size=f["size"], align="right")
-                y -= line_h
+    
+    # Content line with amount
+        taxes_total = sum(t.get("amount", 0) for t in data.get("taxes", []))
+        self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies",
+              size=f["size"], bold=False)
+        self.number(CHARGES_TABLE["amount_x"], y,
+                taxes_total, size=f["size"], align="right")
+        y -= line_h
+    
         return y
 
     def _draw_total_charges_dynamic(self, data, y):

@@ -179,7 +179,15 @@ class ProductLabelGroupingRenderer(BaseRenderer):
                   f"({code}.)", size=f["size"], bold=True, align="right")
 
     def _draw_charges_with_subtotals(self, product_labels):
-        """BPR12: per-product recurring + one-off subtotals."""
+        """BPR12: per-product recurring + one-off subtotals.
+
+        Print order inside every product label (matches GMF tag order):
+            1. charge lines (SLTPRODLABELDET)  -> description ONLY;
+               the amount is shown in the subtotal, not on the line
+            2. Product Recurring Subtotal
+            3. Product One-off Subtotal
+            4. usage (event) lines + discounts -> description + amount
+        """
         y      = CHARGES_TABLE["page1_y_start"]
         y_min  = CHARGES_TABLE["page1_y_min"]
         line_h = CHARGES_TABLE["line_h"]
@@ -188,14 +196,30 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         fc = FONTS["charge_line"]
         fs = FONTS["subtotal"]
 
+        def _page_break_if_needed(y, y_min):
+            if y < y_min:
+                self.new_page()
+                return (CHARGES_TABLE["otherpage_y_start"],
+                        CHARGES_TABLE["otherpage_y_min"])
+            return y, y_min
+
         for product in product_labels:
-            sub_lines = (
-                (1 if product.get("recurring_subtotal") else 0) +
-                (1 if product.get("oneoff_subtotal") else 0)
-            )
-            space = lp_gap + len(product["charges"]) * line_h + \
-                sub_lines * line_h
-            if y - space < y_min:
+            charge_lines = [c for c in product["charges"]
+                            if c.get("kind") == "charge"]
+            event_lines  = [c for c in product["charges"]
+                            if c.get("kind") != "charge"]
+
+            subtotals = []
+            if product.get("recurring_subtotal"):
+                subtotals.append(("Product Recurring Subtotal",
+                                  product["recurring_subtotal"]))
+            if product.get("oneoff_subtotal"):
+                subtotals.append(("Product One-off Subtotal",
+                                  product["oneoff_subtotal"]))
+
+            # keep the whole product block together if it fits
+            n_lines = len(charge_lines) + len(subtotals) + len(event_lines)
+            if y - (lp_gap + n_lines * line_h) < y_min:
                 self.new_page()
                 y     = CHARGES_TABLE["otherpage_y_start"]
                 y_min = CHARGES_TABLE["otherpage_y_min"]
@@ -204,41 +228,33 @@ class ProductLabelGroupingRenderer(BaseRenderer):
                       product["label"], size=f["size"], bold=f["bold"])
             y -= lp_gap
 
-            for charge in product["charges"]:
-                if y < y_min:
-                    self.new_page()
-                    y     = CHARGES_TABLE["otherpage_y_start"]
-                    y_min = CHARGES_TABLE["otherpage_y_min"]
+            # 1. charge lines - description only, NO amount
+            for charge in charge_lines:
+                y, y_min = _page_break_if_needed(y, y_min)
                 self.text(CHARGES_TABLE["desc_x"], y,
                           charge["description"], size=fc["size"])
-                if charge["amount"]:
+                y -= line_h
+
+            # 2./3. subtotals - printed BEFORE the event lines
+            for label, amount in subtotals:
+                y, y_min = _page_break_if_needed(y, y_min)
+                self.text(CHARGES_TABLE["desc_x"] +
+                          CHARGES_TABLE["subtotal_indent"], y,
+                          label, size=fs["size"], bold=fs["bold"])
+                self.number(CHARGES_TABLE["subtotal_x"], y, amount,
+                            size=fs["size"], bold=fs["bold"],
+                            align="right")
+                y -= line_h
+
+            # 4. usage + discount lines - WITH amount
+            for line in event_lines:
+                y, y_min = _page_break_if_needed(y, y_min)
+                self.text(CHARGES_TABLE["desc_x"], y,
+                          line["description"], size=fc["size"])
+                if line["amount"]:
                     self.number(CHARGES_TABLE["amount_x"], y,
-                                charge["amount"], size=fc["size"],
+                                line["amount"], size=fc["size"],
                                 align="right")
-                y -= line_h
-
-            if product.get("recurring_subtotal"):
-                self.text(
-                    CHARGES_TABLE["desc_x"] +
-                    CHARGES_TABLE["subtotal_indent"], y,
-                    "Product Recurring Subtotal",
-                    size=fs["size"], bold=fs["bold"])
-                self.number(CHARGES_TABLE["subtotal_x"], y,
-                            product["recurring_subtotal"],
-                            size=fs["size"], bold=fs["bold"],
-                            align="right")
-                y -= line_h
-
-            if product.get("oneoff_subtotal"):
-                self.text(
-                    CHARGES_TABLE["desc_x"] +
-                    CHARGES_TABLE["subtotal_indent"], y,
-                    "Product One-off Subtotal",
-                    size=fs["size"], bold=fs["bold"])
-                self.number(CHARGES_TABLE["subtotal_x"], y,
-                            product["oneoff_subtotal"],
-                            size=fs["size"], bold=fs["bold"],
-                            align="right")
                 y -= line_h
 
         return y
@@ -278,22 +294,32 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         return y
 
     def _draw_taxes_only(self, data, y):
-        """BPR11/24."""
         has_nonzero = any(t['amount'] for t in data.get("taxes", []))
         if not is_tax_section_printable(data.get("tax_status"), has_nonzero):
             return y
-        f      = FONTS["taxes"]
+    
+        f = FONTS["taxes"]
         line_h = CHARGES_TABLE["line_h"]
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
+    
+        if y - line_h * 2 < y_min:
+            self.new_page()
+            y = CHARGES_TABLE["otherpage_y_start"]
+            y_min = CHARGES_TABLE["otherpage_y_min"]
+
+    # Header line
         self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies",
-                  size=f["size"], bold=True)
+              size=f["size"], bold=True)
         y -= line_h
-        for t in data.get("taxes", []):
-            if t["amount"]:
-                self.text(CHARGES_TABLE["desc_x"], y,
-                          t["name"], size=f["size"])
-                self.number(CHARGES_TABLE["amount_x"], y,
-                            t["amount"], size=f["size"], align="right")
-                y -= line_h
+    
+    # Content line with amount
+        taxes_total = sum(t.get("amount", 0) for t in data.get("taxes", []))
+        self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies",
+              size=f["size"], bold=False)
+        self.number(CHARGES_TABLE["amount_x"], y,
+                taxes_total, size=f["size"], align="right")
+        y -= line_h
+    
         return y
 
 
