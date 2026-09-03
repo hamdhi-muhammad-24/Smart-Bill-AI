@@ -162,6 +162,8 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
         bill_handling = file_info.get("bill_handling", "")
         category = categorize_bill_handling_code(bill_handling)
         is_print_invoice = (category == "print")
+        if isinstance(data, dict) and "template_id" not in data:
+            data["template_id"] = template_id
 
         if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):
             renderer = NonVATPrintRenderer()

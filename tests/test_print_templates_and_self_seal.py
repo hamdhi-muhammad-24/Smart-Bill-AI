@@ -79,12 +79,94 @@ def test_nonvat_print_renderer_red():
     assert renderer.page_count() == 1
 
 
+def test_nonvat_print_renderer_home_taxes_total_only():
+    """Test NonVATPrintRenderer shows only total summation of Taxes & Levies for NonVAT Home."""
+    import fitz
+    renderer = NonVATPrintRenderer()
+    data = _sample_nonvat_data(is_red=False)
+    data["badge"] = "HOME"
+    data["template_id"] = "nonvat_home"
+    data["taxes"] = [
+        {"name": "CESS", "amount": 39.43},
+        {"name": "Recovery in lieu of SSCL", "amount": 73.42},
+        {"name": "Telecommunication Levy-15%", "amount": 295.88},
+        {"name": "VAT-18%", "amount": 529.44},
+    ]
+    data["taxes_total"] = 938.17
+    data["inv_total_tax"] = 938.17
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+
+    try:
+        renderer.render(data)
+        renderer.save(pdf_path)
+
+        doc = fitz.open(pdf_path)
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+
+        assert "Taxes & Levies" in full_text
+        assert "938.17" in full_text
+        assert "CESS" not in full_text
+        assert "Recovery in lieu of SSCL" not in full_text
+        assert "Telecommunication Levy" not in full_text
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+
 def test_nonvat_home_standard_renderer_keeps_layout():
     """Test standard NonVATHomeRenderer uses layout.pdf."""
     renderer = NonVATHomeRenderer()
     data = _sample_nonvat_data(is_red=False)
     renderer.render(data)
     assert renderer.template_pdf_path.endswith("layout.pdf")
+
+
+def test_nonvat_home_taxes_total_only_and_no_detailed_usage():
+    """Test NonVATHomeRenderer shows only total summation of Taxes & Levies and no Detailed Usage charges."""
+    import fitz
+    renderer = NonVATHomeRenderer()
+    data = _sample_nonvat_data(is_red=False)
+    data["taxes"] = [
+        {"name": "CESS", "amount": 39.43},
+        {"name": "Recovery in lieu of SSCL", "amount": 73.42},
+        {"name": "Telecommunication Levy-15%", "amount": 295.88},
+        {"name": "VAT-18%", "amount": 529.44},
+    ]
+    data["taxes_total"] = 938.17
+    data["inv_total_tax"] = 938.17
+    data["usage_sections"] = [
+        {
+            "label": "Additional Channels",
+            "phone": "0112858589",
+            "subsections": [{"label": "0112858589", "rows": [["23/09/2025", "10:11:05", "Channel", "Star Sports 1", "100.000"]]}],
+        }
+    ]
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+
+    try:
+        renderer.render(data)
+        renderer.save(pdf_path)
+
+        doc = fitz.open(pdf_path)
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+
+        assert "Taxes & Levies" in full_text
+        assert "938.17" in full_text
+        # Detailed tax lines must NOT appear
+        assert "CESS" not in full_text
+        assert "Recovery in lieu of SSCL" not in full_text
+        assert "Telecommunication Levy" not in full_text
+        # Detailed usage charges must NOT appear
+        assert "Detailed Usage Charges" not in full_text
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
 
 
 def test_nonvat_enterprise_standard_renderer_keeps_layout():
