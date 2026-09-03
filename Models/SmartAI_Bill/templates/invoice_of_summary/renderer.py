@@ -763,14 +763,20 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             for row in rows:
                 col_x, amount_x, _ = (
                     self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
-                disp       = ([f"{row[0]}  {row[1]}"] + row[2:]
-                              if combine else list(row))
-                charge_val = get_last_numeric(row)
+                row_clean = list(row)
+                while row_clean and row_clean[-1] == '':
+                    row_clean.pop()
+
+                disp       = ([f"{row_clean[0]}  {row_clean[1]}"] + row_clean[2:]
+                              if combine else list(row_clean))
+                charge_val = get_last_numeric(row_clean)
 
                 # Wrap every text cell FIRST so we know the real row
                 # height before reserving space or drawing anything -
                 # same pattern as draw_table_with_overflow.
-                n_cells    = min(len(disp) - 1, len(col_x))
+                # Only wrap descriptive columns (excluding the right-aligned charge column)
+                num_text_cols = min(len(disp_h) - 1 if disp_h else len(disp) - 1, len(col_x))
+                n_cells    = min(len(disp) - 1, num_text_cols)
                 cell_lines = []
                 for i in range(n_cells):
                     max_w = ((col_x[i + 1] - col_x[i] - pad) if i + 1 < len(col_x)

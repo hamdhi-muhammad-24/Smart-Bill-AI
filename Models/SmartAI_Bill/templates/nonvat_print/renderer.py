@@ -211,22 +211,9 @@ class NonVATPrintRenderer(BaseRenderer):
 
         self.text(prod_x, y, "Taxes & Levies", size=f["size"], bold=True)
         y -= line_h
-
-        is_home = (data.get("badge", "").upper() == "HOME" or data.get("template_id") == "nonvat_home")
-        if is_home:
-            self.text(desc_x, y, "Taxes & Levies", size=f["size"])
-            self.number(amt_x, y, total_tax, size=f["size"], align="right")
-            y -= line_h
-        else:
-            for t in data.get("taxes", []):
-                if t.get("amount"):
-                    if y - line_h < y_min:
-                        self.new_page()
-                        y = CHARGES_TABLE["otherpage_y_start"]
-                        y_min = CHARGES_TABLE["otherpage_y_min"]
-                    self.text(desc_x, y, t.get("name", ""), size=f["size"])
-                    self.number(amt_x, y, t.get("amount", 0), size=f["size"], align="right")
-                    y -= line_h
+        self.text(desc_x, y, "Taxes & Levies", size=f["size"])
+        self.number(amt_x, y, total_tax, size=f["size"], align="right")
+        y -= line_h
         return y
 
     def _draw_total_charges_dynamic(self, data, y):

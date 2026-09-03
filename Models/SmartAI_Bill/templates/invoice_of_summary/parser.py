@@ -207,6 +207,8 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                     if current_subsection is not None:
                         row = [value] + [p.strip()
                                          for p in rest.split('|')]
+                        while row and row[-1] == '':
+                            row.pop()
                         current_subsection['rows'].append(row)
                 elif tag == 'TENDEVENT':
                     if (current_subsection is not None and

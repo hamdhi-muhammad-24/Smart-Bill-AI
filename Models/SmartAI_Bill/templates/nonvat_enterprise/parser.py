@@ -20,6 +20,7 @@ _GROUPSUBTOTAL_RE = re.compile(r'^ITEMGROUPSUBTOTAL_(\d+)_(\d+)$')
 
 def parse_nonvat_enterprise(file_path: str) -> dict:
     data: dict[str, Any] = {
+        "template_id":           "nonvat_enterprise",
         "telephone_number":      "",
         "account_number":        "",
         "invoice_number":        "",
@@ -43,6 +44,7 @@ def parse_nonvat_enterprise(file_path: str) -> dict:
         "adjustments":           [],
         "taxes":                 [],
         "taxes_total":           0,
+        "inv_total_tax":         None,
         "tax_status":            "",
         "total_charges":         0,
         "payments":              [],
@@ -367,6 +369,9 @@ def parse_nonvat_enterprise(file_path: str) -> dict:
                     data['taxes'].append({'name': all_parts[0], 'amount': amt})
                     data['taxes_total'] += amt
 
+            elif key == 'INVTOTALTAX':
+                data['inv_total_tax'] = to_float(value)
+
             elif key == 'ADJ':
                 raw       = rest.split('|')
                 all_parts = [value] + raw
@@ -419,6 +424,9 @@ def parse_nonvat_enterprise(file_path: str) -> dict:
 
     from core.customer_type_mapper import get_badge
     data['badge'] = get_badge(data['customer_type'])
+
+    if data.get('inv_total_tax') is not None:
+        data['taxes_total'] = data['inv_total_tax']
 
     # BPR22: drop subsections with no rows AND zero subtotal
     for sec in usage_sections.values():
