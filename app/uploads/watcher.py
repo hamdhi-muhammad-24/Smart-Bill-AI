@@ -128,18 +128,11 @@ def _get_cycle_from_billdate(file_path: str | Path) -> int | None:
                         for cycle, days in ((1, range(1, 4)), (2, range(8, 11)), (3, range(16, 19)), (4, range(24, 27))):
                             if bill_day in days:
                                 return cycle
-                        if bill_day <= 7:
-                            return 1
-                        elif bill_day <= 14:
-                            return 2
-                        elif bill_day <= 21:
-                            return 3
-                        else:
-                            return 4
-                    return 1
+                        return None
+                    return None
     except (OSError, ValueError):
-        return 1
-    return 1
+        return None
+    return None
 
 
 def _resolve_folder_type(folder_name: str, file_path: str | Path) -> str:
@@ -147,7 +140,7 @@ def _resolve_folder_type(folder_name: str, file_path: str | Path) -> str:
     if folder_name != INCOMING_CYCLE_FOLDER:
         return folder_name
     cycle_number = _get_cycle_from_billdate(file_path)
-    return f"Cycle_{cycle_number}" if cycle_number else "Cycle_1"
+    return f"Cycle_{cycle_number}" if cycle_number else NO_CYCLE_FOLDER
 
 
 def _get_billing_mode() -> str:

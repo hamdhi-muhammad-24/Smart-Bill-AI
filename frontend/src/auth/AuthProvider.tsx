@@ -73,7 +73,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const hasAuth = url.includes('code=') || url.includes('error=') || url.includes('id_token=') || sessionStorage.getItem('msal-post-login') === 'pending'
     return hasAuth || !getToken()
   })
-  const hasHandledRedirect = useRef(false)
   const isInitializing = useRef(false)
 
   useEffect(() => {
@@ -87,73 +86,104 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isInitializing.current = true
 
       try {
-        // Handle redirect only once if this is a redirect return
-        if (!hasHandledRedirect.current) {
+        let token: string | null = null
+        let account = accounts[0] || instance.getAllAccounts()[0] || null
+
+        // 1. Check redirect result from MSAL
+        try {
           const redirectResult = await instance.handleRedirectPromise()
-
-          if (redirectResult && redirectResult.accessToken) {
-            hasHandledRedirect.current = true
-            setToken(redirectResult.accessToken)
-            sessionStorage.removeItem('msal-post-login')
-
-            const me = await authMe()
-            const s = buildSessionFromMe(me)
-            setSession(s)
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-
-            if (me.is_new_user) {
-              navigate('/request-access', { replace: true })
-            } else {
-              navigate('/role-select', { replace: true })
+          if (redirectResult) {
+            token = redirectResult.idToken || redirectResult.accessToken || null
+            if (redirectResult.account) {
+              account = redirectResult.account
+              instance.setActiveAccount(redirectResult.account)
             }
-            return
           }
-          hasHandledRedirect.current = true
+        } catch (e) {
+          console.warn('handleRedirectPromise exception (non-fatal):', e)
         }
 
-        // Check existing token
-        const currentToken = getToken()
+        // 2. If no redirect token, but an MSAL account exists, acquire token silently
+        if (!token && account) {
+          try {
+            instance.setActiveAccount(account)
+            const silentResult = await instance.acquireTokenSilent({
+              ...loginRequest,
+              account,
+            })
+            token = silentResult.idToken || silentResult.accessToken || null
+          } catch (e) {
+            console.warn('acquireTokenSilent failed:', e)
+          }
+        }
 
-        if (currentToken) {
+        // 3. If token obtained from MSAL (redirect or silent):
+        if (token) {
+          setToken(token)
+          sessionStorage.removeItem('msal-post-login')
+
           try {
             const me = await authMe()
             const s = buildSessionFromMe(me)
             setSession(s)
             localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-          } catch {
-            // Token expired — try silent re-acquisition via MSAL
-            if (accounts.length > 0) {
-              try {
-                const silentResult = await instance.acquireTokenSilent({
-                  ...loginRequest,
-                  account: accounts[0],
-                })
-                setToken(silentResult.accessToken)
-                const me = await authMe()
-                const s = buildSessionFromMe(me)
-                setSession(s)
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-              } catch {
-                clearToken()
-                localStorage.removeItem(STORAGE_KEY)
-                setSession(null)
+
+            const currentPath = window.location.pathname
+            if (currentPath === '/login' || currentPath === '/') {
+              if (me.is_new_user) {
+                navigate('/request-access', { replace: true })
+              } else {
+                navigate('/role-select', { replace: true })
               }
-            } else {
-              clearToken()
-              localStorage.removeItem(STORAGE_KEY)
-              setSession(null)
             }
+            return
+          } catch (authErr) {
+            console.error('authMe error with MSAL token:', authErr)
           }
-          return
         }
 
-        // No stored token — do not auto-login; require explicit user interaction
+        // 4. Check existing stored token (e.g. dev token or persistent session)
+        const storedToken = getToken()
+        if (storedToken) {
+          if (storedToken.startsWith('dev-')) {
+            try {
+              const me = await authMe()
+              const s = buildSessionFromMe(me)
+              setSession(s)
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+            } catch {
+              const raw = localStorage.getItem(STORAGE_KEY)
+              if (raw) {
+                setSession(JSON.parse(raw))
+              }
+            }
+            return
+          }
+
+          try {
+            const me = await authMe()
+            const s = buildSessionFromMe(me)
+            setSession(s)
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+            return
+          } catch {
+            clearToken()
+            localStorage.removeItem(STORAGE_KEY)
+            setSession(null)
+            return
+          }
+        }
+
+        // 5. No stored token and no active MSAL account
         setSession(null)
       } catch (err) {
         console.error('AuthProvider init error:', err)
-        clearToken()
-        localStorage.removeItem(STORAGE_KEY)
-        setSession(null)
+        const raw = localStorage.getItem(STORAGE_KEY)
+        if (!raw) {
+          clearToken()
+          localStorage.removeItem(STORAGE_KEY)
+          setSession(null)
+        }
       } finally {
         setIsChecking(false)
         isInitializing.current = false
@@ -166,6 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   function login(s: Session) {
     setSession(s)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+    setIsChecking(false)
   }
 
   function logout() {

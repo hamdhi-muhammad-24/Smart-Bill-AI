@@ -14,17 +14,15 @@ from core.barcode_generator import generate_barcode, generate_slip_barcode
 from core.gmf_reader import is_red_notice
 
 
-_TEMPLATE_PAGES_CACHE: dict[str, tuple[bytes, list[PageObject]]] = {}
+_TEMPLATE_BYTES_CACHE: dict[str, bytes] = {}
 
-def _get_template_pages(pdf_path: str):
+def _get_template_bytes(pdf_path: str) -> bytes | None:
     if not pdf_path or not os.path.exists(pdf_path):
-        return None, []
-    if pdf_path not in _TEMPLATE_PAGES_CACHE:
+        return None
+    if pdf_path not in _TEMPLATE_BYTES_CACHE:
         with open(pdf_path, "rb") as f:
-            raw_bytes = f.read()
-        reader = PdfReader(io.BytesIO(raw_bytes))
-        _TEMPLATE_PAGES_CACHE[pdf_path] = (raw_bytes, list(reader.pages))
-    return _TEMPLATE_PAGES_CACHE[pdf_path]
+            _TEMPLATE_BYTES_CACHE[pdf_path] = f.read()
+    return _TEMPLATE_BYTES_CACHE[pdf_path]
 
 
 class BaseRenderer:
@@ -35,8 +33,6 @@ class BaseRenderer:
     def __init__(self, template_pdf_path):
         self.default_template_pdf_path = template_pdf_path
         self.template_pdf_path = template_pdf_path
-        _, self.template_pages = _get_template_pages(template_pdf_path)
-        self.reader = None
         self.writer = PdfWriter()
         self.canvases = []
         self.is_red = False
@@ -46,7 +42,6 @@ class BaseRenderer:
         """Switch background template PDF (e.g. for RED notice)."""
         if template_pdf_path and os.path.exists(template_pdf_path):
             self.template_pdf_path = template_pdf_path
-            _, self.template_pages = _get_template_pages(template_pdf_path)
 
     def check_red_notice(self, data):
         """Helper to switch background to Template_RED.pdf if source_filename matches RED notice pattern."""
@@ -173,12 +168,15 @@ class BaseRenderer:
             c.save()
             buf.seek(0)
 
+        template_bytes = _get_template_bytes(self.template_pdf_path)
+        template_reader = PdfReader(io.BytesIO(template_bytes)) if template_bytes else None
+        template_pages = list(template_reader.pages) if template_reader else []
+
         for page_idx, (buf, c) in enumerate(self.canvases):
             overlay = PdfReader(buf)
 
-            if self.template_pages and page_idx < len(self.template_pages):
-                template_page = self.template_pages[page_idx]
-                page = deepcopy(template_page)
+            if template_pages and page_idx < len(template_pages):
+                page = template_pages[page_idx]
                 w = float(page.mediabox.width)
                 h = float(page.mediabox.height)
                 if abs(w - self.PAGE_W) > 5 or abs(h - self.PAGE_H) > 5:

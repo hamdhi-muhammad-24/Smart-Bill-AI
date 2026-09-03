@@ -21,36 +21,23 @@ import { loginRequest, clearStaleMsalInteractions } from '../auth/msalConfig'
 // Remove ROLE_HOME
 
 export default function Login() {
-  const { isChecking, login } = useAuth()
+  const { isChecking, session, login } = useAuth()
   const { resolvedTheme, toggleTheme } = useTheme()
   const navigate = useNavigate()
   const { instance, inProgress } = useMsal()
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Reset any loading or error state immediately if returning via browser Back button or tab switch
+  // Redirect if already authenticated
   useEffect(() => {
-    function resetLoginState() {
-      setLoading(false)
-      setError(null)
-      sessionStorage.removeItem('msal-post-login')
-      
-      const url = window.location.href
-      const hasAuthParams = url.includes('code=') || url.includes('error=') || url.includes('id_token=')
-      if (!hasAuthParams) {
-        clearStaleMsalInteractions()
+    if (!isChecking && session) {
+      if (session.isNewUser) {
+        navigate('/request-access', { replace: true })
+      } else {
+        navigate('/role-select', { replace: true })
       }
     }
-
-    resetLoginState()
-    window.addEventListener('pageshow', resetLoginState)
-    window.addEventListener('focus', resetLoginState)
-
-    return () => {
-      window.removeEventListener('pageshow', resetLoginState)
-      window.removeEventListener('focus', resetLoginState)
-    }
-  }, [])
+  }, [isChecking, session, navigate])
 
   if (isChecking) return null
 

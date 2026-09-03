@@ -14,6 +14,17 @@ from core.barcode_generator import generate_barcode, generate_slip_barcode
 from core.gmf_reader import is_red_notice
 
 
+_TEMPLATE_BYTES_CACHE: dict[str, bytes] = {}
+
+def _get_template_bytes(pdf_path: str) -> bytes | None:
+    if not pdf_path or not os.path.exists(pdf_path):
+        return None
+    if pdf_path not in _TEMPLATE_BYTES_CACHE:
+        with open(pdf_path, "rb") as f:
+            _TEMPLATE_BYTES_CACHE[pdf_path] = f.read()
+    return _TEMPLATE_BYTES_CACHE[pdf_path]
+
+
 class BaseRenderer:
     PAGE_W, PAGE_H = A4
     FONT_NAME = "Helvetica"
@@ -22,7 +33,6 @@ class BaseRenderer:
     def __init__(self, template_pdf_path):
         self.default_template_pdf_path = template_pdf_path
         self.template_pdf_path = template_pdf_path
-        self.reader = PdfReader(template_pdf_path)
         self.writer = PdfWriter()
         self.canvases = []
         self.is_red = False
@@ -32,7 +42,6 @@ class BaseRenderer:
         """Switch background template PDF (e.g. for RED notice)."""
         if template_pdf_path and os.path.exists(template_pdf_path):
             self.template_pdf_path = template_pdf_path
-            self.reader = PdfReader(template_pdf_path)
 
     def get_template_red_path(self):
         candidates = [
@@ -170,14 +179,18 @@ class BaseRenderer:
             c.save()
             buf.seek(0)
 
+        template_bytes = _get_template_bytes(self.template_pdf_path)
+        template_reader = PdfReader(io.BytesIO(template_bytes)) if template_bytes else None
+        template_pages = list(template_reader.pages) if template_reader else []
+
         for page_idx, (buf, c) in enumerate(self.canvases):
             overlay = PdfReader(buf)
 
-            if page_idx < len(self.reader.pages):
-                template_page = self.reader.pages[page_idx]
+            if template_pages and page_idx < len(template_pages):
+                template_page = template_pages[page_idx]
+                w = float(template_page.mediabox.width)
+                h = float(template_page.mediabox.height)
                 page = deepcopy(template_page)
-                w = float(page.mediabox.width)
-                h = float(page.mediabox.height)
                 if abs(w - self.PAGE_W) > 5 or abs(h - self.PAGE_H) > 5:
                     scale_x = self.PAGE_W / w
                     page.scale_by(scale_x)
