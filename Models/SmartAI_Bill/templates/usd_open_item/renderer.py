@@ -2,6 +2,8 @@ import os
 from datetime import datetime
 
 from reportlab.lib.colors import black
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from core.pdf_renderer import BaseRenderer
 from templates.usd_open_item.config import (
@@ -15,6 +17,13 @@ from templates.usd_open_item.config import (
 
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
+
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template) from templates/fonts/.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
+    pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +120,28 @@ class USDOpenItemRenderer(BaseRenderer):
     CLAUDE.md section 1.3), with page breaks via BaseRenderer.new_page().
     """
 
+    FONT_NAME = "Calibri"
+
     def __init__(self):
         super().__init__(TEMPLATE_PDF)
+
+    def text(self, x, y, value, size=10, bold=False, align="left"):
+        """Override the base Helvetica text() with Calibri, scoped to this
+        template only - the shared BaseRenderer.text() (used by every other
+        template) is untouched."""
+        if value is None or value == "":
+            return
+        c = self.canvas
+        font = "Calibri-Bold" if bold else "Calibri"
+        c.setFont(font, size)
+        c.setFillColor(black)
+        text = str(value)
+        if align == "right":
+            c.drawRightString(x, y, text)
+        elif align == "center":
+            c.drawCentredString(x, y, text)
+        else:
+            c.drawString(x, y, text)
 
     def render(self, data):
         self._draw_system_strings(data)
@@ -265,7 +294,7 @@ class USDOpenItemRenderer(BaseRenderer):
         from reportlab.lib.colors import red
         c = self.canvas
         c.setFillColor(red)
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont("Calibri-Bold", 9)
         c.drawString(
             CHARGES_TBL["indent_l1"], CHARGES_TBL["y_start"] + 20,
             "Your account has been flagged for credit control action - "

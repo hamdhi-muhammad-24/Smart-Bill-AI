@@ -19,6 +19,7 @@ _GROUPSUBTOTAL_RE = re.compile(r'^ITEMGROUPSUBTOTAL_(\d+)_(\d+)$')
 
 def parse_nonvat_home(file_path: str) -> dict:
     data = {
+        "template_id":           "nonvat_home",
         "telephone_number":      "",
         "account_number":        "",
         "invoice_number":        "",
@@ -42,6 +43,7 @@ def parse_nonvat_home(file_path: str) -> dict:
         "adjustments":           [],
         "taxes":                 [],
         "taxes_total":           0,
+        "inv_total_tax":         None,
         "tax_status":            "",
         "total_charges":         0,
         "payments":              [],
@@ -373,6 +375,9 @@ def parse_nonvat_home(file_path: str) -> dict:
                     data['taxes'].append({'name': all_parts[0], 'amount': amt})
                     data['taxes_total'] += amt
 
+            elif key == 'INVTOTALTAX':
+                data['inv_total_tax'] = to_float(value)
+
             elif key == 'ADJ':
                 raw       = rest.split('|')
                 all_parts = [value] + raw
@@ -425,16 +430,10 @@ def parse_nonvat_home(file_path: str) -> dict:
     from core.customer_type_mapper import get_badge
     data['badge'] = get_badge(data['customer_type'])
 
-    # BPR22: drop subsections with no rows AND zero subtotal
-    for sec in usage_sections.values():
-        sec['subsections'] = [
-            s for s in sec['subsections']
-            if s.get('rows') or s.get('subtotal')
-        ]
+    if data.get('inv_total_tax') is not None:
+        data['taxes_total'] = data['inv_total_tax']
 
-    # Drop entire usage sections that have no remaining subsections
-    data['usage_sections'] = [
-        s for s in usage_sections.values() if s['subsections']
-    ]
+    # NonVAT Home: Detailed Usage charges should not appear
+    data['usage_sections'] = []
 
     return data

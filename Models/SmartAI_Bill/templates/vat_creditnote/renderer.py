@@ -1,5 +1,9 @@
 import os
 
+from reportlab.lib.colors import black
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
 from core.pdf_renderer import BaseRenderer
 
 from templates.vat_creditnote.config import (
@@ -14,10 +18,36 @@ from templates.vat_creditnote.config import (
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template) from templates/fonts/.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
+    pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
+
 class VATCreditNoteRenderer(BaseRenderer):
+    FONT_NAME = "Calibri"
 
     def __init__(self):
         super().__init__(TEMPLATE_PDF)
+
+    def text(self, x, y, value, size=10, bold=False, align="left"):
+        """Override the base Helvetica text() with Calibri, scoped to this
+        template only - the shared BaseRenderer.text() (used by every other
+        template) is untouched."""
+        if value is None or value == "":
+            return
+        c = self.canvas
+        font = "Calibri-Bold" if bold else "Calibri"
+        c.setFont(font, size)
+        c.setFillColor(black)
+        text = str(value)
+        if align == "right":
+            c.drawRightString(x, y, text)
+        elif align == "center":
+            c.drawCentredString(x, y, text)
+        else:
+            c.drawString(x, y, text)
 
     def render(self, data):
         self._draw_header(data)
@@ -34,7 +64,7 @@ class VATCreditNoteRenderer(BaseRenderer):
         total = len(self.canvases)
         for idx in range(total):
             c = self.canvases[idx][1]
-            c.setFont("Helvetica", FONTS["header"]["size"])
+            c.setFont("Calibri", FONTS["header"]["size"])
             c.drawRightString(550, 750, f"{idx + 1}  of  {total}")
 
     def _draw_header(self, data):

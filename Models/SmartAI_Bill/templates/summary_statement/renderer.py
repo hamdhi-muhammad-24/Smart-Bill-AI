@@ -1,4 +1,8 @@
 import os
+from reportlab.lib.colors import black
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
 from core.pdf_renderer import BaseRenderer
 from core.text_utils import wrap_text
 from templates.summary_statement.config import (
@@ -8,12 +12,39 @@ from templates.summary_statement.config import (
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template) from templates/fonts/.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
+    pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
+
 
 class SummaryStatementRenderer(BaseRenderer):
     """Renders Summary Statement bills."""
 
+    FONT_NAME = "Calibri"
+
     def __init__(self):
         super().__init__(TEMPLATE_PDF)
+
+    def text(self, x, y, value, size=10, bold=False, align="left"):
+        """Override the base Helvetica text() with Calibri, scoped to this
+        template only - the shared BaseRenderer.text() (used by every other
+        template) is untouched."""
+        if value is None or value == "":
+            return
+        c = self.canvas
+        font = "Calibri-Bold" if bold else "Calibri"
+        c.setFont(font, size)
+        c.setFillColor(black)
+        text = str(value)
+        if align == "right":
+            c.drawRightString(x, y, text)
+        elif align == "center":
+            c.drawCentredString(x, y, text)
+        else:
+            c.drawString(x, y, text)
 
     def render(self, data):
         # Split accounts across pages
@@ -94,6 +125,12 @@ class SummaryStatementRenderer(BaseRenderer):
         x, y = COORDS_HEADER["date_of_statement"]
         self.text(x, y, data["date_of_statement"], size=f["size"])
 
+        # Invoice number (if available)
+        if data.get("invoice_number"):
+            f_inv = FONTS["invoice_no"]
+            self.text(COORDS_HEADER["customer_x"], COORDS_HEADER["customer_y_start"] + 30,
+                      f'Invoice No. {data["invoice_number"]}',
+                      size=f_inv["size"], bold=f_inv["bold"])
 
         # Customer Ref No
         x, y = COORDS_HEADER["customer_ref_no"]
@@ -154,7 +191,7 @@ class SummaryStatementRenderer(BaseRenderer):
         # Invoice No at top
         f = FONTS["invoice_no"]
         self.text(MIDDLE_PAGE["invoice_no_x"], MIDDLE_PAGE["invoice_no_y"],
-                   f'Invoice No.{data["invoice_number"]}',
+                   f'Invoice No. {data["invoice_number"]}',
                    size=f["size"], bold=f["bold"])
 
         # Page indicator

@@ -2,6 +2,8 @@
 import os
 from datetime import datetime
 from reportlab.lib.colors import black
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_vat_reg_printable, is_tax_section_printable
@@ -10,11 +12,37 @@ from templates.subscription_ref_grouping.config import COORDS, CHARGES_TABLE, FO
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template) from templates/fonts/.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
+    pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
+
 
 class SubscriptionRefGroupingRenderer(BaseRenderer):
+    FONT_NAME = "Calibri"
 
     def __init__(self):
         super().__init__(TEMPLATE_PDF)
+
+    def text(self, x, y, value, size=10, bold=False, align="left"):
+        """Override the base Helvetica text() with Calibri, scoped to this
+        template only - the shared BaseRenderer.text() (used by every other
+        template) is untouched."""
+        if value is None or value == "":
+            return
+        c = self.canvas
+        font = "Calibri-Bold" if bold else "Calibri"
+        c.setFont(font, size)
+        c.setFillColor(black)
+        text = str(value)
+        if align == "right":
+            c.drawRightString(x, y, text)
+        elif align == "center":
+            c.drawCentredString(x, y, text)
+        else:
+            c.drawString(x, y, text)
 
     def render(self, data):
         self._draw_header(data)
@@ -198,7 +226,7 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
         for sub_ref in subscription_refs:
             space = (lp_gap if sub_ref["ref"] else 0)
             for prod in sub_ref["products"]:
-                space += line_h + len(prod["charges"]) * line_h
+                space += line_h
             if sub_ref.get("recurring_subtotal"):
                 space += line_h
             if sub_ref.get("oneoff_subtotal"):
@@ -224,19 +252,6 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
                           product["label"],
                           size=f_prod["size"], bold=f_prod["bold"])
                 y -= line_h
-
-                for charge in product["charges"]:
-                    if y < y_min:
-                        self.new_page()
-                        y     = CHARGES_TABLE["otherpage_y_start"]
-                        y_min = CHARGES_TABLE["otherpage_y_min"]
-                    self.text(CHARGES_TABLE["desc_x"], y,
-                              charge["description"], size=f_chg["size"])
-                    if charge["amount"]:
-                        self.number(CHARGES_TABLE["amount_x"], y,
-                                    charge["amount"],
-                                    size=f_chg["size"], align="right")
-                    y -= line_h
 
             if sub_ref.get("recurring_subtotal"):
                 label = (f'{sub_ref.get("detail_name","").strip()} '
@@ -575,14 +590,14 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
     def _draw_page_indicators(self, data, total_pages):
         for idx in range(len(self.canvases)):
             c = self.canvases[idx][1]
-            c.setFont("Helvetica", 9)
+            c.setFont("Calibri", 9)
             if idx == 0:
                 c.drawRightString(540, 753,
                                   f"1  of  {total_pages}")
             else:
-                c.setFont("Helvetica-Bold", 10)
+                c.setFont("Calibri-Bold", 10)
                 c.drawString(45, 795,
                              f'Invoice No.{data["invoice_number"]}')
-                c.setFont("Helvetica", 9)
+                c.setFont("Calibri", 9)
                 c.drawRightString(540, 795,
                                   f"{idx + 1}  of  {total_pages}")
