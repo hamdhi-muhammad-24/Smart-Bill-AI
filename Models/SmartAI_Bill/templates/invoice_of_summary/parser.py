@@ -4,7 +4,7 @@ import re
 
 from core.bill_common import (
     to_float, strip_before_underscore, apply_label_override,
-    reorder_addresses, TopLevelDiscountCollector, parse_cancel_payment,
+    reorder_addresses, parse_cancel_payment,
     MARKETING_MESSAGE_TAGS, ADDRESS_PRINT_ORDER,
     is_vat_reg_printable,
 )
@@ -65,10 +65,17 @@ def parse_invoice_of_summary(file_path: str) -> dict:
         "show_vat_lines":        False,
         "address_name_not_required": False,
         "usage_sections":        [],
+        # ITEMGROUPSUBTOTAL_1_N totals (e.g. "On net" / "Off net") have no
+        # per-call itemization of their own - they're just a category +
+        # amount. The same category tag repeats once per phone/product, so
+        # summing them here into ONE dict (instead of attaching a copy to
+        # every phone's usage_sections entry) gives a single combined
+        # "Total for On net" / "Total for Off net" line for the whole bill
+        # instead of one repeated line per phone.
+        "usage_summary_totals":  {},
     }
 
     raw_address   = {}
-    top_discounts = TopLevelDiscountCollector()
 
     with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
         current_group            = None
@@ -77,6 +84,8 @@ def parse_invoice_of_summary(file_path: str) -> dict:
         in_no_sub_ref            = False
         usage_sections           = {}
         current_item_id          = None
+        current_item_key         = None
+        item_key_counter         = 0
         current_subsection       = None
         pending_subsection_label = None
         last_closed_subsection   = None
@@ -84,6 +93,21 @@ def parse_invoice_of_summary(file_path: str) -> dict:
         # BPR32 promo group state
         in_promo_group        = False
         current_promo_product = None
+
+        # BPR23 top-level discounts (parsed directly here, no longer via
+        # bill_common's TopLevelDiscountCollector). PRODDISCNAME/
+        # PRODDISCTOTAL is a per-product revenue-commitment discount (e.g.
+        # "FTTH SP Office Rev. Commitment2022" tied to a specific phone);
+        # CUSTDISCNAME/CUSTDISCTOTAL is the account-level discount (e.g.
+        # "RevenueCommit.WaiveOff"). Each NAME tag is followed later by its
+        # matching TOTAL tag within the same block, so we hold the name in
+        # a pending variable until the total arrives.
+        # Deliberately NOT reading PRODUCTDISCNAME/PRODUCTDISCLISTTOTAL -
+        # that's a duplicate rollup of the same PRODDISC entry appearing
+        # again later in the GMF near the product's own block; including
+        # both would double-count the amount.
+        pending_proddisc_name = None
+        pending_custdisc_name = None
 
         for line in f:
             line = line.strip()
@@ -141,22 +165,34 @@ def parse_invoice_of_summary(file_path: str) -> dict:
             if m:
                 tag, item_id = m.group(1), m.group(2)
                 if tag == 'BSTARTITEM':
-                    current_item_id = item_id
-                    usage_sections[item_id] = {
-                        'phone':             '',
-                        'label':             '',
-                        'subsections':       [],
-                        'grand_total':       0,
-                        'aggregated_totals': {},
+                    # NOTE: item_id (the ITEMISATIONORDER, e.g. "33") is NOT
+                    # unique per phone/product - the same GMF reuses the same
+                    # item_id for every occurrence of a given usage TYPE
+                    # (e.g. every "Additional Channels" product gets item_id
+                    # 33, every "P_International Voice Usage" product gets
+                    # item_id 37, across many different EVSOURCE phones).
+                    # Keying usage_sections by item_id alone means each new
+                    # BSTARTITEM_33 overwrites the previous phone's entry,
+                    # silently dropping all but the last one (BPR27). Use a
+                    # counter-suffixed key so every occurrence gets its own
+                    # slot, while current_item_id still drives the regex
+                    # matching used for the rest of this block's tags.
+                    current_item_id  = item_id
+                    item_key_counter += 1
+                    current_item_key = f"{item_id}_{item_key_counter}"
+                    usage_sections[current_item_key] = {
+                        'phone': '', 'label': '',
+                        'subsections': [], 'grand_total': 0,
                     }
                 elif tag == 'BENDITEM':
-                    current_item_id = None
+                    current_item_id  = None
+                    current_item_key = None
                 elif tag == 'EVSOURCE':
-                    if item_id in usage_sections:
-                        usage_sections[item_id]['phone'] = value
+                    if current_item_key in usage_sections:
+                        usage_sections[current_item_key]['phone'] = value
                 elif tag == 'EVENTSTEXT':
-                    if item_id in usage_sections:
-                        usage_sections[item_id]['label'] = value
+                    if current_item_key in usage_sections:
+                        usage_sections[current_item_key]['label'] = value
                 elif tag == 'EVENTHEADING':
                     cols = [value] + [p.strip() for p in rest.split('|')
                                       if p.strip()]
@@ -174,16 +210,16 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                         current_subsection['rows'].append(row)
                 elif tag == 'TENDEVENT':
                     if (current_subsection is not None and
-                            item_id in usage_sections):
-                        usage_sections[item_id]['subsections'].append(
+                            current_item_key in usage_sections):
+                        usage_sections[current_item_key]['subsections'].append(
                             current_subsection)
                         last_closed_subsection = current_subsection
                     current_subsection = None
                 elif tag == 'SLTITEMGRANDTOTAL':
                     gparts = [value] + [p.strip() for p in rest.split('|')
                                         if p.strip()]
-                    if item_id in usage_sections and len(gparts) >= 2:
-                        usage_sections[item_id]['grand_total'] = \
+                    if current_item_key in usage_sections and len(gparts) >= 2:
+                        usage_sections[current_item_key]['grand_total'] = \
                             to_float(gparts[1])
                 continue
 
@@ -203,13 +239,15 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                         last_closed_subsection['subtotal'] = \
                             to_float(sub_parts[2])
                     last_closed_subsection = None
-                elif (tag_n == '1' and current_item_id is not None
+                elif (tag_n == '1' and current_item_key is not None
                         and pending_subsection_label):
-                    amt    = to_float(value)
-                    totals = usage_sections[
-                        current_item_id]['aggregated_totals']
-                    totals[pending_subsection_label] = \
-                        totals.get(pending_subsection_label, 0) + amt
+                    # Combine into the single bill-wide summary dict
+                    # instead of attaching a per-phone copy - see the
+                    # note on data['usage_summary_totals'] above.
+                    amt = to_float(value)
+                    data['usage_summary_totals'][pending_subsection_label] = \
+                        data['usage_summary_totals'].get(
+                            pending_subsection_label, 0) + amt
                     pending_subsection_label = None
                 continue
 
@@ -244,13 +282,47 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                         desc   = f"{prefix} {suffix}".strip()
                         flag   = (all_parts[5].strip().upper()
                                   if len(all_parts) > 5 else '')
+                        amt = to_float(all_parts[0])
+
+                        # Skip zero-amount charges (BPR20: [SAPROD 0])
+                        if amt == 0:
+                            continue
+
                         if flag == 'P':
                             desc += " [Rental]"
+                            # Field layout (pipe-delimited, 0-indexed from
+                            # all_parts): [6]=start date, [7]=end date,
+                            # [8]=unused, [9]=internal marker
+                            # ("SAPROD"/"PARPROD" - never customer-facing,
+                            # NOT a count), [10]=count, [11]=unit text
+                            # (e.g. "number of extension").
+                            count = (all_parts[10].strip()
+                                     if len(all_parts) > 10 else '')
+                            extra = (all_parts[11].strip()
+                                     if len(all_parts) > 11 else '')
+                            p_start = (all_parts[6].strip()
+                                       if len(all_parts) > 6 else '')
+                            p_end   = (all_parts[7].strip()
+                                       if len(all_parts) > 7 else '')
+                            if p_start and p_end and (
+                                p_start != data.get('billing_period_start', '') or
+                                p_end   != data.get('billing_period_end', '')
+                            ):
+                                desc += f" [{p_start}-{p_end}]"
+                            if count and count != '0' and extra:
+                                desc += f" [{count} {extra}]"
                         elif flag == 'O':
                             desc += " [One Time]"
                         elif flag == 'I':
                             desc += " [Initiation]"
-                        amt = to_float(all_parts[0])
+                            # BPR20: Add initiation date (start date only)
+                            date_range = (all_parts[7].strip()
+                                          if len(all_parts) > 7 else '')
+                            if date_range:
+                                start_date = date_range.split()[0] if date_range else ''
+                                if start_date:
+                                    desc += f" [{start_date}]"
+
                         current_promo_product['charges'].append(
                             {'description': desc, 'amount': amt})
 
@@ -266,10 +338,6 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                                     all_parts[0]),
                                 'amount': -amt,
                             })
-                continue
-
-            # BPR23 top-level discounts
-            if top_discounts.handle(key, value):
                 continue
 
             # BPR28 marketing messages
@@ -351,6 +419,53 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                             'amount': -amt,
                         })
 
+            elif key == 'BENDPRODDISC':
+                # Exact match only - NOT startswith, since
+                # 'BENDPRODDISCPERIOD' (a distinct tag that appears between
+                # PRODDISCNAME and PRODDISCTOTAL) would otherwise also match
+                # a prefix check and wipe the pending name before its total
+                # ever arrives.
+                pending_proddisc_name = None
+
+            elif key == 'PRODDISCNAME':
+                # BPR23 (rewritten, in-parser): per-product revenue-
+                # commitment discount name, e.g. "FTTH SP Office Rev.
+                # Commitment2022", tied to a specific phone/product. Paired
+                # with the PRODDISCTOTAL that follows within the same
+                # BSTARTPRODDISC block.
+                # Deliberately NOT reading PRODUCTDISCNAME/
+                # PRODUCTDISCLISTTOTAL - that's a duplicate rollup of the
+                # same PRODDISC entry appearing again later in the GMF near
+                # the product's own block; including both would
+                # double-count the amount.
+                pending_proddisc_name = value
+
+            elif key == 'PRODDISCTOTAL':
+                if pending_proddisc_name is not None:
+                    amt = to_float(value)
+                    if amt:
+                        data['top_level_discounts'].append({
+                            'description': pending_proddisc_name,
+                            'amount': amt,
+                        })
+                    pending_proddisc_name = None
+
+            elif key == 'CUSTDISCNAME':
+                # BPR23: account/customer-level discount, e.g.
+                # "01Feb11-AMWCrone_RevenueCommit.WaiveOff" -> strip the
+                # prefix (BPR21) to get "RevenueCommit.WaiveOff".
+                pending_custdisc_name = strip_before_underscore(value)
+
+            elif key == 'CUSTDISCTOTAL':
+                if pending_custdisc_name is not None:
+                    amt = to_float(value)
+                    if amt:
+                        data['top_level_discounts'].append({
+                            'description': pending_custdisc_name,
+                            'amount': amt,
+                        })
+                    pending_custdisc_name = None
+
             elif key == 'SLTSUBSCRIPTIONREF':
                 current_group = {"ref": value, "products": []}
                 data['charge_groups'].append(current_group)
@@ -384,19 +499,45 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                     desc   = f"{prefix} {suffix}".strip()
                     flag   = (all_parts[5].strip().upper()
                               if len(all_parts) > 5 else '')
+                    amt = to_float(all_parts[0])
+
+                    # Skip zero-amount charges (BPR20: [SAPROD 0])
+                    if amt == 0:
+                        continue
+
                     if flag == 'P':
                         desc += " [Rental]"
-                        extra = (all_parts[9].strip()
-                                 if len(all_parts) > 9 else '')
-                        count = (all_parts[8].strip()
-                                 if len(all_parts) > 8 else '')
-                        if count and extra:
+                        # See matching comment in the promo-group branch
+                        # above: [9] is an internal SAPROD/PARPROD marker
+                        # (never displayed), [10] is the real count, [11]
+                        # is the unit text.
+                        count = (all_parts[10].strip()
+                                 if len(all_parts) > 10 else '')
+                        extra = (all_parts[11].strip()
+                                 if len(all_parts) > 11 else '')
+                        p_start = (all_parts[6].strip()
+                                   if len(all_parts) > 6 else '')
+                        p_end   = (all_parts[7].strip()
+                                   if len(all_parts) > 7 else '')
+                        if p_start and p_end and (
+                            p_start != data.get('billing_period_start', '') or
+                            p_end   != data.get('billing_period_end', '')
+                        ):
+                            desc += f" [{p_start}-{p_end}]"
+                        if count and count != '0' and extra:
                             desc += f" [{count} {extra}]"
                     elif flag == 'O':
                         desc += " [One Time]"
                     elif flag == 'I':
                         desc += " [Initiation]"
-                    amt = to_float(all_parts[0])
+                        # BPR20: Add initiation date (start date only)
+                        date_range = (all_parts[7].strip()
+                                      if len(all_parts) > 7 else '')
+                        if date_range:
+                            start_date = date_range.split()[0] if date_range else ''
+                            if start_date:
+                                desc += f" [{start_date}]"
+
                     current_product['charges'].append(
                         {'description': desc, 'amount': amt})
 
@@ -477,7 +618,6 @@ def parse_invoice_of_summary(file_path: str) -> dict:
     # post-parse
     data['address_lines']       = reorder_addresses(raw_address)
     data['show_vat_lines']      = is_vat_reg_printable(data['customer_vat_reg'])
-    data['top_level_discounts'] = top_discounts.discounts
 
     # BPR20: remove empty products from charge groups
     for grp in data['charge_groups']:
@@ -499,17 +639,6 @@ def parse_invoice_of_summary(file_path: str) -> dict:
 
     from core.customer_type_mapper import get_badge
     data['badge'] = get_badge(data['customer_type'])
-
-    # Aggregate no-CDR usage totals into subsections
-    for sec in usage_sections.values():
-        agg = sec.pop('aggregated_totals', {})
-        for label, amt in agg.items():
-            sec['subsections'].append({
-                'label':    label,
-                'headers':  [],
-                'rows':     [],
-                'subtotal': amt,
-            })
 
     data['usage_sections'] = list(usage_sections.values())
     return data

@@ -5,6 +5,7 @@ from reportlab.lib.colors import black
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_vat_reg_printable, is_tax_section_printable
+from core.text_utils import wrap_text
 from templates.invoice_of_summary.config import (
     COORDS, CHARGES_TABLE, USAGE_TABLE_2COL, FONTS,
 )
@@ -227,9 +228,9 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         if data['usage_subtotal']:
             _line("Subtotal Usage charges", data['usage_subtotal'])
 
-        if data['discounts']:
+        if data['top_level_discounts']:
             _line("Discounts", bold=True)
-            for d in data['discounts']:
+            for d in data['top_level_discounts']:
                 _line(d["description"], d["amount"], size=fc)
 
         if data.get('adjustments_subtotal'):
@@ -345,7 +346,10 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                              bold=True, x=grx)
 
     def _draw_top_level_discounts_flowing(self, data):
-        """BPR23: ACCDISCNAME etc. block."""
+        """BPR23: ACCDISCNAME etc. block. This is the ONLY place Discounts
+        get drawn in the Charges-in-Detail flow — see the note in
+        _draw_discounts_and_taxes_flowing about why that method no longer
+        also prints a Discounts block."""
         discounts = data.get("top_level_discounts", [])
         if not discounts:
             return
@@ -355,14 +359,20 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             self._write_line(d["description"], amount=d["amount"], x=grx)
 
     def _draw_discounts_and_taxes_flowing(self, data):
-        """SLTDISCDETAIL discounts + Taxes + Total Charges with box."""
-        grx = CHARGES_TABLE["group_ref_x"]
+        """Taxes + Total Charges with box.
 
-        if data["discounts"]:
-            self._write_line("Discounts", bold=True, x=grx)
-            for d in data["discounts"]:
-                self._write_line(d["description"],
-                                 amount=d["amount"], x=grx)
+        This used to also print a second "Discounts" heading here for
+        data["discounts"] (SLTDISCDETAIL). That duplicated
+        _draw_top_level_discounts_flowing's "Discounts" block (BPR23,
+        top_level_discounts) immediately above it, and on real bills the two
+        lists overlap (e.g. "RevenueCommit.WaiveOff" appearing in both) plus
+        extra SLTDISCDETAIL-only lines the reference layout never shows.
+        Sheet 18's correct output has exactly one Discounts section, so that
+        second block has been removed - data["discounts"] is still collected
+        by the parser and used in the page-1 Summary of Invoice box, just
+        not repeated here.
+        """
+        grx = CHARGES_TABLE["group_ref_x"]
 
         # BPR11/24: gate taxes
         has_nonzero = any(t['amount'] for t in data["taxes"])
@@ -465,137 +475,343 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                       size=f_size, bold=True)
             self._y -= CHARGES_TABLE["line_h"]
 
-    # usage sections
+    # usage sections (BPR27) — two-column flowing layout
+    #
+    # Fills the left column top-to-bottom, then the right column at the
+    # same page, then a new page (back to the left column) once both are
+    # full. A vertical rule is drawn once per page at
+    # USAGE_TABLE_2COL["vert_line_x"], spanning page_bottom..page_top.
+    # Column x-positions, amount x, and page bounds all come from the
+    # existing USAGE_TABLE_2COL config. Column headers remain dynamic
+    # (from EVENTHEADING via subsection["headers"]).
+    #
+    # Row cells now use the SAME wrap -> measure real height -> advance
+    # pattern as core.tables.draw_table_with_overflow (via the shared
+    # wrap_text utility), instead of single-line clipping with an
+    # ellipsis. A long Description/label wraps onto additional lines
+    # within its own column, the row's height is computed from however
+    # many lines its tallest cell needed, and self._y only advances by
+    # that real height - so no cell is ever cut off, and no row can end
+    # up sharing a y-position with its neighbour (which is what produced
+    # the earlier doubled/overlapping Charge values).
 
     def _draw_usage_sections(self, data):
-        for section in data.get("usage_sections", []):
+        # Only print sections that have at least one subsection with real
+        # itemized rows (dates/dialled numbers/quantities etc). Sections
+        # that are pure category subtotals with no itemization (e.g. a
+        # phone's Domestic Voice Usage that only ever produced an
+        # ITEMGROUPSUBTOTAL "Total for Off Net"/"Total for On Net" with no
+        # EVENT rows) are never shown in the reference bill.
+        sections = [s for s in data.get("usage_sections", [])
+                    if any(sub.get("rows") for sub in s.get("subsections", []))]
+        if not sections:
+            return
+
+        grx = CHARGES_TABLE["group_ref_x"]
+        self._write_line("Detailed Usage Charges", bold=True, x=grx)
+
+        # switch into two-column flow for everything below this heading
+        self._usage_col                 = 0          # 0 = left, 1 = right
+        self._usage_top_y               = self._y
+        self._usage_divider_drawn_pages = set()
+
+        for section in sections:
             self._draw_one_usage_section(section)
 
-    def _draw_one_usage_section(self, section):
-        """Only draw subsections with actual CDR rows."""
-        subsections   = section.get("subsections", [])
-        subs_with_rows = [s for s in subsections if s.get("rows")]
-        if not subs_with_rows:
-            return
-
-        u     = USAGE_TABLE_2COL
-        grx   = u["left_col_x"][0]
-        amt_x = u["left_amount_x"]
-
-        for subsection in subs_with_rows:
-            self._draw_usage_subsection(subsection)
-            self._ensure_space()
-            self.text(grx, self._y,
-                      f"Total for {subsection.get('label', '')}",
-                      size=u["font_size"], bold=True)
-            self.number(amt_x, self._y,
-                        subsection.get("subtotal", 0),
-                        decimals=3, size=u["font_size"],
-                        bold=True, align="right")
-            self._y -= u["line_h"]
-
-        label = section.get("label", "")
-        self._ensure_space()
-        self.text(grx, self._y,
-                  f"Total Usage Charges for {label}",
-                  size=u["font_size"], bold=True)
-        self.number(amt_x, self._y,
-                    section.get("grand_total", 0),
-                    decimals=3, size=u["font_size"],
-                    bold=True, align="right")
-        self._y -= u["line_h"] * 1.5
-
-    def _draw_usage_subsection(self, subsection):
-        """2-up left/right CDR row layout, separated by a vertical divider.
-        Left and right rows are always drawn as matched pairs (same y), so
-        the divider on each page just needs to run from the header box
-        down to wherever content actually stopped on that page - drawn
-        after the fact, once that's known, rather than at a fixed length."""
-        rows = subsection.get("rows", [])
-        if not rows:
-            return
+    def _usage_col_x(self):
         u = USAGE_TABLE_2COL
-        vert_x = u["vert_line_x"]
+        return u["left_col_x"] if self._usage_col == 0 else u["right_col_x"]
 
-        self._ensure_space(u["line_h"] * 3)
-        self._draw_usage_headers()
+    def _usage_amount_x(self):
+        u = USAGE_TABLE_2COL
+        return u["left_amount_x"] if self._usage_col == 0 else u["right_amount_x"]
 
-        top_y  = self._y + u["line_h"]
-        last_y = self._y
+    def _usage_box_right(self):
+        u = USAGE_TABLE_2COL
+        return u["left_box_right"] if self._usage_col == 0 else u["right_box_right"]
 
-        # First divider drawn overall: extend its top up to where "Details
-        # of Payments Received" started, if that was on this same page and
-        # hasn't already been used by an earlier subsection/section.
-        divider_top_y = getattr(self, "_divider_top_y", None)
-        divider_top_page = getattr(self, "_divider_top_page", None)
-        if divider_top_y is not None and divider_top_page == self.page_count() - 1:
-            top_y = divider_top_y
-        self._divider_top_y = None
-
-        i = 0
-        while i < len(rows):
-            page_before = self.page_count()
-            self._ensure_space(u["line_h"])
-            if self.page_count() != page_before:
-                self._draw_usage_vert_divider(vert_x, top_y, last_y)
-                top_y = self._y + u["line_h"]
-
-            self._draw_usage_row(rows[i],   side="left")
-            if i + 1 < len(rows):
-                self._draw_usage_row(rows[i + 1], side="right")
-            last_y = self._y
-            self._y -= u["line_h"]
-            i += 2
-
-        self._draw_usage_vert_divider(vert_x, top_y, last_y)
-
-    def _draw_usage_vert_divider(self, x, top_y, bottom_y):
-        if top_y <= bottom_y:
+    def _usage_draw_divider(self):
+        page_idx = self.page_count() - 1
+        if page_idx in self._usage_divider_drawn_pages:
             return
-        c = self.canvas
-        c.setLineWidth(0.5)
-        c.setStrokeColor(black)
-        c.line(x, top_y, x, bottom_y)
-
-    def _draw_usage_headers(self):
-        """Left column only: box + headers."""
-        u       = USAGE_TABLE_2COL
-        headers = ["Date &Time", "Dialled No.", "Duration", "Charge"]
-        lx      = u["left_col_x"][0]
+        self._usage_divider_drawn_pages.add(page_idx)
+        u = USAGE_TABLE_2COL
         try:
-            self.canvas.rect(
-                lx - 3, self._y - 3,
-                u["left_box_right"] - lx + 3,
-                u["line_h"] + 2,
-            )
+            c = self.canvas
+            c.setLineWidth(0.5)
+            c.line(u["vert_line_x"], u["page_bottom"],
+                   u["vert_line_x"], u["page_top"])
         except AttributeError:
             pass
-        for i, h in enumerate(headers):
-            if i == len(headers) - 1:
-                self.text(u["left_amount_x"], self._y, h,
-                          size=u["font_header"], bold=True, align="right")
+
+    def _usage_ensure_space(self, needed):
+        u = USAGE_TABLE_2COL
+        if self._y - needed < u["page_bottom"]:
+            if self._usage_col == 0:
+                # left column full -> move to right column, same page
+                self._usage_col = 1
+                self._y         = self._usage_top_y
             else:
-                self.text(u["left_col_x"][i], self._y, h,
-                          size=u["font_header"], bold=True)
-        self._y -= u["line_h"]
+                # both columns full -> new page, back to left column
+                self.new_page()
+                self._on_page1    = False
+                self._usage_col   = 0
+                self._usage_top_y = u["page_top"]
+                self._y           = self._usage_top_y
+        self._usage_draw_divider()
 
-    def _draw_usage_row(self, row, side):
-        u        = USAGE_TABLE_2COL
-        col_x    = u["left_col_x"]  if side == "left"  else u["right_col_x"]
-        amount_x = u["left_amount_x"] if side == "left" else u["right_amount_x"]
+    def _usage_string_width(self, text, font_name, font_size):
+        try:
+            return self.canvas.stringWidth(text, font_name, font_size)
+        except AttributeError:
+            return len(text) * font_size * 0.5
 
-        date     = row[0] if len(row) > 0 else ""
-        time     = row[1] if len(row) > 1 else ""
-        dialled  = row[2] if len(row) > 2 else ""
-        duration = row[3] if len(row) > 3 else ""
-        charge   = row[4] if len(row) > 4 else "0"
+    def _usage_clip(self, text, max_width, font_name, font_size):
+        """Single-line truncate with ellipsis - used only for fixed, known
+        -short labels (column headers, 'Total for X' lines) where wrapping
+        to a second line isn't appropriate."""
+        text = str(text)
+        if max_width is not None and max_width <= 0:
+            return ""
+        if (max_width is None or
+                self._usage_string_width(text, font_name, font_size) <= max_width):
+            return text
+        ell = "..."
+        while text and self._usage_string_width(
+                text + ell, font_name, font_size) > max_width:
+            text = text[:-1]
+        return (text + ell) if text else ell
 
-        self.text(col_x[0], self._y,
-                  f"{date} {time}".strip(), size=u["font_size"])
-        self.text(col_x[1], self._y, dialled,  size=u["font_size"])
-        self.text(col_x[2], self._y, duration, size=u["font_size"])
-        self.number(amount_x, self._y, _safe_float(charge),
-                    size=u["font_size"], align="right")
+    def _usage_wrap_lines(self, text, max_width, font_name, font_size,
+                          max_lines=2):
+        """Word-wrap using the shared wrap_text utility, capped to
+        max_lines; only clips with an ellipsis as a last resort if the
+        text still doesn't fit within that cap. Used for section/subsection
+        headers."""
+        text = str(text)
+        if not text or max_width is None or max_width <= 0:
+            return [text]
+        lines = wrap_text(self.canvas, text, font_name, font_size, max_width)
+        if len(lines) <= max_lines:
+            return lines
+        kept = lines[:max_lines]
+        last = kept[-1]
+        ell  = "..."
+        while last and self._usage_string_width(
+                last + ell, font_name, font_size) > max_width:
+            last = last[:-1]
+        kept[-1] = (last + ell) if last else ell
+        return kept
+
+    def _usage_wrap_cell(self, text, max_width, font_name, font_size,
+                         max_lines=3):
+        """Word-wrap a table-row cell (e.g. Description) using wrap_text,
+        capped to max_lines so a single pathological value can't blow up
+        the row height indefinitely. This replaces single-line
+        ellipsis-clipping for row cells - long descriptions now wrap onto
+        additional lines instead of being cut off."""
+        text = str(text) if text else ""
+        if not text:
+            return [""]
+        if max_width is None or max_width <= 0:
+            return [text]
+        lines = wrap_text(self.canvas, text, font_name, font_size, max_width)
+        if len(lines) <= max_lines:
+            return lines
+        kept = lines[:max_lines]
+        last = kept[-1]
+        ell  = "..."
+        while last and self._usage_string_width(
+                last + ell, font_name, font_size) > max_width:
+            last = last[:-1]
+        kept[-1] = (last + ell) if last else ell
+        return kept
+
+    def _usage_draw_amount(self, x_right, y, value, decimals=3,
+                           size=7, bold=False):
+        """Draw a right-aligned numeric value directly on the canvas with
+        a manually built string, formatted independently of self.number()."""
+        try:
+            formatted = f"{float(value):,.{decimals}f}"
+        except (ValueError, TypeError):
+            formatted = f"{0:,.{decimals}f}"
+        c = self.canvas
+        c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+        c.drawRightString(x_right, y, formatted)
+
+    def _draw_one_usage_section(self, section):
+        subsections = section.get("subsections", [])
+        if not subsections:
+            return
+
+        line_h           = 9
+        font_row         = 7
+        font_header      = 7
+        font_subtotal    = 7
+        font_grand_total = 8
+        font_section_hdr = font_row
+        pad              = 4   # gap kept clear before the amount column
+
+        def get_last_numeric(row):
+            for val in reversed(row):
+                if val is None:
+                    continue
+                s = str(val).replace(",", "").strip()
+                if not s:
+                    continue
+                try:
+                    return float(s)
+                except (ValueError, TypeError):
+                    continue
+            return 0.0
+
+        def sum_rows(rows):
+            return sum(get_last_numeric(r) for r in rows if r)
+
+        def draw_table(sub, rows, print_header, show_section_hdr):
+            avail_w = self._usage_box_right() - self._usage_col_x()[0]
+
+            section_hdr_lines = []
+            if show_section_hdr:
+                hdr = f'Detailed Usage Charges for {section["label"]}'
+                if section.get("phone"):
+                    hdr += f' {section["phone"]}'
+                section_hdr_lines = self._usage_wrap_lines(
+                    hdr, avail_w, "Helvetica-Bold", font_section_hdr,
+                    max_lines=2)
+
+            sub_label_line = None
+            if print_header and sub.get("label"):
+                sub_label_line = self._usage_clip(
+                    sub["label"], avail_w, "Helvetica-Bold", font_row)
+
+            header_lines = (len(section_hdr_lines)
+                            + (1 if sub_label_line else 0)
+                            + (1 if print_header else 0))
+            self._usage_ensure_space(line_h * (header_lines + 2))
+            col_x, amount_x, box_right = (
+                self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
+
+            for hline in section_hdr_lines:
+                self.text(col_x[0], self._y, hline,
+                          size=font_section_hdr, bold=True)
+                self._y -= line_h * 1.2
+            if section_hdr_lines:
+                self._y -= line_h * 0.2
+
+            if sub_label_line:
+                self.text(col_x[0], self._y, sub_label_line,
+                          size=font_row, bold=True)
+                self._y -= line_h * 1.2
+
+            headers = sub.get("headers") or []
+            combine = (len(headers) >= 2 and
+                       headers[0] == 'Date' and headers[1] == 'Time')
+            disp_h  = (['Date &Time'] + headers[2:]
+                       if combine else headers)
+
+            if print_header and disp_h:
+                try:
+                    self.canvas.rect(
+                        col_x[0] - 3, self._y - 2,
+                        box_right - (col_x[0] - 3), line_h + 2,
+                    )
+                except AttributeError:
+                    pass
+                for i, h in enumerate(disp_h[:len(col_x) + 1]):
+                    if i == len(disp_h) - 1:
+                        self.text(amount_x, self._y, h, size=font_header,
+                                  bold=True, align="right")
+                    else:
+                        x     = col_x[i]
+                        max_w = ((col_x[i + 1] - x - pad) if i + 1 < len(col_x)
+                                 else (amount_x - pad - x))
+                        self.text(x, self._y,
+                                  self._usage_clip(h, max_w, "Helvetica-Bold",
+                                                   font_header),
+                                  size=font_header, bold=True)
+                self._y -= line_h
+
+            for row in rows:
+                col_x, amount_x, _ = (
+                    self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
+                disp       = ([f"{row[0]}  {row[1]}"] + row[2:]
+                              if combine else list(row))
+                charge_val = get_last_numeric(row)
+
+                # Wrap every text cell FIRST so we know the real row
+                # height before reserving space or drawing anything -
+                # same pattern as draw_table_with_overflow.
+                n_cells    = min(len(disp) - 1, len(col_x))
+                cell_lines = []
+                for i in range(n_cells):
+                    max_w = ((col_x[i + 1] - col_x[i] - pad) if i + 1 < len(col_x)
+                             else (amount_x - pad - col_x[i]))
+                    cell_lines.append(
+                        self._usage_wrap_cell(disp[i], max_w, "Helvetica",
+                                              font_row, max_lines=3))
+                row_height = max((len(lines) for lines in cell_lines),
+                                 default=1) * line_h
+
+                self._usage_ensure_space(row_height)
+                col_x, amount_x, _ = (
+                    self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
+                # column/page may have switched - re-wrap against the
+                # (possibly different) column width now in effect
+                cell_lines = []
+                for i in range(n_cells):
+                    max_w = ((col_x[i + 1] - col_x[i] - pad) if i + 1 < len(col_x)
+                             else (amount_x - pad - col_x[i]))
+                    cell_lines.append(
+                        self._usage_wrap_cell(disp[i], max_w, "Helvetica",
+                                              font_row, max_lines=3))
+                row_height = max((len(lines) for lines in cell_lines),
+                                 default=1) * line_h
+
+                first_line_y = self._y
+                for i, lines in enumerate(cell_lines):
+                    cy = first_line_y
+                    for line in lines:
+                        self.text(col_x[i], cy, line, size=font_row)
+                        cy -= line_h
+
+                self._usage_draw_amount(amount_x, first_line_y, charge_val,
+                                        decimals=3, size=font_row)
+                self._y -= row_height
+
+            return sum_rows(rows)
+
+        for sub_idx, sub in enumerate(subsections):
+            rows      = sub.get("rows", [])
+            sub_total = sum_rows(rows) if rows else sub.get("subtotal", 0)
+            draw_table(sub, rows,
+                      print_header=bool(rows),
+                      show_section_hdr=(sub_idx == 0))
+            self._usage_ensure_space(line_h)
+            col_x, amount_x, _ = (
+                self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
+            label = self._usage_clip(f'Total for {sub.get("label", "")}',
+                                     amount_x - pad - col_x[0],
+                                     "Helvetica-Bold", font_subtotal)
+            self.text(col_x[0], self._y, label,
+                      size=font_subtotal, bold=True)
+            self._usage_draw_amount(amount_x, self._y, sub_total,
+                                    decimals=3, size=font_subtotal, bold=True)
+            self._y -= line_h * 1.3
+
+        gt = section.get("grand_total") or sum_rows(
+            r for s in subsections for r in s.get("rows", []))
+        self._usage_ensure_space(line_h)
+        col_x, amount_x, _ = (
+            self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
+        gt_label = self._usage_clip(
+            f'Total Usage Charges for {section.get("label", "")}',
+            amount_x - pad - col_x[0], "Helvetica-Bold", font_grand_total)
+        self.text(col_x[0], self._y, gt_label,
+                  size=font_grand_total, bold=True)
+        self._usage_draw_amount(amount_x, self._y, gt,
+                                decimals=3, size=font_grand_total, bold=True)
+        self._y -= line_h * 2
 
 
     def _stamp_all_page_indicators(self, data):
@@ -612,10 +828,3 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                 c.setFont("Helvetica", 9)
                 c.drawRightString(540, 795,
                                   f"{idx + 1}  of  {total}")
-
-
-def _safe_float(v):
-    try:
-        return float(str(v).replace(",", ""))
-    except (ValueError, TypeError):
-        return 0
