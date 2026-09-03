@@ -2,6 +2,8 @@
 import os
 from datetime import datetime
 from reportlab.lib.colors import black
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from core.pdf_renderer import BaseRenderer
 from core.bill_common import is_vat_reg_printable, is_tax_section_printable
@@ -10,11 +12,37 @@ from templates.product_label_grouping.config import COORDS, CHARGES_TABLE, FONTS
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
+# Calibri, scoped to this template only - shared font files (not duplicated
+# per template) from templates/fonts/.
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
+    pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
+
 
 class ProductLabelGroupingRenderer(BaseRenderer):
+    FONT_NAME = "Calibri"
 
     def __init__(self):
         super().__init__(TEMPLATE_PDF)
+
+    def text(self, x, y, value, size=10, bold=False, align="left"):
+        """Override the base Helvetica text() with Calibri, scoped to this
+        template only - the shared BaseRenderer.text() (used by every other
+        template) is untouched."""
+        if value is None or value == "":
+            return
+        c = self.canvas
+        font = "Calibri-Bold" if bold else "Calibri"
+        c.setFont(font, size)
+        c.setFillColor(black)
+        text = str(value)
+        if align == "right":
+            c.drawRightString(x, y, text)
+        elif align == "center":
+            c.drawCentredString(x, y, text)
+        else:
+            c.drawString(x, y, text)
 
     def render(self, data):
         self._draw_header(data)
@@ -318,7 +346,7 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         c.line(x, y + 11, ax, y + 11)   # Top horizontal line
         c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
 
-        c.setFont("Helvetica-Bold", f["size"])
+        c.setFont("Calibri-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
         c.drawRightString(ax, y, f"{data['total_charges']:,.2f}")
         return y - line_h
@@ -344,10 +372,10 @@ class ProductLabelGroupingRenderer(BaseRenderer):
 
         top_y = y + line_h * 0.5   # a touch above the header, matches the divider's top
 
-        c.setFont("Helvetica-Bold", f["size"])
+        c.setFont("Calibri-Bold", f["size"])
         c.drawString(rx, y, "Details of Payments Received")
         y -= line_h
-        c.setFont("Helvetica", f["size"])
+        c.setFont("Calibri", f["size"])
         for p in data.get("payments", []):
             line = (f"{p.get('pay_type', 'Payment')}-"
                     f"{p.get('date', '')}-"
@@ -355,7 +383,7 @@ class ProductLabelGroupingRenderer(BaseRenderer):
             c.drawString(rx, y, line)
             c.drawRightString(ax, y, f"{p['amount']:,.2f}")
             y -= line_h
-        c.setFont("Helvetica-Bold", f["size"])
+        c.setFont("Calibri-Bold", f["size"])
         c.drawString(rx, y, COORDS["payments_total_label"])
         c.drawRightString(ax, y, f"{data['total_payments']:,.2f}")
 
@@ -382,10 +410,10 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         y      = COORDS["payments_row_start_y"] - (
             (len(data.get("payments", [])) + 2) * line_h)
 
-        c.setFont("Helvetica-Bold", f["size"])
+        c.setFont("Calibri-Bold", f["size"])
         c.drawString(rx, y, "Cancel Payment")
         y -= line_h
-        c.setFont("Helvetica", f["size"])
+        c.setFont("Calibri", f["size"])
         for p in cancelled:
             line = (f"{p.get('pay_type', '')}-{p.get('date', '')}"
                     f"-{p.get('location', '')}").rstrip('-')
@@ -408,15 +436,15 @@ class ProductLabelGroupingRenderer(BaseRenderer):
              len(data.get("cancelled_payments", [])) + 3) * line_h)
 
         if messages:
-            c.setFont("Helvetica-Bold", f["size"])
+            c.setFont("Calibri-Bold", f["size"])
             c.drawString(rx, y, "Message on Bill")
             y -= line_h
-            c.setFont("Helvetica", f["size"])
+            c.setFont("Calibri", f["size"])
             for m in messages:
                 c.drawString(rx, y, m)
                 y -= line_h
         if suspended:
-            c.setFont("Helvetica-Bold", f["size"])
+            c.setFont("Calibri-Bold", f["size"])
             c.drawString(rx, y, suspended)
 
     # usage (page 2+)
@@ -552,10 +580,10 @@ class ProductLabelGroupingRenderer(BaseRenderer):
                 x, y = COORDS["page_indicator_p1"]
             else:
                 x, y = COORDS["page_indicator_p2"]
-            c.setFont("Helvetica", f["size"])
+            c.setFont("Calibri", f["size"])
             c.drawRightString(x, y, f"{idx + 1}  of  {total_pages}")
             if idx > 0:
                 ix, iy = COORDS["page_invoice_no_p2"]
-                c.setFont("Helvetica-Bold", inv_f["size"])
+                c.setFont("Calibri-Bold", inv_f["size"])
                 c.drawString(ix, iy,
                              f'Invoice No.{data["invoice_number"]}')
