@@ -125,6 +125,12 @@ class SummaryStatementRenderer(BaseRenderer):
         x, y = COORDS_HEADER["date_of_statement"]
         self.text(x, y, data["date_of_statement"], size=f["size"])
 
+        # Invoice number (if available)
+        if data.get("invoice_number"):
+            f_inv = FONTS["invoice_no"]
+            self.text(COORDS_HEADER["customer_x"], COORDS_HEADER["customer_y_start"] + 30,
+                      f'Invoice No. {data["invoice_number"]}',
+                      size=f_inv["size"], bold=f_inv["bold"])
 
         # Customer Ref No
         x, y = COORDS_HEADER["customer_ref_no"]
@@ -185,7 +191,7 @@ class SummaryStatementRenderer(BaseRenderer):
         # Invoice No at top
         f = FONTS["invoice_no"]
         self.text(MIDDLE_PAGE["invoice_no_x"], MIDDLE_PAGE["invoice_no_y"],
-                   f'Invoice No.{data["invoice_number"]}',
+                   f'Invoice No. {data["invoice_number"]}',
                    size=f["size"], bold=f["bold"])
 
         # Page indicator

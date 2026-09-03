@@ -95,6 +95,10 @@ def parse_summary_statement(file_path: str) -> dict:
             elif key == 'SUMSTCONTACTZIP':
                 data["contact_zip"] = value
 
+            # Capture BILLREF regardless of invoice summary state
+            if key == 'BILLREF':
+                last_billref = value
+
             # accounts
             elif in_invoice_summary:
                 if key == 'ACCOUNTNO':
@@ -107,8 +111,6 @@ def parse_summary_statement(file_path: str) -> dict:
                     current_account["tax_amount"] = to_float(value)
                 elif key == 'INVGROSSTOTAL':
                     current_account["gross_total"] = to_float(value)
-                elif key == 'BILLREF':
-                    last_billref = value
 
             # totals
             elif key == 'SUMSTNETTTOTAL':

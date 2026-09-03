@@ -226,7 +226,7 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
         for sub_ref in subscription_refs:
             space = (lp_gap if sub_ref["ref"] else 0)
             for prod in sub_ref["products"]:
-                space += line_h + len(prod["charges"]) * line_h
+                space += line_h
             if sub_ref.get("recurring_subtotal"):
                 space += line_h
             if sub_ref.get("oneoff_subtotal"):
@@ -252,19 +252,6 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
                           product["label"],
                           size=f_prod["size"], bold=f_prod["bold"])
                 y -= line_h
-
-                for charge in product["charges"]:
-                    if y < y_min:
-                        self.new_page()
-                        y     = CHARGES_TABLE["otherpage_y_start"]
-                        y_min = CHARGES_TABLE["otherpage_y_min"]
-                    self.text(CHARGES_TABLE["desc_x"], y,
-                              charge["description"], size=f_chg["size"])
-                    if charge["amount"]:
-                        self.number(CHARGES_TABLE["amount_x"], y,
-                                    charge["amount"],
-                                    size=f_chg["size"], align="right")
-                    y -= line_h
 
             if sub_ref.get("recurring_subtotal"):
                 label = (f'{sub_ref.get("detail_name","").strip()} '
