@@ -55,6 +55,7 @@ def parse_nonvat_enterprise(file_path: str) -> dict:
         "suspended_message":     "",
         "source_filename":       os.path.basename(file_path).removesuffix(".processing"),
         "customer_segment":      "",
+        "currency_code":         "",
         "slt_vat_reg":           "",
         "customer_vat_reg":      "",
         "show_vat_lines":        False,
@@ -289,6 +290,8 @@ def parse_nonvat_enterprise(file_path: str) -> dict:
                 data['total_charges']  = to_float(value)
             elif key == 'NEWBAL':
                 data['total_payable'] = to_float(value)
+            elif key == 'ACCCURRENCYCODE':
+                data['currency_code'] = value
 
             elif key == 'SLTPRODUCTLABEL':
                 label = apply_label_override(value)

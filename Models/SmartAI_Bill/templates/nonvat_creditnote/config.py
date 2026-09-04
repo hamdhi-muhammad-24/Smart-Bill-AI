@@ -26,10 +26,20 @@ FONTS = {
 
     "title": {
         "size": 11,
-        "bold": False
+        "bold": True
     },
 
     "summary": {
+        "size": 9,
+        "bold": False
+    },
+
+    "adjustment_sub_heading": {
+        "size": 9,
+        "bold": True
+    },
+
+    "adjustment_desc": {
         "size": 9,
         "bold": False
     },
@@ -40,8 +50,13 @@ FONTS = {
     },
 
     "address": {
-        "size": 8,
+        "size": 9,
         "bold": False
+    },
+
+    "total_row": {
+        "size": 9,
+        "bold": True
     },
 
     "footer": {
@@ -135,7 +150,7 @@ ADDRESS_BOX = {
 
     "line_h": 11,
 
-    "font_size": 8
+    "font_size": 9
 
 }
 

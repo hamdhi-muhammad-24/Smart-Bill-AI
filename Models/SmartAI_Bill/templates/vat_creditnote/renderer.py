@@ -68,7 +68,7 @@ class VATCreditNoteRenderer(BaseRenderer):
             c.drawRightString(550, 750, f"{idx + 1}  of  {total}")
 
     def _draw_header(self, data):
-        self.text(*COORDS["document_title"], "Tax Credit Note", size=FONTS["title"]["size"])
+        self.text(*COORDS["document_title"], "Tax Credit Note", size=FONTS["title"]["size"], bold=FONTS["title"]["bold"])
         self.text(*COORDS["account_number"], data.get("account_number", ""), size=FONTS["header"]["size"])
         self.text(*COORDS["invoice_number"], data.get("invoice_number", ""), size=FONTS["header"]["size"])
         self.text(*COORDS["billing_date"], data.get("billing_date", ""), size=FONTS["header"]["size"])
@@ -97,11 +97,13 @@ class VATCreditNoteRenderer(BaseRenderer):
 
     def _draw_summary(self, data):
         summary = data.get("summary", {})
-        self.number(*COORDS["balance_bf"], summary.get("balance_bf", 0), align="center")
-        self.number(*COORDS["payments_received"], summary.get("payments_received", 0), align="center")
-        self.number(*COORDS["arrears"], summary.get("arrears", 0), align="center")
-        self.number(*COORDS["adjustment_value"], summary.get("adjustment_value", 0), align="center")
-        self.number(*COORDS["total_payable"], summary.get("total_payable", 0), bold=True, align="center")
+        f_sum = FONTS.get("summary", {"size": 9, "bold": False})
+        f_tot = FONTS.get("total_row", {"size": 9, "bold": True})
+        self.number(*COORDS["balance_bf"], summary.get("balance_bf", 0), size=f_sum["size"], align="center")
+        self.number(*COORDS["payments_received"], summary.get("payments_received", 0), size=f_sum["size"], align="center")
+        self.number(*COORDS["arrears"], summary.get("arrears", 0), size=f_sum["size"], align="center")
+        self.number(*COORDS["adjustment_value"], summary.get("adjustment_value", 0), size=f_sum["size"], align="center")
+        self.number(*COORDS["total_payable"], summary.get("total_payable", 0), size=f_tot["size"], bold=f_tot["bold"], align="center")
 
     def _draw_adjustments(self, data):
         adjustments = data.get("adjustments", [])
@@ -120,11 +122,13 @@ class VATCreditNoteRenderer(BaseRenderer):
 
     def _draw_section(self, title, items, y, data):
         # Initial heading for the section
-        self.text(ADJUSTMENT_TBL["desc_x"], y, title, bold=True)
+        f_sub = FONTS.get("adjustment_sub_heading", {"size": 9, "bold": True})
+        f_desc = FONTS.get("adjustment_desc", {"size": 9, "bold": False})
+        self.text(ADJUSTMENT_TBL["desc_x"], y, title, size=f_sub["size"], bold=f_sub["bold"])
         if title == "ADJUSTMENTS":
             currency = data.get("acc_currency_code", "Rs").strip()
             currency_str = "(Rs.)" if currency.upper() == "RS" else f"({currency})"
-            self.text(ADJUSTMENT_TBL["amount_x"], y + 3, currency_str, size=ADJUSTMENT_TBL["font_size"], bold=True, align="right")
+            self.text(ADJUSTMENT_TBL["amount_x"], y + 3, currency_str, size=f_sub["size"], bold=f_sub["bold"], align="right")
         y -= ADJUSTMENT_TBL["line_h"]
 
         for item in items:
@@ -133,15 +137,15 @@ class VATCreditNoteRenderer(BaseRenderer):
                 self.new_page()
                 y = ADJUSTMENT_TBL["y_start"]
                 # Re-draw the title at the top of the new page
-                self.text(ADJUSTMENT_TBL["desc_x"], y, title, bold=True)
+                self.text(ADJUSTMENT_TBL["desc_x"], y, title, size=f_sub["size"], bold=f_sub["bold"])
                 if title == "ADJUSTMENTS":
                     currency = data.get("acc_currency_code", "Rs").strip()
                     currency_str = "(Rs.)" if currency.upper() == "RS" else f"({currency})"
-                    self.text(ADJUSTMENT_TBL["amount_x"], y + 15, currency_str, size=ADJUSTMENT_TBL["font_size"], bold=True, align="right")
+                    self.text(ADJUSTMENT_TBL["amount_x"], y + 15, currency_str, size=f_sub["size"], bold=f_sub["bold"], align="right")
                 y -= ADJUSTMENT_TBL["line_h"]
 
-            self.text(ADJUSTMENT_TBL["desc_x"] + ADJUSTMENT_TBL["indent"], y, item.get("description", ""), size=ADJUSTMENT_TBL["font_size"])
-            self.number(ADJUSTMENT_TBL["amount_x"], y, item.get("amount", 0), size=ADJUSTMENT_TBL["font_size"], align="right")
+            self.text(ADJUSTMENT_TBL["desc_x"] + ADJUSTMENT_TBL["indent"], y, item.get("description", ""), size=f_desc["size"])
+            self.number(ADJUSTMENT_TBL["amount_x"], y, item.get("amount", 0), size=f_desc["size"], align="right")
             y -= ADJUSTMENT_TBL["line_h"]
         
         return y
@@ -162,7 +166,8 @@ class VATCreditNoteRenderer(BaseRenderer):
         self.canvas.setStrokeColorRGB(0, 0, 0)
         self.canvas.line(desc_x, y + 11, amount_x, y + 11)
 
-        self.text(desc_x, y, "Charge of the period", size=9, bold=True)
-        self.number(amount_x, y, data.get("charge_for_period", 0), size=9, bold=True, align="right")
+        f_tot = FONTS.get("total_row", {"size": 9, "bold": True})
+        self.text(desc_x, y, "Charge of the period", size=f_tot["size"], bold=f_tot["bold"])
+        self.number(amount_x, y, data.get("charge_for_period", 0), size=f_tot["size"], bold=f_tot["bold"], align="right")
 
         self.canvas.line(desc_x, y - 5, amount_x, y - 5)

@@ -10,7 +10,7 @@ from core.bill_common import (
 )
 
 _ITEM_TAG_RE = re.compile(
-    r'^(BSTARTITEM|BENDITEM|EVSOURCE|EVENTSTEXT|EVENTHEADING'
+    r'^(BSTARTITEM|BENDITEM|EVSOURCE|EVSOURCEASEVENTSOURCE|EVENTSTEXT|EVENTHEADING'
     r'|EVENT|TSTARTEVENT|TENDEVENT|SLTITEMGRANDTOTAL)_(\d+)$'
 )
 _ITEMGROUP_RE     = re.compile(r'^ITEMGROUPNAME_1_(\d+)$')
@@ -127,16 +127,12 @@ def parse_nonvat_home(file_path: str) -> dict:
                     }
                 elif tag == 'BENDITEM':
                     current_item_id = None
-                elif tag == 'EVSOURCE':
+                elif tag in ('EVSOURCE', 'EVSOURCEASEVENTSOURCE'):
                     if item_id in usage_sections:
                         usage_sections[item_id]['phone'] = value
                 elif tag == 'EVENTSTEXT':
                     if item_id in usage_sections:
-                        # Strip P_ prefix from section label
-                        label = value
-                        if label.startswith('P_'):
-                            label = label[2:]
-                        usage_sections[item_id]['label'] = label
+                        usage_sections[item_id]['label'] = value.strip()
                 elif tag == 'EVENTHEADING':
                     cols = [value] + [p.strip() for p in rest.split('|')
                                       if p.strip()]
@@ -433,7 +429,16 @@ def parse_nonvat_home(file_path: str) -> dict:
     if data.get('inv_total_tax') is not None:
         data['taxes_total'] = data['inv_total_tax']
 
-    # NonVAT Home: Detailed Usage charges should not appear
-    data['usage_sections'] = []
+    # BPR22: drop subsections with no rows AND zero subtotal
+    for sec in usage_sections.values():
+        sec['subsections'] = [
+            s for s in sec['subsections']
+            if s.get('rows') or s.get('subtotal')
+        ]
+
+    # Drop entire usage sections that have no remaining subsections
+    data['usage_sections'] = [
+        s for s in usage_sections.values() if s['subsections']
+    ]
 
     return data

@@ -125,13 +125,6 @@ class SummaryStatementRenderer(BaseRenderer):
         x, y = COORDS_HEADER["date_of_statement"]
         self.text(x, y, data["date_of_statement"], size=f["size"])
 
-        # Invoice number (if available)
-        if data.get("invoice_number"):
-            f_inv = FONTS["invoice_no"]
-            self.text(COORDS_HEADER["customer_x"], COORDS_HEADER["customer_y_start"] + 30,
-                      f'Invoice No. {data["invoice_number"]}',
-                      size=f_inv["size"], bold=f_inv["bold"])
-
         # Customer Ref No
         x, y = COORDS_HEADER["customer_ref_no"]
         self.text(x, y, data["customer_ref_no"], size=f["size"])
@@ -161,7 +154,8 @@ class SummaryStatementRenderer(BaseRenderer):
             COORDS_HEADER["customer_y_start"],
             customer_lines,
             line_height=COORDS_HEADER["customer_line_h"],
-            size=f["size"]
+            size=f["size"],
+            bold=f["bold"]
         )
 
         # Barcode (customer ref)
