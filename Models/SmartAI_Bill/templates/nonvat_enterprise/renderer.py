@@ -54,6 +54,7 @@ class NonVATEnterpriseRenderer(BaseRenderer):
         self._draw_generation_id(data)
         self._draw_summary_boxes(data)
         self._draw_page1_footer(data)
+        self._draw_currency_label(data)
 
         y = self._draw_charges(data["product_labels"])
         y = self._draw_adjustments(data, y)
@@ -69,18 +70,19 @@ class NonVATEnterpriseRenderer(BaseRenderer):
 
     def _draw_header(self, data):
         f = FONTS["header"]
+        fa = FONTS.get("account_details", {"size": 9, "bold": False})
         x, y = COORDS["telephone_number"]
-        self.text(x, y, data["telephone_number"], size=f["size"])
+        self.text(x, y, data["telephone_number"], size=f["size"], bold=f["bold"])
         x, y = COORDS["account_number"]
-        self.text(x, y, data["account_number"], size=f["size"])
+        self.text(x, y, data["account_number"], size=fa["size"], bold=fa["bold"])
         x, y = COORDS["invoice_number"]
-        self.text(x, y, data["invoice_number"], size=f["size"])
+        self.text(x, y, data["invoice_number"], size=fa["size"], bold=fa["bold"])
         x, y = COORDS["billing_date"]
-        self.text(x, y, data["billing_date"], size=f["size"])
+        self.text(x, y, data["billing_date"], size=fa["size"], bold=fa["bold"])
         period = (f"{data['billing_period_start']} - "
                   f"{data['billing_period_end']}")
         x, y = COORDS["billing_period"]
-        self.text(x, y, period, size=f["size"])
+        self.text(x, y, period, size=fa["size"], bold=fa["bold"])
 
     def _draw_customer(self, data):
         f = FONTS["customer_name"]
@@ -179,6 +181,16 @@ class NonVATEnterpriseRenderer(BaseRenderer):
         x, y = COORDS["slip_account"]
         self.text(x, y, data["account_number"], size=f["size"])
 
+    def _draw_currency_label(self, data):
+        """Currency label above the charges column (e.g. "(Rs.)") - read from
+        the GMF's ACCCURRENCYCODE tag (data['currency_code']), defaulting to Rs."""
+        code = (data.get("currency_code") or "Rs").strip().rstrip(".")
+        if not code:
+            return
+        f = FONTS["header"]
+        self.text(CHARGES_TABLE["amount_x"], CHARGES_TABLE["page1_y_start"] + 11.0,
+                  f"({code}.)", size=f["size"], bold=True, align="right")
+
     def _draw_charges(self, product_labels):
         y      = CHARGES_TABLE["page1_y_start"]
         y_min  = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"])
@@ -266,11 +278,16 @@ class NonVATEnterpriseRenderer(BaseRenderer):
         return y
 
     def _draw_taxes_only(self, data, y):
-        has_nonzero = any(t['amount'] for t in data.get("taxes", []))
+        total_tax = data.get("inv_total_tax")
+        if total_tax is None:
+            total_tax = data.get("taxes_total") or sum(t.get("amount", 0) for t in data.get("taxes", []))
+
+        has_nonzero = bool(total_tax) or any(t.get('amount') for t in data.get("taxes", []))
         if not is_tax_section_printable(data.get("tax_status"), has_nonzero):
             return y
     
-        f = FONTS["taxes"]
+        f_hdr = FONTS.get("taxes_header", FONTS["taxes"])
+        f_line = FONTS.get("taxes_line", FONTS["taxes"])
         line_h = CHARGES_TABLE["line_h"]
         y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
     
@@ -279,17 +296,16 @@ class NonVATEnterpriseRenderer(BaseRenderer):
             y = CHARGES_TABLE["otherpage_y_start"]
             y_min = CHARGES_TABLE["otherpage_y_min"]
 
-    # Header line
+        # Header line
         self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies",
-              size=f["size"], bold=True)
+                  size=f_hdr["size"], bold=f_hdr["bold"])
         y -= line_h
     
-    # Content line with amount
-        taxes_total = sum(t.get("amount", 0) for t in data.get("taxes", []))
-        self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies",
-              size=f["size"], bold=False)
+        # Content line with amount
+        self.text(CHARGES_TABLE["desc_x"], y, "Taxes & Levies",
+                  size=f_line["size"], bold=f_line["bold"])
         self.number(CHARGES_TABLE["amount_x"], y,
-                taxes_total, size=f["size"], align="right")
+                    total_tax, size=f_line["size"], align="right")
         y -= line_h
     
         return y
@@ -426,35 +442,37 @@ class NonVATEnterpriseRenderer(BaseRenderer):
 
         # ---- 1. Details of Payments Received ----
         payments = data.get("payments", [])
+        f_pay_hdr = FONTS.get("payments_header", {"size": 7.5, "bold": True})
+        f_pay_line = FONTS.get("payments_line", {"size": 7, "bold": False})
         if data.get("total_payments") or payments:
             ensure_space(line_h * (len(payments) + 2.6))
-            draw_text("Details of Payments Received", bold=True)
+            draw_text("Details of Payments Received", bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
             advance(1.2)
             for p in payments:
                 ensure_space(line_h)
                 line = (f"{p.get('pay_type', 'Payment')}-"
                         f"{p.get('date', '')}-"
                         f"{p.get('location', '')}").rstrip('-')
-                draw_text(line)
-                draw_amount(p['amount'])
+                draw_text(line, bold=f_pay_line["bold"], size=f_pay_line["size"])
+                draw_amount(p['amount'], bold=f_pay_line["bold"], size=f_pay_line["size"])
                 advance()
             ensure_space(line_h * 1.4)
-            draw_text("Total Payments Received", bold=True)
-            draw_amount(data.get('total_payments', 0), bold=True)
+            draw_text("Total Payments Received", bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
+            draw_amount(data.get('total_payments', 0), bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
             advance(1.6)
 
         # ---- 2. Cancel Payment ----
         cancelled = data.get("cancelled_payments", [])
         if cancelled:
             ensure_space(line_h * (len(cancelled) + 1.4))
-            draw_text("Cancel Payment", bold=True)
+            draw_text("Cancel Payment", bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
             advance(1.2)
             for p in cancelled:
                 ensure_space(line_h)
                 line = (f"{p.get('pay_type', '')}-{p.get('date', '')}"
                         f"-{p.get('location', '')}").rstrip('-')
-                draw_text(line)
-                draw_amount(p['amount'])
+                draw_text(line, bold=f_pay_line["bold"], size=f_pay_line["size"])
+                draw_amount(p['amount'], bold=f_pay_line["bold"], size=f_pay_line["size"])
                 advance()
             advance(1.2)
 

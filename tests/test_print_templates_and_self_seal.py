@@ -153,6 +153,57 @@ def test_nonvat_print_renderer_enterprise_taxes_total_only():
             os.remove(pdf_path)
 
 
+def test_nonvat_enterprise_renders_currency_label():
+    """Test NonVATEnterpriseRenderer renders (Rs.) currency label above charges."""
+    from templates.nonvat_enterprise.parser import parse_nonvat_enterprise
+    # 1. Test parser extracts ACCCURRENCYCODE
+    gmf_sample = (
+        "ACCOUNTNO 1234567890 |\n"
+        "BILLREF INV-12345 |\n"
+        "INVOICEACTUALDATE 01/10/2025 |\n"
+        "INVOICESTART 01/09/2025 |\n"
+        "INVOICEEND 30/09/2025 |\n"
+        "PAYMENTDUEDATE 22/10/2025 |\n"
+        "CUSTOMERTYPE ENTERPRISE |\n"
+        "ACCCURRENCYCODE Rs |\n"
+        "CHARGES 100.00 |\n"
+        "NEWBAL 100.00 |\n"
+        "DOCEND |\n"
+    )
+    with tempfile.NamedTemporaryFile(suffix=".gmf", mode="w", delete=False, encoding="utf-8") as f:
+        f.write(gmf_sample)
+        tmp_gmf = f.name
+    try:
+        parsed = parse_nonvat_enterprise(tmp_gmf)
+        assert parsed.get("currency_code") == "Rs"
+    finally:
+        if os.path.exists(tmp_gmf):
+            os.remove(tmp_gmf)
+
+    # 2. Test renderer displays (Rs.)
+    renderer = NonVATEnterpriseRenderer()
+    data = _sample_nonvat_data(is_red=False)
+    data["badge"] = "ENTERPRISE"
+    data["currency_code"] = "Rs"
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+
+    try:
+        renderer.render(data)
+        renderer.save(pdf_path)
+
+        doc = fitz.open(pdf_path)
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+
+        assert "(Rs.)" in full_text
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+
+
 def test_nonvat_home_standard_renderer_keeps_layout():
     """Test standard NonVATHomeRenderer uses layout.pdf."""
     renderer = NonVATHomeRenderer()
@@ -161,8 +212,8 @@ def test_nonvat_home_standard_renderer_keeps_layout():
     assert renderer.template_pdf_path.endswith("layout.pdf")
 
 
-def test_nonvat_home_taxes_total_only_and_no_detailed_usage():
-    """Test NonVATHomeRenderer shows only total summation of Taxes & Levies and no Detailed Usage charges."""
+def test_nonvat_home_taxes_total_only_and_detailed_usage():
+    """Test NonVATHomeRenderer shows only total summation of Taxes & Levies and renders Detailed Usage charges."""
     import fitz
     renderer = NonVATHomeRenderer()
     data = _sample_nonvat_data(is_red=False)
@@ -199,8 +250,57 @@ def test_nonvat_home_taxes_total_only_and_no_detailed_usage():
         assert "CESS" not in full_text
         assert "Recovery in lieu of SSCL" not in full_text
         assert "Telecommunication Levy" not in full_text
-        # Detailed usage charges must NOT appear
-        assert "Detailed Usage Charges" not in full_text
+        # Detailed usage charges MUST appear
+        assert "Detailed Usage Charges" in full_text
+        assert "Additional Channels" in full_text
+        assert "Star Sports 1" in full_text
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+
+def test_nonvat_home_renders_detailed_usage_multi_page():
+    """Test full parsing and rendering of 520205 nonvat home GMF with all 4 usage sections across 2 pages."""
+    import fitz
+    from Models.SmartAI_Bill.templates.nonvat_home.parser import parse_nonvat_home
+
+    gmf_path = os.path.join(
+        os.path.dirname(__file__), "..", "local_gmf_uploads", "Test_GMFs",
+        "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4"
+    )
+    if not os.path.exists(gmf_path):
+        pytest.skip("Test GMF not found")
+
+    data = parse_nonvat_home(gmf_path)
+    assert len(data["usage_sections"]) == 4
+
+    renderer = NonVATHomeRenderer()
+    renderer.render(data)
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+
+    try:
+        renderer.save(pdf_path)
+        doc = fitz.open(pdf_path)
+        assert len(doc) == 2
+
+        p1_text = doc[0].get_text()
+        p2_text = doc[1].get_text()
+        doc.close()
+
+        # Page 1 has Payments and Domestic Voice Usage preview
+        assert "Details of Payments Received" in p1_text
+        assert "Detailed Usage Charges for P_Domestic Voice Usage 0312276282" in p1_text
+        assert "SLT-SLT Local" in p1_text
+
+        # Page 2 has continuation of Domestic Voice Usage, Additional Channels, International, and Extra GB
+        assert "Total for SLT-SLT Local" in p2_text
+        assert "Short Code - Free of charge" in p2_text
+        assert "Detailed Usage Charges for Additional Channels 0312276282" in p2_text
+        assert "Detailed Usage Charges for P_International Voice Usage 0312276282" in p2_text
+        assert "Detailed Usage Charges for Extra GB KK2276282" in p2_text
+        assert "Total Usage Charges for Extra GB" in p2_text
     finally:
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
@@ -212,6 +312,40 @@ def test_nonvat_enterprise_standard_renderer_keeps_layout():
     data = _sample_nonvat_data(is_red=False)
     renderer.render(data)
     assert renderer.template_pdf_path.endswith("layout.pdf")
+
+
+def test_nonvat_enterprise_email_taxes_total_only():
+    """Test NonVATEnterpriseRenderer shows only total summation of Taxes & Levies."""
+    import fitz
+    renderer = NonVATEnterpriseRenderer()
+    data = _sample_nonvat_data(is_red=False)
+    data["badge"] = "ENTERPRISE"
+    data["template_id"] = "nonvat_enterprise"
+    data["taxes"] = [
+        {"name": "Recovery in lieu of SSCL", "amount": 722.36},
+        {"name": "VAT-18%", "amount": 5209.08},
+    ]
+    data["taxes_total"] = 5931.44
+    data["inv_total_tax"] = 5931.44
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+
+    try:
+        renderer.render(data)
+        renderer.save(pdf_path)
+
+        doc = fitz.open(pdf_path)
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+
+        assert "Taxes & Levies" in full_text
+        assert "5,931.44" in full_text
+        assert "Recovery in lieu of SSCL" not in full_text
+        assert "VAT-18%" not in full_text
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
 
 
 def test_self_seal_address_overlay_rotation():

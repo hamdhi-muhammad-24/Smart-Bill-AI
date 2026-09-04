@@ -333,8 +333,12 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                         if start:
                             desc += f" ({start}-{end})"
                     amt = to_float(all_parts[0])
-                    current_product['charges'].append(
-                        {'description': desc, 'amount': amt})
+                    current_product['charges'].append({
+                        'description': desc,
+                        'amount': amt,
+                        'kind': 'charge',
+                        'flag': flag,
+                    })
 
             elif key == 'SLTPRODLABELUSAGEDET':
                 all_parts = [value] + [p.strip() for p in rest.split('|')
@@ -344,8 +348,11 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                     if amt == 0:                         # BPR22
                         continue
                     desc = strip_before_underscore(all_parts[0])  # BPR21
-                    current_product['charges'].append(
-                        {'description': desc, 'amount': amt})
+                    current_product['charges'].append({
+                        'description': desc,
+                        'amount': amt,
+                        'kind': 'usage',
+                    })
 
             elif key == 'SLTPRODLABELDISCDET':
                 all_parts = [value] + [p.strip() for p in rest.split('|')
@@ -357,6 +364,7 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                             'description': strip_before_underscore(
                                 all_parts[0]),             # BPR21
                             'amount': -amt,
+                            'kind': 'discount',
                         })
 
             elif key == 'SLTSUBSLVL_RECURR_SUBTOTAL':

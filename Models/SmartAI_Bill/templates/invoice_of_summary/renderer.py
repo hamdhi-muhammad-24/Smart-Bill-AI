@@ -77,17 +77,20 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
 
     def _draw_header(self, data):
         f = FONTS["header"]
+        fa = FONTS.get("account_details", {"size": 9, "bold": False})
+        if data.get("show_vat_lines"):
+            self.text(*COORDS["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
         self.text(*COORDS["telephone_number"], data["telephone_number"],
-                  size=f["size"])
+                  size=f["size"], bold=f["bold"])
         self.text(*COORDS["account_number"],   data["account_number"],
-                  size=f["size"])
+                  size=fa["size"], bold=fa["bold"])
         self.text(*COORDS["invoice_number"],   data["invoice_number"],
-                  size=f["size"])
+                  size=fa["size"], bold=fa["bold"])
         self.text(*COORDS["billing_date"],     data["billing_date"],
-                  size=f["size"])
+                  size=fa["size"], bold=fa["bold"])
         period = (f"{data['billing_period_start']} - "
                   f"{data['billing_period_end']}")
-        self.text(*COORDS["billing_period"], period, size=f["size"])
+        self.text(*COORDS["billing_period"], period, size=fa["size"], bold=fa["bold"])
 
     def _draw_vat_lines(self, data):
         """BPR05/07: only when show_vat_lines is True (VATDL check)."""
@@ -106,27 +109,29 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
 
     def _draw_customer(self, data):
         f = FONTS["customer_name"]
-        lines = []
-        if data.get("address_name_not_required"):
-            top = data.get("business_name") or data.get("customer_name", "")
-            if top:
-                lines.append(top)
-        else:
-            top = data.get("department") or data.get("customer_name", "")
-            if top:
-                lines.append(top)
-            if data.get("business_name"):
-                lines.append(data["business_name"])
+        addr_lines = []
+        cust_name = data.get("customer_name", "").strip()
+        if cust_name and not data.get("address_name_not_required"):
+            addr_lines.append(cust_name)
+        elif cust_name and not (data.get("position") or data.get("business_name")):
+            addr_lines.append(cust_name)
 
-        lines.extend(data.get("address_lines", []))
+        if data.get("position"):
+            addr_lines.append(data["position"])
+        if data.get("department"):
+            addr_lines.append(data["department"])
+        if data.get("business_name") and data["business_name"] != cust_name:
+            addr_lines.append(data["business_name"])
+
+        addr_lines.extend(data.get("address_lines", []))
         if data.get("zip_code"):
-            lines.append(data["zip_code"])
+            addr_lines.append(data["zip_code"])
 
         start_y = COORDS["customer_name"][1]
         line_h = COORDS.get("customer_addr_line_h", 11)
         self.multiline_block(
             COORDS["customer_name"][0], start_y,
-            lines, line_height=line_h,
+            addr_lines, line_height=line_h,
             size=f["size"], bold=True,
         )
 
@@ -246,7 +251,8 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                       size if size is not None else f["size"])
             c.drawString(x, self._y, text)
             if amount is not None:
-                c.drawRightString(amt_x, self._y, f"{amount:,.2f}")
+                amt_str = f"- {abs(amount):,.2f}" if amount < 0 else f"{amount:,.2f}"
+                c.drawRightString(amt_x, self._y, amt_str)
             self._y -= lh
 
         # BPR: suppress rental/usage subtotal lines if zero
@@ -256,21 +262,24 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         if data['usage_subtotal']:
             _line("Subtotal Usage charges", data['usage_subtotal'])
 
-        if data['top_level_discounts']:
+        discounts = data.get('top_level_discounts') or data.get('discounts') or []
+        if discounts:
             _line("Discounts", bold=True)
-            for d in data['top_level_discounts']:
+            for d in discounts:
                 _line(d["description"], d["amount"], size=fc)
 
         if data.get('adjustments_subtotal'):
             _line("Subtotal Adjustment charges",
                   data['adjustments_subtotal'], bold=True)
 
-        # BPR11/24: gate taxes
-        has_nonzero = any(t['amount'] for t in data["taxes"])
-        if data["taxes"] and is_tax_section_printable(
+        # BPR11/24: gate taxes (Recovery in lieu of SSCL removed)
+        taxes = [t for t in data.get("taxes", [])
+                 if t.get("name") != "Recovery in lieu of SSCL" and "SSCL" not in t.get("name", "").upper()]
+        has_nonzero = any(t['amount'] for t in taxes)
+        if taxes and is_tax_section_printable(
                 data.get('tax_status'), has_nonzero):
             _line("Taxes & Levies", bold=True)
-            for t in data["taxes"]:
+            for t in taxes:
                 if t['amount']:
                     _line(t["name"], t['amount'], size=fc)
 
@@ -316,17 +325,22 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         x_pos = x if x is not None else CHARGES_TABLE["desc_x"]
         self.text(x_pos, self._y, text, size=fs, bold=bold)
         if amount is not None:
-            self.number(CHARGES_TABLE["amount_x"], self._y, amount,
-                        size=fs, bold=bold, align="right")
+            if isinstance(amount, (int, float)) and amount < 0:
+                self.text(CHARGES_TABLE["amount_x"], self._y,
+                          f"- {abs(amount):,.2f}",
+                          size=fs, bold=bold, align="right")
+            else:
+                self.number(CHARGES_TABLE["amount_x"], self._y, amount,
+                            size=fs, bold=bold, align="right")
         self._y -= CHARGES_TABLE["line_h"]
 
     # flowing sections
 
     def _draw_charges_in_detail_flowing(self, data):
-        """Charges in Detail — starts at fixed coord, may overflow."""
+        """Charges in Detail — starts dynamically after Total Charges, may overflow."""
         if not data["charge_groups"]:
             return
-        self._y        = COORDS["charges_detail_y_start"]
+        self._y        -= 14
         self._on_page1 = True
 
         # "Charges in Detail" heading + underline, aligned to the same
@@ -350,11 +364,14 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                 self._write_line(group["detail_name"],
                                  x=CHARGES_TABLE["group_ref_x"])
             for product in group["products"]:
-                self._write_line(product["label"], bold=True,
+                self._write_line(product["label"], bold=FONTS["product_label"]["bold"],
+                                 size=FONTS["product_label"]["size"],
                                  x=CHARGES_TABLE["product_label_x"])
                 for charge in product["charges"]:
                     self._write_line(charge["description"],
                                      amount=charge["amount"],
+                                     bold=FONTS["charge_line"]["bold"],
+                                     size=FONTS["charge_line"]["size"],
                                      x=CHARGES_TABLE["desc_x"])
 
     def _draw_adjustments_flowing(self, data):
@@ -378,7 +395,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         get drawn in the Charges-in-Detail flow — see the note in
         _draw_discounts_and_taxes_flowing about why that method no longer
         also prints a Discounts block."""
-        discounts = data.get("top_level_discounts", [])
+        discounts = data.get("top_level_discounts") or data.get("discounts") or []
         if not discounts:
             return
         grx = CHARGES_TABLE["group_ref_x"]
@@ -402,15 +419,20 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         """
         grx = CHARGES_TABLE["group_ref_x"]
 
-        # BPR11/24: gate taxes
-        has_nonzero = any(t['amount'] for t in data["taxes"])
-        if data["taxes"] and is_tax_section_printable(
+        # BPR11/24: gate taxes (Recovery in lieu of SSCL removed)
+        taxes = [t for t in data.get("taxes", [])
+                 if t.get("name") != "Recovery in lieu of SSCL" and "SSCL" not in t.get("name", "").upper()]
+        has_nonzero = any(t['amount'] for t in taxes)
+        f_th = FONTS.get("taxes_header", {"size": 9.5, "bold": True})
+        f_tl = FONTS.get("taxes_line", {"size": 9, "bold": False})
+        if taxes and is_tax_section_printable(
                 data.get('tax_status'), has_nonzero):
-            self._write_line("Taxes & Levies", bold=True, x=grx)
-            for t in data["taxes"]:
+            self._write_line("Taxes & Levies", bold=f_th["bold"], size=f_th["size"], x=grx)
+            for t in taxes:
                 if t["amount"]:
                     self._write_line(t["name"],
-                                     amount=t["amount"], x=grx)
+                                     amount=t["amount"],
+                                     bold=f_tl["bold"], size=f_tl["size"], x=grx)
 
         # Total Charges framed by top/bottom horizontal lines (not a box)
         self._y -= CHARGES_TABLE["line_h"] * 0.3
@@ -436,31 +458,36 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         if not data.get("total_payments") and not data.get("payments"):
             return
         grx    = CHARGES_TABLE["group_ref_x"]
-        f_size = FONTS["payments"]["size"]
+        f_hdr  = FONTS.get("payments_header", {"size": 7.5, "bold": True})
+        f_line = FONTS.get("payments_line", {"size": 7, "bold": False})
+
+        # Ensure space for the entire payments block so the header is never stranded
+        payments = data.get("payments", [])
+        needed = CHARGES_TABLE["line_h"] * (len(payments) + 3)
+        self._ensure_space(needed=needed)
 
         # Remember where this block starts so the usage-table vertical
         # divider can extend up to start here, instead of at its own
         # header lower down the page.
-        self._ensure_space()
         self._divider_top_y   = self._y
         self._divider_top_page = self.page_count() - 1
 
         self._write_line("Details of Payments Received",
-                         bold=True, x=grx)
+                         bold=f_hdr["bold"], size=f_hdr["size"], x=grx)
         for p in data["payments"]:
             line = (f"{p.get('pay_type', '')}-{p.get('date', '')}"
                     f"-{p.get('location', '')}").rstrip('-')
             self._ensure_space()
-            self.text(grx, self._y, line, size=f_size)
+            self.text(grx, self._y, line, size=f_line["size"], bold=f_line["bold"])
             self.number(290, self._y, p["amount"],
-                        size=f_size, align="right")
+                        size=f_line["size"], bold=f_line["bold"], align="right")
             self._y -= CHARGES_TABLE["line_h"]
 
         self._ensure_space()
         self.text(grx, self._y, "Total Payments Received",
-                  size=f_size, bold=True)
+                  size=f_hdr["size"], bold=f_hdr["bold"])
         self.number(290, self._y, data["total_payments"],
-                    size=f_size, bold=True, align="right")
+                    size=f_hdr["size"], bold=f_hdr["bold"], align="right")
         self._y -= CHARGES_TABLE["line_h"] * 1.5
 
     def _draw_cancel_payments_flowing(self, data):
@@ -469,16 +496,17 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         if not cancelled:
             return
         grx    = CHARGES_TABLE["group_ref_x"]
-        f_size = FONTS["payments"]["size"]
+        f_hdr  = FONTS.get("payments_header", {"size": 7.5, "bold": True})
+        f_line = FONTS.get("payments_line", {"size": 7, "bold": False})
 
-        self._write_line("Cancel Payment", bold=True, x=grx)
+        self._write_line("Cancel Payment", bold=f_hdr["bold"], size=f_hdr["size"], x=grx)
         for p in cancelled:
             line = (f"{p.get('pay_type', '')}-{p.get('date', '')}"
                     f"-{p.get('location', '')}").rstrip('-')
             self._ensure_space()
-            self.text(grx, self._y, line, size=f_size)
+            self.text(grx, self._y, line, size=f_line["size"], bold=f_line["bold"])
             self.number(290, self._y, p["amount"],
-                        size=f_size, align="right")
+                        size=f_line["size"], bold=f_line["bold"], align="right")
             self._y -= CHARGES_TABLE["line_h"]
         self._y -= CHARGES_TABLE["line_h"] * 0.5
 

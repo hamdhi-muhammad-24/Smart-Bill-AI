@@ -221,13 +221,14 @@ class VATHomeRenderer:
 
     def _draw_header(self, data):
         f = FONTS["header"]
+        fa = FONTS.get("account_details", {"size": 9, "bold": False})
         self.text(*COORDS["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
-        self.text(*COORDS["telephone_number"], data["telephone_number"], size=f["size"])
-        self.text(*COORDS["account_number"], data["account_number"], size=f["size"])
-        self.text(*COORDS["invoice_number"], data["invoice_number"], size=f["size"])
-        self.text(*COORDS["billing_date"], data["billing_date"], size=f["size"])
+        self.text(*COORDS["telephone_number"], data["telephone_number"], size=f["size"], bold=f["bold"])
+        self.text(*COORDS["account_number"], data["account_number"], size=fa["size"], bold=fa["bold"])
+        self.text(*COORDS["invoice_number"], data["invoice_number"], size=fa["size"], bold=fa["bold"])
+        self.text(*COORDS["billing_date"], data["billing_date"], size=fa["size"], bold=fa["bold"])
         period = f"{data['billing_period_start']} - {data['billing_period_end']}"
-        self.text(*COORDS["billing_period"], period, size=f["size"])
+        self.text(*COORDS["billing_period"], period, size=fa["size"], bold=fa["bold"])
 
     def _draw_vat_lines(self, data):
         if not data.get("show_vat_lines"):
@@ -524,8 +525,10 @@ def _draw_charge_group(flow, group, indent=0, gap_before=False):
         flow.ensure_space(LINE_HEIGHT * 3)
         flow.draw_line([])
     flow.ensure_space(LINE_HEIGHT * 2)
+    f_pl = FONTS.get("product_label", {"size": 9.5, "bold": True})
+    f_cl = FONTS.get("charge_line", {"size": 9, "bold": False})
     col = flow.col_def()
-    flow.draw_line([(col["x_start"] + indent, group["label"], "left")], bold=True, size=9)
+    flow.draw_line([(col["x_start"] + indent, group["label"], "left")], bold=f_pl["bold"], size=f_pl["size"])
     for charge in group["charges"]:
         flow.ensure_space(LINE_HEIGHT)
         col = flow.col_def()
@@ -533,7 +536,7 @@ def _draw_charge_group(flow, group, indent=0, gap_before=False):
         flow.draw_line([
             (col["x_start"] + indent + 8, charge["description"], "left"),
             (col["amount_x"], amt, "right"),
-        ], size=8)
+        ], size=f_cl["size"], bold=f_cl["bold"])
 
 
 def _draw_charges_flow(flow, data):
@@ -560,41 +563,47 @@ def _draw_adjustments_flow(flow, data):
     adjustments = data.get("adjustments", [])
     if not adjustments:
         return
+    f_th = FONTS.get("taxes_header", {"size": 9.5, "bold": True})
+    f_tl = FONTS.get("taxes_line", {"size": 9, "bold": False})
     flow.ensure_space(LINE_HEIGHT * 2)
     col = flow.col_def()
-    flow.draw_line([(col["x_start"], "Adjustments", "left")], bold=True, size=9)
+    flow.draw_line([(col["x_start"], "Adjustments", "left")], bold=f_th["bold"], size=f_th["size"])
     for adj in adjustments:
         flow.ensure_space(LINE_HEIGHT)
         col = flow.col_def()
         flow.draw_line([
             (col["x_start"] + 8, adj["description"], "left"),
             (col["amount_x"], f"{adj['amount']:,.2f}", "right"),
-        ], size=8)
+        ], size=f_tl["size"], bold=f_tl["bold"])
 
 
 def _draw_discounts_flow(flow, data):
     discounts = data.get("top_level_discounts", [])
     if not discounts:
         return
+    f_th = FONTS.get("taxes_header", {"size": 9.5, "bold": True})
+    f_tl = FONTS.get("taxes_line", {"size": 9, "bold": False})
     flow.ensure_space(LINE_HEIGHT * 2)
     col = flow.col_def()
-    flow.draw_line([(col["x_start"], "Discounts", "left")], bold=True, size=9)
+    flow.draw_line([(col["x_start"], "Discounts", "left")], bold=f_th["bold"], size=f_th["size"])
     for d in discounts:
         flow.ensure_space(LINE_HEIGHT)
         col = flow.col_def()
         flow.draw_line([
             (col["x_start"] + 8, d["description"], "left"),
             (col["amount_x"], f"{d['amount']:,.2f}", "right"),
-        ], size=8)
+        ], size=f_tl["size"], bold=f_tl["bold"])
 
 
 def _draw_taxes_flow(flow, data):
     has_nonzero = any(t['amount'] for t in data.get("taxes", []))
     if not is_tax_section_printable(data.get("tax_status"), has_nonzero):
         return
+    f_th = FONTS.get("taxes_header", {"size": 9.5, "bold": True})
+    f_tl = FONTS.get("taxes_line", {"size": 9, "bold": False})
     flow.ensure_space(LINE_HEIGHT * 2)
     col = flow.col_def()
-    flow.draw_line([(col["x_start"], "Taxes & Levies", "left")], bold=True, size=9)
+    flow.draw_line([(col["x_start"], "Taxes & Levies", "left")], bold=f_th["bold"], size=f_th["size"])
     for t in data.get("taxes", []):
         if not t["amount"]:
             continue
@@ -603,7 +612,7 @@ def _draw_taxes_flow(flow, data):
         flow.draw_line([
             (col["x_start"] + 8, t["name"], "left"),
             (col["amount_x"], f"{t['amount']:,.2f}", "right"),
-        ], size=8)
+        ], size=f_tl["size"], bold=f_tl["bold"])
 
 
 def _draw_total_charges_flow(flow, data):
@@ -635,10 +644,11 @@ def _draw_total_charges_flow(flow, data):
     text_y = flow.y
     page.draw_line((col["x_start"], text_y - TOP_GAP), (col["amount_x"], text_y - TOP_GAP),
                     width=0.5, color=(0, 0, 0))
+    f_tot = FONTS.get("total", {"size": 9.5, "bold": True})
     flow.draw_line([
         (col["x_start"], "Total Charges for the Period", "left"),
         (col["amount_x"], f"{data['total_charges']:,.2f}", "right"),
-    ], bold=True, size=9)
+    ], bold=f_tot["bold"], size=f_tot["size"])
     page.draw_line((col["x_start"], text_y + BOTTOM_GAP), (col["amount_x"], text_y + BOTTOM_GAP),
                     width=0.5, color=(0, 0, 0))
     flow.y = text_y + LINE_HEIGHT + BOTTOM_GAP
@@ -651,9 +661,11 @@ def _draw_payments_flow(flow, data):
     payments = data.get("payments", [])
     if not (data.get("total_payments") or payments):
         return
+    f_ph = FONTS.get("payments_header", {"size": 7.5, "bold": True})
+    f_pl = FONTS.get("payments_line", {"size": 7, "bold": False})
     flow.ensure_space(LINE_HEIGHT * 2)
     col = flow.col_def()
-    flow.draw_line([(col["x_start"], "Details of Payments Received", "left")], bold=True, size=8)
+    flow.draw_line([(col["x_start"], "Details of Payments Received", "left")], bold=f_ph["bold"], size=f_ph["size"])
     for p in payments:
         flow.ensure_space(LINE_HEIGHT)
         col = flow.col_def()
@@ -662,22 +674,24 @@ def _draw_payments_flow(flow, data):
         flow.draw_line([
             (col["x_start"], line, "left"),
             (col["amount_x"], f"{p['amount']:,.2f}", "right"),
-        ], size=8)
+        ], size=f_pl["size"], bold=f_pl["bold"])
     flow.ensure_space(LINE_HEIGHT)
     col = flow.col_def()
     flow.draw_line([
         (col["x_start"], "Total Payments Received", "left"),
         (col["amount_x"], f"{data.get('total_payments', 0):,.2f}", "right"),
-    ], bold=True, size=8)
+    ], bold=f_ph["bold"], size=f_ph["size"])
 
 
 def _draw_cancel_payments_flow(flow, data):
     cancelled = data.get("cancelled_payments", [])
     if not cancelled:
         return
+    f_ph = FONTS.get("payments_header", {"size": 7.5, "bold": True})
+    f_pl = FONTS.get("payments_line", {"size": 7, "bold": False})
     flow.ensure_space(LINE_HEIGHT * 2)
     col = flow.col_def()
-    flow.draw_line([(col["x_start"], "Cancel Payment", "left")], bold=True, size=8)
+    flow.draw_line([(col["x_start"], "Cancel Payment", "left")], bold=f_ph["bold"], size=f_ph["size"])
     for p in cancelled:
         flow.ensure_space(LINE_HEIGHT)
         col = flow.col_def()
@@ -686,7 +700,7 @@ def _draw_cancel_payments_flow(flow, data):
         flow.draw_line([
             (col["x_start"], line, "left"),
             (col["amount_x"], f"{p['amount']:,.2f}", "right"),
-        ], size=8)
+        ], size=f_pl["size"], bold=f_pl["bold"])
 
 
 def _row_amount(row):

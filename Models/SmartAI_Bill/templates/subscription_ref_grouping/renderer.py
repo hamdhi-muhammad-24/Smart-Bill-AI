@@ -70,6 +70,8 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
 
     def _draw_header(self, data):
         f = FONTS["header"]
+        if data.get("show_vat_lines"):
+            self.text(*COORDS["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
         self.text(*COORDS["account_number"], data["account_number"],
                   size=f["size"])
         self.text(*COORDS["invoice_number"], data["invoice_number"],
@@ -223,37 +225,70 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
         line_h = CHARGES_TABLE["line_h"]
         lp_gap = CHARGES_TABLE["product_label_y_gap"]
 
+        def _break_if_needed(curr_y, curr_ymin):
+            if curr_y < curr_ymin:
+                self.new_page()
+                return CHARGES_TABLE["otherpage_y_start"], CHARGES_TABLE["otherpage_y_min"]
+            return curr_y, curr_ymin
+
         for sub_ref in subscription_refs:
             space = (lp_gap if sub_ref["ref"] else 0)
             for prod in sub_ref["products"]:
                 space += line_h
+                space += len(prod.get("charges", [])) * line_h
             if sub_ref.get("recurring_subtotal"):
                 space += line_h
             if sub_ref.get("oneoff_subtotal"):
                 space += line_h
 
-            if y - space < y_min:
+            curr_y_start = (CHARGES_TABLE["page1_y_start"]
+                            if self.page_count() == 1
+                            else CHARGES_TABLE["otherpage_y_start"])
+            if y < curr_y_start and y - space < y_min:
                 self.new_page()
                 y     = CHARGES_TABLE["otherpage_y_start"]
                 y_min = CHARGES_TABLE["otherpage_y_min"]
 
             if sub_ref["ref"]:
+                y, y_min = _break_if_needed(y, y_min)
                 self.text(CHARGES_TABLE["subscription_ref_x"], y,
                           sub_ref["ref"],
                           size=f_sub["size"], bold=f_sub["bold"])
                 y -= lp_gap
 
+            has_subtotal = bool(sub_ref.get("recurring_subtotal") or sub_ref.get("oneoff_subtotal"))
+
             for product in sub_ref["products"]:
-                if y < y_min:
-                    self.new_page()
-                    y     = CHARGES_TABLE["otherpage_y_start"]
-                    y_min = CHARGES_TABLE["otherpage_y_min"]
+                y, y_min = _break_if_needed(y, y_min)
                 self.text(CHARGES_TABLE["product_label_x"], y,
                           product["label"],
                           size=f_prod["size"], bold=f_prod["bold"])
                 y -= line_h
 
+                for charge in product.get("charges", []):
+                    y, y_min = _break_if_needed(y, y_min)
+                    self.text(CHARGES_TABLE["desc_x"], y,
+                              charge["description"], size=f_chg["size"],
+                              bold=f_chg.get("bold", False))
+                    is_charge = charge.get("kind", "charge") == "charge"
+                    flag = charge.get("flag", "P")
+                    suppress_amount = False
+                    if is_charge:
+                        if flag == "P" and sub_ref.get("recurring_subtotal"):
+                            suppress_amount = True
+                        elif flag in ("O", "I") and sub_ref.get("oneoff_subtotal"):
+                            suppress_amount = True
+                        elif has_subtotal and not sub_ref.get("recurring_subtotal") and not sub_ref.get("oneoff_subtotal"):
+                            suppress_amount = True
+                    if not suppress_amount:
+                        if charge.get("amount"):
+                            self.number(CHARGES_TABLE["amount_x"], y,
+                                        charge["amount"], size=f_chg["size"],
+                                        align="right")
+                    y -= line_h
+
             if sub_ref.get("recurring_subtotal"):
+                y, y_min = _break_if_needed(y, y_min)
                 label = (f'{sub_ref.get("detail_name","").strip()} '
                          f'Recurring Subtotal').strip()
                 self.text(CHARGES_TABLE["desc_x"], y, label,
@@ -265,6 +300,7 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
                 y -= line_h
 
             if sub_ref.get("oneoff_subtotal"):
+                y, y_min = _break_if_needed(y, y_min)
                 label = (f'{sub_ref.get("detail_name","").strip()} '
                          f'One-off Subtotal').strip()
                 self.text(CHARGES_TABLE["desc_x"], y, label,

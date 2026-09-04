@@ -1,6 +1,7 @@
 """Invoice of Summary (Sheet 18, BILLSTYLE=18) - Coordinates."""
 
 COORDS = {
+    "tax_invoice_label":      (43.2, 748.2),
     "slt_vat_reg_label":      (273.6, 748.2),
     "customer_vat_reg_label": (273.6, 739.5),
 
@@ -11,7 +12,7 @@ COORDS = {
     "account_number":       (155, 703),
     "invoice_number":       (155, 674),
     "billing_date":         (155, 645),
-    "billing_period":       (150, 617),
+    "billing_period":       (145, 617),
 
     "customer_name":        (280, 725),
     "customer_business_y":  715,
@@ -104,19 +105,24 @@ USAGE_TABLE_2COL = {
 }
 
 FONTS = {
-    "header":        {"size": 9,   "bold": False},
-    "vat_reg":       {"size": 7.5, "bold": False},
-    "customer_name": {"size": 9.5, "bold": True},
-    "customer_addr": {"size": 9,   "bold": True},
-    "badge":         {"size": 18,  "bold": True},
-    "summary_box":   {"size": 10,  "bold": False},
-    "summary_total": {"size": 10,  "bold": True},
-    "group_ref":     {"size": 10,  "bold": True},
-    "product_label": {"size": 9,   "bold": True},
-    "charge_line":   {"size": 9,   "bold": False},
-    "taxes":         {"size": 8,   "bold": False},
-    "total":         {"size": 10,  "bold": True},
-    "payments":      {"size": 8,   "bold": False},
-    "slip":          {"size": 8,   "bold": False},
-    "gen_id":        {"size": 8,   "bold": False},
+    "header":          {"size": 11,  "bold": True},
+    "account_details": {"size": 9,   "bold": False},
+    "vat_reg":         {"size": 7.5, "bold": False},
+    "customer_name":   {"size": 9.5, "bold": True},
+    "customer_addr":   {"size": 9.5, "bold": True},
+    "badge":           {"size": 15,  "bold": True},
+    "summary_box":     {"size": 9,   "bold": False},
+    "summary_total":   {"size": 9,   "bold": True},
+    "group_ref":       {"size": 10,  "bold": True},
+    "product_label":   {"size": 9.5, "bold": True},
+    "charge_line":     {"size": 9,   "bold": False},
+    "taxes_header":    {"size": 9.5, "bold": True},
+    "taxes_line":      {"size": 9,   "bold": False},
+    "taxes":           {"size": 9,   "bold": False},
+    "total":           {"size": 9.5, "bold": True},
+    "payments_header": {"size": 7.5, "bold": True},
+    "payments_line":   {"size": 7,   "bold": False},
+    "payments":        {"size": 7,   "bold": False},
+    "slip":            {"size": 8,   "bold": False},
+    "gen_id":          {"size": 8,   "bold": False},
 }

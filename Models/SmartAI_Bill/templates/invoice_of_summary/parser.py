@@ -7,6 +7,7 @@ from core.bill_common import (
     reorder_addresses, parse_cancel_payment,
     MARKETING_MESSAGE_TAGS, ADDRESS_PRINT_ORDER,
     is_vat_reg_printable,
+    TOP_LEVEL_DISCOUNT_TAGS, TOP_LEVEL_DISCOUNT_TOTAL_TAGS,
 )
 
 _ITEM_TAG_RE = re.compile(
@@ -94,20 +95,12 @@ def parse_invoice_of_summary(file_path: str) -> dict:
         in_promo_group        = False
         current_promo_product = None
 
-        # BPR23 top-level discounts (parsed directly here, no longer via
-        # bill_common's TopLevelDiscountCollector). PRODDISCNAME/
-        # PRODDISCTOTAL is a per-product revenue-commitment discount (e.g.
-        # "FTTH SP Office Rev. Commitment2022" tied to a specific phone);
-        # CUSTDISCNAME/CUSTDISCTOTAL is the account-level discount (e.g.
-        # "RevenueCommit.WaiveOff"). Each NAME tag is followed later by its
-        # matching TOTAL tag within the same block, so we hold the name in
-        # a pending variable until the total arrives.
+        # BPR23 top-level discounts. Accumulate name/total tag pairs
+        # (e.g. ACCDISCNAME/ACCDISCTOTAL, PRODDISCNAME/PRODDISCTOTAL, etc.).
         # Deliberately NOT reading PRODUCTDISCNAME/PRODUCTDISCLISTTOTAL -
         # that's a duplicate rollup of the same PRODDISC entry appearing
-        # again later in the GMF near the product's own block; including
-        # both would double-count the amount.
-        pending_proddisc_name = None
-        pending_custdisc_name = None
+        # again later in the GMF near the product's own block.
+        pending_discounts = {}
 
         for line in f:
             line = line.strip()
@@ -421,52 +414,28 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                             'amount': -amt,
                         })
 
-            elif key == 'BENDPRODDISC':
-                # Exact match only - NOT startswith, since
-                # 'BENDPRODDISCPERIOD' (a distinct tag that appears between
-                # PRODDISCNAME and PRODDISCTOTAL) would otherwise also match
-                # a prefix check and wipe the pending name before its total
-                # ever arrives.
-                pending_proddisc_name = None
+            elif key in TOP_LEVEL_DISCOUNT_TAGS:
+                pending_discounts[key] = strip_before_underscore(value)
 
-            elif key == 'PRODDISCNAME':
-                # BPR23 (rewritten, in-parser): per-product revenue-
-                # commitment discount name, e.g. "FTTH SP Office Rev.
-                # Commitment2022", tied to a specific phone/product. Paired
-                # with the PRODDISCTOTAL that follows within the same
-                # BSTARTPRODDISC block.
-                # Deliberately NOT reading PRODUCTDISCNAME/
-                # PRODUCTDISCLISTTOTAL - that's a duplicate rollup of the
-                # same PRODDISC entry appearing again later in the GMF near
-                # the product's own block; including both would
-                # double-count the amount.
-                pending_proddisc_name = value
+            elif key in TOP_LEVEL_DISCOUNT_TOTAL_TAGS:
+                name_key = next(
+                    (k for k, v in TOP_LEVEL_DISCOUNT_TAGS.items() if v == key),
+                    None
+                )
+                amt = to_float(value)
+                if amt:
+                    name = pending_discounts.pop(name_key, '') if name_key else ''
+                    desc = strip_before_underscore(name) if name else 'Discount'
+                    data['top_level_discounts'].append({
+                        'description': desc,
+                        'amount': -abs(amt),
+                    })
 
-            elif key == 'PRODDISCTOTAL':
-                if pending_proddisc_name is not None:
-                    amt = to_float(value)
-                    if amt:
-                        data['top_level_discounts'].append({
-                            'description': pending_proddisc_name,
-                            'amount': amt,
-                        })
-                    pending_proddisc_name = None
-
-            elif key == 'CUSTDISCNAME':
-                # BPR23: account/customer-level discount, e.g.
-                # "01Feb11-AMWCrone_RevenueCommit.WaiveOff" -> strip the
-                # prefix (BPR21) to get "RevenueCommit.WaiveOff".
-                pending_custdisc_name = strip_before_underscore(value)
-
-            elif key == 'CUSTDISCTOTAL':
-                if pending_custdisc_name is not None:
-                    amt = to_float(value)
-                    if amt:
-                        data['top_level_discounts'].append({
-                            'description': pending_custdisc_name,
-                            'amount': amt,
-                        })
-                    pending_custdisc_name = None
+            elif key in ('BENDACCDISC', 'BENDPRODDISC', 'BENDCUSTDISC',
+                         'BENDPACKDISC', 'BENDEVENTSRCDISC', 'BENDSUBSDISC'):
+                tag_prefix = key[4:-4] if key.endswith('DISC') else ''
+                name_key = f"{tag_prefix}DISCNAME"
+                pending_discounts.pop(name_key, None)
 
             elif key == 'SLTSUBSCRIPTIONREF':
                 current_group = {"ref": value, "products": []}
@@ -573,8 +542,11 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                 all_parts = [value] + [p.strip() for p in rest.split('|')
                                        if p.strip()]
                 if len(all_parts) >= 4:
+                    tax_name = all_parts[0].strip()
+                    if tax_name == "Recovery in lieu of SSCL" or "SSCL" in tax_name.upper():
+                        continue
                     data['taxes'].append({
-                        'name':   all_parts[0],
+                        'name':   tax_name,
                         'amount': to_float(all_parts[3]),
                     })
 
@@ -641,6 +613,10 @@ def parse_invoice_of_summary(file_path: str) -> dict:
 
     from core.customer_type_mapper import get_badge
     data['badge'] = get_badge(data['customer_type'])
+
+    # Fallback to SLTDISCDETAIL discounts if no top-level discount tags present
+    if not data['top_level_discounts'] and data['discounts']:
+        data['top_level_discounts'] = list(data['discounts'])
 
     data['usage_sections'] = list(usage_sections.values())
     return data

@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 from datetime import datetime
 from reportlab.lib.colors import black, white
@@ -14,10 +15,17 @@ TEMPLATE_PDF = os.path.join(TEMPLATE_DIR, "layout.pdf")
 
 # Calibri, scoped to this template only - registered under names distinct
 # from reportlab's built-in Helvetica so no other template is affected.
-_FONTS_DIR = os.path.join(TEMPLATE_DIR, "fonts")
+_FONTS_DIR = os.path.join(os.path.dirname(TEMPLATE_DIR), "fonts")
 if "Calibri" not in pdfmetrics.getRegisteredFontNames():
     pdfmetrics.registerFont(TTFont("Calibri", os.path.join(_FONTS_DIR, "calibri.ttf")))
     pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
+
+
+def _clean_customer_name(name):
+    if not name:
+        return ""
+    # Strip leading placeholder "To", "To.", "To .", "To," prefix or standalone placeholder
+    return re.sub(r'^to\b[.,:\-\s]*', '', name.strip(), flags=re.IGNORECASE).strip()
 
 
 class VATEnterpriseRenderer(BaseRenderer):
@@ -101,41 +109,48 @@ class VATEnterpriseRenderer(BaseRenderer):
 
     def _draw_header(self, data):
         f = FONTS["header"]
+        fa = FONTS.get("account_details", {"size": 9, "bold": False})
         self.text(*self.active_coords["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
-        self.text(*self.active_coords["telephone_number"], data["telephone_number"], size=f["size"])
-        self.text(*self.active_coords["account_number"], data["account_number"], size=f["size"])
-        self.text(*self.active_coords["invoice_number"], data["invoice_number"], size=f["size"])
-        self.text(*self.active_coords["billing_date"], data["billing_date"], size=f["size"])
+        self.text(*self.active_coords["telephone_number"], data["telephone_number"], size=f["size"], bold=f["bold"])
+        self.text(*self.active_coords["account_number"], data["account_number"], size=fa["size"], bold=fa["bold"])
+        self.text(*self.active_coords["invoice_number"], data["invoice_number"], size=fa["size"], bold=fa["bold"])
+        self.text(*self.active_coords["billing_date"], data["billing_date"], size=fa["size"], bold=fa["bold"])
         period = f"{data['billing_period_start']} - {data['billing_period_end']}"
-        self.text(*self.active_coords["billing_period"], period, size=f["size"])
+        self.text(*self.active_coords["billing_period"], period, size=fa["size"], bold=fa["bold"])
 
     def _draw_vat_lines(self, data):
         if not data.get("show_vat_lines"):
             return
-        f = FONTS["header"]
+        f = FONTS.get("vat_reg", {"size": 7, "bold": False})
         if data.get("slt_vat_reg"):
             self.text(*self.active_coords["slt_vat_reg"],
                       f"SLT VAT Registration Number: {data['slt_vat_reg']}",
-                      size=f["size"])
+                      size=f["size"],
+                      bold=f.get("bold", False))
         if data.get("customer_vat_reg"):
             self.text(*self.active_coords["customer_vat_reg"],
                       f"Customer VAT Registration Number: {data['customer_vat_reg']}",
-                      size=f["size"])
+                      size=f["size"],
+                      bold=f.get("bold", False))
 
     def _draw_customer(self, data):
-        # Build address block dynamically - show every existing field, in
-        # order, regardless of address_name_not_required. That flag used to
-        # suppress customer_name/position/department entirely and only show
-        # business_name; now every non-empty field prints in the standard
-        # ADDRESSNAME -> POSITION -> DEPARTMENT -> BUSINESSNAME order.
+        # Build address block dynamically - show existing fields in standard order:
+        # ADDRESSNAME -> POSITION -> DEPARTMENT -> BUSINESSNAME -> address lines -> zip code.
+        # If address_name_not_required is set, or if customer_name is a "To ."
+        # placeholder / salutation prefix, omit the customer_name line so the
+        # address starts directly with the position / business name.
         addr_lines = []
-        if data.get("customer_name"):
-            addr_lines.append(data["customer_name"])
+        cust_name = _clean_customer_name(data.get("customer_name", ""))
+        if cust_name and not data.get("address_name_not_required"):
+            addr_lines.append(cust_name)
+        elif cust_name and not (data.get("position") or data.get("business_name")):
+            addr_lines.append(cust_name)
+
         if data.get("position"):
             addr_lines.append(data["position"])
         if data.get("department"):
             addr_lines.append(data["department"])
-        if data.get("business_name") and data["business_name"] != data.get("customer_name"):
+        if data.get("business_name") and data["business_name"] != cust_name:
             addr_lines.append(data["business_name"])
 
         # Add the parsed address lines
@@ -207,10 +222,11 @@ class VATEnterpriseRenderer(BaseRenderer):
         f = FONTS["slip"]
         self.text(*self.active_coords["slip_telephone"], data["telephone_number"], size=f["size"])
         self.text(*self.active_coords["slip_invoice"], data["invoice_number"], size=f["size"])
+        slip_cust = _clean_customer_name(data.get("customer_name", ""))
         slip_name = (
             data.get("business_name")
             if data.get("address_name_not_required")
-            else (data.get("business_name") or data.get("customer_name", ""))
+            else (data.get("business_name") or slip_cust or "")
         )
         self.text(*self.active_coords["slip_customer"], slip_name or "", size=f["size"])
         self.text(*self.active_coords["slip_account"], data["account_number"], size=f["size"])
@@ -357,7 +373,8 @@ class VATEnterpriseRenderer(BaseRenderer):
         has_nonzero = any(t['amount'] for t in data.get("taxes", []))
         if not is_tax_section_printable(data.get("tax_status"), has_nonzero):
             return y
-        f = FONTS["taxes"]
+        f_hdr = FONTS.get("taxes_header", FONTS["taxes"])
+        f_line = FONTS.get("taxes_line", FONTS["taxes"])
         line_h = CHARGES_TABLE["line_h"]
         y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 else CHARGES_TABLE["otherpage_y_min"]
         
@@ -367,7 +384,7 @@ class VATEnterpriseRenderer(BaseRenderer):
             y = CHARGES_TABLE["otherpage_y_start"]
             y_min = CHARGES_TABLE["otherpage_y_min"]
             
-        self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies", size=f["size"], bold=True)
+        self.text(CHARGES_TABLE["product_label_x"], y, "Taxes & Levies", size=f_hdr["size"], bold=f_hdr["bold"])
         y -= line_h
         for t in data.get("taxes", []):
             if t["amount"]:
@@ -375,8 +392,8 @@ class VATEnterpriseRenderer(BaseRenderer):
                     self.new_page()
                     y = CHARGES_TABLE["otherpage_y_start"]
                     y_min = CHARGES_TABLE["otherpage_y_min"]
-                self.text(CHARGES_TABLE["desc_x"], y, t["name"], size=f["size"])
-                self.number(CHARGES_TABLE["amount_x"], y, t["amount"], size=f["size"], align="right")
+                self.text(CHARGES_TABLE["desc_x"], y, t["name"], size=f_line["size"], bold=f_line["bold"])
+                self.number(CHARGES_TABLE["amount_x"], y, t["amount"], size=f_line["size"], align="right")
                 y -= line_h
         return y
 
@@ -534,35 +551,37 @@ class VATEnterpriseRenderer(BaseRenderer):
         # header never gets stranded in one column while its rows land in the
         # next - only the (much larger) CDR row tables flow row-by-row.
         payments = data.get("payments", [])
+        f_pay_hdr = FONTS.get("payments_header", {"size": 7.5, "bold": True})
+        f_pay_line = FONTS.get("payments_line", {"size": 7, "bold": False})
         if data.get("total_payments") or payments:
             ensure_space(line_h * (len(payments) + 2.6))
-            draw_text("Details of Payments Received", bold=True)
+            draw_text("Details of Payments Received", bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
             advance(1.2)
             for p in payments:
                 ensure_space(line_h)
                 line = (f"{p.get('pay_type', 'Payment')}-"
                         f"{p.get('date', '')}-"
                         f"{p.get('location', '')}").rstrip('-')
-                draw_text(line)
-                draw_amount(p['amount'])
+                draw_text(line, bold=f_pay_line["bold"], size=f_pay_line["size"])
+                draw_amount(p['amount'], bold=f_pay_line["bold"], size=f_pay_line["size"])
                 advance()
             ensure_space(line_h * 1.4)
-            draw_text("Total Payments Received", bold=True)
-            draw_amount(data.get('total_payments', 0), bold=True)
+            draw_text("Total Payments Received", bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
+            draw_amount(data.get('total_payments', 0), bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
             advance(1.6)
 
         # ---- 2. Cancel Payment ----
         cancelled = data.get("cancelled_payments", [])
         if cancelled:
             ensure_space(line_h * (len(cancelled) + 1.4))
-            draw_text("Cancel Payment", bold=True)
+            draw_text("Cancel Payment", bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
             advance(1.2)
             for p in cancelled:
                 ensure_space(line_h)
                 line = (f"{p.get('pay_type', '')}-{p.get('date', '')}"
                         f"-{p.get('location', '')}").rstrip('-')
-                draw_text(line)
-                draw_amount(p['amount'])
+                draw_text(line, bold=f_pay_line["bold"], size=f_pay_line["size"])
+                draw_amount(p['amount'], bold=f_pay_line["bold"], size=f_pay_line["size"])
                 advance()
             advance(1.2)
 

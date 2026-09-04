@@ -8,7 +8,7 @@ COORDS = {
     "account_number":       (155, 703),
     "invoice_number":       (155, 674),
     "billing_date":         (155, 645),
-    "billing_period":       (150, 617),
+    "billing_period":       (145, 617),
 
     # Customer block
     "customer_name":        (280, 722),
@@ -92,21 +92,26 @@ CHARGES_TABLE = {
 }
 
 FONTS = {
-    "header":         {"size": 9,   "bold": False},
-    "customer_name":  {"size": 9.5, "bold": True},
-    "customer_addr":  {"size": 9,   "bold": True},
-    "badge":          {"size": 18,  "bold": True},
-    "summary_box":    {"size": 10,  "bold": False},
-    "summary_total":  {"size": 10,  "bold": True},
-    "product_label":  {"size": 9,   "bold": True},
-    "charge_line":    {"size": 8,   "bold": False},
-    "taxes":          {"size": 8,   "bold": False},
-    "total":          {"size": 10,  "bold": True},
-    "payments":       {"size": 8,   "bold": False},
-    "slip":           {"size": 8,   "bold": False},
-    "gen_id":         {"size": 7,   "bold": False},
-    "page_indicator": {"size": 9,   "bold": False},
-    "invoice_no_p2":  {"size": 10,  "bold": True},
+    "header":          {"size": 11,  "bold": True},
+    "account_details": {"size": 9,   "bold": False},
+    "customer_name":   {"size": 9.5, "bold": True},
+    "customer_addr":   {"size": 9.5, "bold": True},
+    "badge":           {"size": 15,  "bold": True},
+    "summary_box":     {"size": 9,   "bold": False},
+    "summary_total":   {"size": 9,   "bold": True},
+    "product_label":   {"size": 9.5, "bold": True},
+    "charge_line":     {"size": 9,   "bold": False},
+    "taxes_header":    {"size": 9.5, "bold": True},
+    "taxes_line":      {"size": 9,   "bold": False},
+    "taxes":           {"size": 9,   "bold": False},
+    "total":           {"size": 9.5, "bold": True},
+    "payments_header": {"size": 7.5, "bold": True},
+    "payments_line":   {"size": 7,   "bold": False},
+    "payments":        {"size": 7,   "bold": False},
+    "slip":            {"size": 8,   "bold": False},
+    "gen_id":          {"size": 7,   "bold": False},
+    "page_indicator":  {"size": 9,   "bold": False},
+    "invoice_no_p2":   {"size": 10,  "bold": True},
 }
 
 POST_TC_COLUMNS = {

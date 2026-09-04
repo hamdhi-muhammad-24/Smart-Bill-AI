@@ -43,7 +43,7 @@ COORDS = {
     "account_number":   (160.0, 141.25),
     "invoice_number":   (155.0, 169.25),
     "billing_date":     (160.0, 199.25),
-    "billing_period":   (140.0, 227.25),
+    "billing_period":   (145.0, 227.25),
 
     # VAT registration lines
     "slt_vat_reg":      (273.60, 95.25),
@@ -140,14 +140,26 @@ SUMMARY_BUBBLE_MIN_SIZE = 7.0
 CAP_HEIGHT_RATIO = 0.718
 
 FONTS = {
-    "header":         {"size": 9,     "bold": False},
-    "customer_addr":  {"size": 9,     "bold": True},
-    "badge":          {"size": 18,    "bold": True},
-    "summary_box":    {"size": 11, "bold": False},
-    "summary_total":  {"size": 11, "bold": True},
-    "gen_id":         {"size": 7,     "bold": False},
-    "page_indicator": {"size": 9,     "bold": False},
-    "slip":           {"size": 9,  "bold": False},
+    "header":          {"size": 11,  "bold": True},
+    "account_details": {"size": 9,   "bold": False},
+    "customer_name":   {"size": 9.5, "bold": True},
+    "customer_addr":   {"size": 9.5, "bold": True},
+    "badge":           {"size": 15,  "bold": True},
+    "summary_box":     {"size": 9,   "bold": False},
+    "summary_total":   {"size": 9,   "bold": True},
+    "product_label":   {"size": 9.5, "bold": True},
+    "charge_line":     {"size": 9,   "bold": False},
+    "taxes_header":    {"size": 9.5, "bold": True},
+    "taxes_line":      {"size": 9,   "bold": False},
+    "taxes":           {"size": 9,   "bold": False},
+    "total":           {"size": 9.5, "bold": True},
+    "payments_header": {"size": 7.5, "bold": True},
+    "payments_line":   {"size": 7,   "bold": False},
+    "payments":        {"size": 7,   "bold": False},
+    "slip":            {"size": 8,   "bold": False},
+    "gen_id":          {"size": 7,   "bold": False},
+    "page_indicator":  {"size": 9,   "bold": False},
+    "invoice_no_p2":   {"size": 10,  "bold": True},
 }
 
 # Charge groups, adjustments/discounts, and Taxes & Levies (everything BEFORE

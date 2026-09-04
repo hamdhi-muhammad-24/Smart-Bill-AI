@@ -13,6 +13,7 @@ from templates.usd_open_item.config import (
     ADDRESS_FIELD_ORDER,
     CHARGES_TBL,
     USAGE_TABLE,
+    FONTS,
 )
 
 TEMPLATE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -182,20 +183,20 @@ class USDOpenItemRenderer(BaseRenderer):
             file_info = file_info.split("__")[0]
             
         file_info = file_info + timestamp
-        self.text(top_x, top_y, file_info, size=7.5)
-        self.text(top_x, top_y - 8, data.get("customer_segment", ""), size=7.5, bold=True)
+        self.text(top_x, top_y, file_info, size=FONTS["system_strings"]["size"], bold=FONTS["system_strings"]["bold"])
+        self.text(top_x, top_y - 8, data.get("customer_segment", ""), size=FONTS["customer_segment"]["size"], bold=False)
 
     # --------------------------------------------------
     # Header
     # --------------------------------------------------
     def _draw_header(self, data):
-        self.text(*COORDS["account_number"], data.get("account_number", ""))
-        self.text(*COORDS["invoice_number"], data.get("invoice_number", ""))
-        self.text(*COORDS["billing_date"], data.get("billing_date", ""))
-        self.text(*COORDS["bill_period"], data.get("bill_period", ""), size=9)
+        self.text(*COORDS["account_number"], data.get("account_number", ""), size=FONTS["header"]["size"], bold=FONTS["header"]["bold"])
+        self.text(*COORDS["invoice_number"], data.get("invoice_number", ""), size=FONTS["header"]["size"], bold=FONTS["header"]["bold"])
+        self.text(*COORDS["billing_date"], data.get("billing_date", ""), size=FONTS["header"]["size"], bold=FONTS["header"]["bold"])
+        self.text(*COORDS["bill_period"], data.get("bill_period", ""), size=FONTS["header"]["size"], bold=FONTS["header"]["bold"])
 
-        self.text(*COORDS["invoice_amount"], data.get("invoice_amount", ""), bold=True)
-        self.text(*COORDS["payment_due_date"], data.get("payment_due_date", ""), bold=True)
+        self.text(*COORDS["invoice_amount"], data.get("invoice_amount", ""), size=FONTS["header_amount_due"]["size"], bold=FONTS["header_amount_due"]["bold"])
+        self.text(*COORDS["payment_due_date"], data.get("payment_due_date", ""), size=FONTS["header_amount_due"]["size"], bold=FONTS["header_amount_due"]["bold"])
 
     # --------------------------------------------------
     # Barcode - encodes $BILLREF (invoice number), per section 2's explicit
@@ -266,8 +267,8 @@ class USDOpenItemRenderer(BaseRenderer):
             555,
             y + 17,
             page_label,
-            size=ADDRESS_BOX["font_size"],
-            bold=False,
+            size=FONTS["page_label"]["size"],
+            bold=FONTS["page_label"]["bold"],
             align="right",
         )
 
@@ -318,7 +319,8 @@ class USDOpenItemRenderer(BaseRenderer):
     def _draw_charges(self, data, y):
         tbl = CHARGES_TBL
         line_h = tbl["line_h"]
-        font_size = tbl["font_size"]
+        f_sub = FONTS["sub_header"]
+        f_desc = FONTS["charge_desc"]
 
         # Section header: description on the left, currency bracket right-aligned
         # above the amount column so "(US$)" appears directly over the numbers.
@@ -328,37 +330,37 @@ class USDOpenItemRenderer(BaseRenderer):
         
         if currency_bracket:
             self.text(tbl["amount_x"], y, currency_bracket,
-                      size=font_size, bold=True, align="right")
+                      size=f_sub["size"], bold=f_sub["bold"], align="right")
         y -= line_h
 
         for block in data.get("charge_blocks", []):
             if block["kind"] == "subscription_ref":
                 y = self._ensure_space(y, line_h * 2)
                 self.text(tbl["indent_l1"], y, f"Subscription Ref: {block['ref']}",
-                          size=font_size, bold=True)
+                          size=f_sub["size"], bold=f_sub["bold"])
                 y -= line_h
                 for prod in block["product_labels"]:
                     y = self._ensure_space(y, line_h * 2)
                     self.text(tbl["indent_l2"], y, prod["label"],
-                              size=font_size, bold=True)
+                              size=f_sub["size"], bold=f_sub["bold"])
                     y -= line_h
                     for charge in prod["charges"]:
                         y = self._ensure_space(y, line_h)
-                        self.text(tbl["indent_l3"], y, charge["description"], size=font_size)
+                        self.text(tbl["indent_l3"], y, charge["description"], size=f_desc["size"])
                         if charge["amount"]:
                             self.number(tbl["amount_x"], y, charge["amount"],
-                                        size=font_size, align="right")
+                                        size=f_desc["size"], align="right")
                         y -= line_h
             else:  # standalone product-label block, no subscription ref
                 y = self._ensure_space(y, line_h * 2)
-                self.text(tbl["indent_l2"], y, block["label"], size=font_size, bold=True)
+                self.text(tbl["indent_l2"], y, block["label"], size=f_sub["size"], bold=f_sub["bold"])
                 y -= line_h
                 for charge in block["charges"]:
                     y = self._ensure_space(y, line_h)
-                    self.text(tbl["indent_l3"], y, charge["description"], size=font_size)
+                    self.text(tbl["indent_l3"], y, charge["description"], size=f_desc["size"])
                     if charge["amount"]:
                         self.number(tbl["amount_x"], y, charge["amount"],
-                                    size=font_size, align="right")
+                                    size=f_desc["size"], align="right")
                     y -= line_h
 
         # Unlabeled charges (no SLTPRODUCTLABEL scope at all) render as their
@@ -368,14 +370,14 @@ class USDOpenItemRenderer(BaseRenderer):
         unlabeled = data.get("unlabeled_charges", [])
         if unlabeled:
             y = self._ensure_space(y, line_h * 2)
-            self.text(tbl["indent_l1"], y, "Other Charges", size=font_size, bold=True)
+            self.text(tbl["indent_l1"], y, "Other Charges", size=f_sub["size"], bold=f_sub["bold"])
             y -= line_h
             for charge in unlabeled:
                 y = self._ensure_space(y, line_h)
-                self.text(tbl["indent_l3"], y, charge["description"], size=font_size)
+                self.text(tbl["indent_l3"], y, charge["description"], size=f_desc["size"])
                 if charge["amount"]:
                     self.number(tbl["amount_x"], y, charge["amount"],
-                                size=font_size, align="right")
+                                size=f_desc["size"], align="right")
                 y -= line_h
 
         return y
@@ -389,13 +391,15 @@ class USDOpenItemRenderer(BaseRenderer):
         if not discounts:
             return y
         tbl = CHARGES_TBL
+        f_sub = FONTS["sub_header"]
+        f_desc = FONTS["charge_desc"]
         y = self._ensure_space(y, tbl["line_h"] * 2)
-        self.text(tbl["indent_l1"], y, "Discounts", size=tbl["font_size"], bold=True)
+        self.text(tbl["indent_l1"], y, "Discounts", size=f_sub["size"], bold=f_sub["bold"])
         y -= tbl["line_h"]
         for d in discounts:
             y = self._ensure_space(y, tbl["line_h"])
-            self.text(tbl["indent_l3"], y, d["description"], size=tbl["font_size"])
-            self.number(tbl["amount_x"], y, d["amount"], size=tbl["font_size"], align="right")
+            self.text(tbl["indent_l3"], y, d["description"], size=f_desc["size"])
+            self.number(tbl["amount_x"], y, d["amount"], size=f_desc["size"], align="right")
             y -= tbl["line_h"]
         return y
 
@@ -407,13 +411,15 @@ class USDOpenItemRenderer(BaseRenderer):
         if not adjustments:
             return y
         tbl = CHARGES_TBL
+        f_sub = FONTS["sub_header"]
+        f_desc = FONTS["charge_desc"]
         y = self._ensure_space(y, tbl["line_h"] * 2)
-        self.text(tbl["indent_l1"], y, "Adjustments", size=tbl["font_size"], bold=True)
+        self.text(tbl["indent_l1"], y, "Adjustments", size=f_sub["size"], bold=f_sub["bold"])
         y -= tbl["line_h"]
         for adj in adjustments:
             y = self._ensure_space(y, tbl["line_h"])
-            self.text(tbl["indent_l3"], y, adj["description"], size=tbl["font_size"])
-            self.number(tbl["amount_x"], y, adj["amount"], size=tbl["font_size"], align="right")
+            self.text(tbl["indent_l3"], y, adj["description"], size=f_desc["size"])
+            self.number(tbl["amount_x"], y, adj["amount"], size=f_desc["size"], align="right")
             y -= tbl["line_h"]
         return y
 
@@ -423,7 +429,7 @@ class USDOpenItemRenderer(BaseRenderer):
     def _draw_total_charge(self, data, y):
         tbl = CHARGES_TBL
         line_h = tbl["line_h"]
-        font_size = tbl["font_size"]
+        f_tot = FONTS["total_row"]
         y = self._ensure_space(y, line_h * 2)
 
         line_left_x = tbl["indent_l1"]
@@ -435,9 +441,9 @@ class USDOpenItemRenderer(BaseRenderer):
         c.line(line_left_x, y, line_right_x, y)
         y -= line_h
 
-        self.text(line_left_x, y, "Total charges for the period", size=font_size, bold=True)
+        self.text(line_left_x, y, "Total charges for the period", size=f_tot["size"], bold=f_tot["bold"])
         self.number(line_right_x, y, data.get("total_charges", 0.0),
-                    size=font_size, bold=True, align="right")
+                    size=f_tot["size"], bold=f_tot["bold"], align="right")
         y -= line_h * 0.5
         c.line(line_left_x, y, line_right_x, y)
         y -= line_h * 1.5
@@ -457,7 +463,8 @@ class USDOpenItemRenderer(BaseRenderer):
 
         tbl = CHARGES_TBL
         line_h = tbl["line_h"]
-        font_size = tbl["font_size"]
+        f_sub = FONTS["sub_header"]
+        f_desc = FONTS["charge_desc"]
         y = self._ensure_space(y, line_h * 2)
 
         info_total = data.get("info_inv_total_rounded", 0.0)
@@ -465,12 +472,12 @@ class USDOpenItemRenderer(BaseRenderer):
 
         self.text(tbl["indent_l1"], y,
                   f"Total charges for the period in {info_curr} {info_total:,.2f}",
-                  size=font_size, bold=True)
+                  size=f_sub["size"], bold=f_sub["bold"])
         y -= line_h
         y = self._ensure_space(y, line_h)
         self.text(tbl["indent_l1"], y,
                   f"at Parity rate of {info_curr} = {acc_curr} {acc_rate}",
-                  size=font_size)
+                  size=f_desc["size"])
         y -= line_h
         return y
 
@@ -482,9 +489,10 @@ class USDOpenItemRenderer(BaseRenderer):
         if not messages:
             return y
         tbl = CHARGES_TBL
+        f_desc = FONTS["charge_desc"]
         for m in messages:
             y = self._ensure_space(y, tbl["line_h"])
-            self.text(tbl["indent_l1"], y, m, size=tbl["font_size"])
+            self.text(tbl["indent_l1"], y, m, size=f_desc["size"])
             y -= tbl["line_h"]
         return y
 
@@ -498,6 +506,7 @@ class USDOpenItemRenderer(BaseRenderer):
     def _draw_usage_sections(self, data, y):
         tbl = CHARGES_TBL
         line_h = tbl["line_h"]
+        f_sub = FONTS["sub_header"]
 
         for section in data.get("usage_sections", []):
             for ref in section["refs"]:
@@ -505,7 +514,7 @@ class USDOpenItemRenderer(BaseRenderer):
                 if ref.get("phone"):
                     hdr += f' {ref["phone"]}'
                 y = self._ensure_space(y, line_h * 2)
-                self.text(tbl["indent_l1"], y, hdr, size=tbl["font_size"], bold=True)
+                self.text(tbl["indent_l1"], y, hdr, size=f_sub["size"], bold=f_sub["bold"])
                 y -= line_h
 
                 for sub in ref["subsections"]:
@@ -515,7 +524,7 @@ class USDOpenItemRenderer(BaseRenderer):
                     if sub.get("label"):
                         y = self._ensure_space(y, line_h * 2)
                         self.text(tbl["indent_l2"], y, sub["label"],
-                                  size=tbl["font_size"], bold=True)
+                                  size=f_sub["size"], bold=f_sub["bold"])
                         y -= line_h
 
                     headers = _merge_date_time(sub.get("headers", []), is_header=True)
@@ -546,17 +555,17 @@ class USDOpenItemRenderer(BaseRenderer):
 
                     y = self._ensure_space(y, line_h)
                     self.text(tbl["indent_l2"], y, f"Total for {sub.get('label') or section['label']}",
-                              size=tbl["font_size"], bold=True)
+                              size=f_sub["size"], bold=f_sub["bold"])
                     self.number(tbl["amount_x"], y, sub.get("subtotal", 0),
-                                decimals=3, size=tbl["font_size"], bold=True, align="right")
+                                decimals=3, size=f_sub["size"], bold=f_sub["bold"], align="right")
                     y -= line_h
 
                 gt = ref.get("grand_total") or section.get("grand_total", 0)
                 y = self._ensure_space(y, line_h)
                 self.text(tbl["indent_l1"], y, f"Total Usage Charges for {section['label']}",
-                          size=tbl["font_size"], bold=True)
+                          size=f_sub["size"], bold=f_sub["bold"])
                 self.number(tbl["amount_x"], y, section.get("grand_total", 0),
-                            decimals=3, size=tbl["font_size"], bold=True, align="right")
+                            decimals=3, size=f_sub["size"], bold=f_sub["bold"], align="right")
                 y -= line_h
 
         return y

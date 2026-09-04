@@ -282,7 +282,7 @@ def parse_vat_enterprise(file_path: str) -> dict:
                         value.strip().upper() == 'Y'
 
                 elif key == 'ADDRESSNAME':
-                    data['customer_name'] = value
+                    data['customer_name'] = re.sub(r'^to\b[.,:\-\s]*', '', value.strip(), flags=re.IGNORECASE).strip()
                 elif key == 'POSITION':
                     data['position'] = value
                 elif key == 'DEPARTMENT':

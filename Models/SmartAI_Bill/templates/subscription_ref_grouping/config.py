@@ -1,4 +1,5 @@
 COORDS = {
+    "tax_invoice_label":      (43.2, 748.2),
     "slt_vat_reg_label":      (273.6, 748.2),
     "customer_vat_reg_label": (273.6, 739.5),
 

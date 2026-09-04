@@ -52,6 +52,24 @@ COORDS = {
     "page_indicator": (555, 790),
 }
 
+FONTS = {
+    "system_strings":    {"size": 8,   "bold": False},
+    "system_file_info":  {"size": 8,   "bold": False},
+    "customer_segment":  {"size": 9,   "bold": False},
+    "system_segment":    {"size": 9,   "bold": False},
+    "header":            {"size": 9,   "bold": False},
+    "header_fields":     {"size": 9,   "bold": False},
+    "header_amount_due": {"size": 9.5, "bold": True},
+    "header_due":        {"size": 9.5, "bold": True},
+    "address":           {"size": 9.5, "bold": True},
+    "page_label":        {"size": 8,   "bold": False},
+    "sub_header":        {"size": 9.5, "bold": True},
+    "charges_subheader": {"size": 9.5, "bold": True},
+    "charge_desc":       {"size": 9,   "bold": False},
+    "charges_desc":      {"size": 9,   "bold": False},
+    "total_row":         {"size": 9.5, "bold": True},
+}
+
 # Dynamic Address Box Configuration (top-right rounded box)
 ADDRESS_BOX = {
     # Box border measured directly from layout.pdf (300 DPI crop): top border
@@ -62,7 +80,7 @@ ADDRESS_BOX = {
     "x": 315,         # X position for all address lines
     "y": 740,         # Starting Y position (first line)
     "line_h": 9.5,    # Vertical spacing between lines
-    "font_size": 8,   # Font size
+    "font_size": 9.5, # Font size
     "bold": True,     # Draw address in bold
     "max_lines": 11   # Total address lines
 }
@@ -87,7 +105,7 @@ CHARGES_TBL = {
     "y_start": 520,
     "y_min": 175,   # just above the footer's dashed separator (~y=127) with margin
     "line_h": 10,
-    "font_size": 8,
+    "font_size": 9,
     "min_font": 7,
 
     "indent_l1": 38,   # "Subscription Ref: X" / section headers (Discounts, etc.)

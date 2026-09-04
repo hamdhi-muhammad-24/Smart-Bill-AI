@@ -41,7 +41,7 @@ TOTAL_ROW = {
     "net_amount_x":   360,
     "tax_amount_x":   440,
     "gross_total_x":  520,
-    "font_size":      10,
+    "font_size":      9,
     "gap_above":      30,
 }
 
@@ -53,10 +53,12 @@ MIDDLE_PAGE = {
 }
 
 FONTS = {
-    "header":     {"size": 8.5, "bold": False},
-    "customer":   {"size": 8,   "bold": False},
-    "table_row":  {"size": 8,   "bold": False},
-    "total_row":  {"size": 8,  "bold": True},
-    "page_num":   {"size": 8,  "bold": False},
-    "invoice_no": {"size": 7, "bold": True},
+    "header":        {"size": 9, "bold": False},
+    "customer":      {"size": 9, "bold": True},
+    "customer_name": {"size": 9, "bold": True},
+    "customer_addr": {"size": 9, "bold": True},
+    "table_row":     {"size": 9, "bold": False},
+    "total_row":     {"size": 9, "bold": True},
+    "page_num":      {"size": 9, "bold": False},
+    "invoice_no":    {"size": 9, "bold": False},
 }

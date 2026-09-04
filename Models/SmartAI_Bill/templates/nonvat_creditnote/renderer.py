@@ -180,35 +180,42 @@ class NonVATCreditNoteRenderer(BaseRenderer):
     def _draw_summary(self, data):
 
         summary = data.get("summary", {})
+        f_sum = FONTS.get("summary", {"size": 9, "bold": False})
+        f_tot = FONTS.get("total_row", {"size": 9, "bold": True})
 
         self.number(
             *COORDS["balance_bf"],
             summary.get("balance_bf", 0),
+            size=f_sum["size"],
             align="center"
         )
 
         self.number(
             *COORDS["payments_received"],
             summary.get("payments_received", 0),
+            size=f_sum["size"],
             align="center"
         )
 
         self.number(
             *COORDS["arrears"],
             summary.get("arrears", 0),
+            size=f_sum["size"],
             align="center"
         )
 
         self.number(
             *COORDS["adjustment_value"],
             summary.get("adjustment_value", 0),
+            size=f_sum["size"],
             align="center"
         )
 
         self.number(
             *COORDS["total_payable"],
             summary.get("total_payable", 0),
-            bold=True,
+            size=f_tot["size"],
+            bold=f_tot["bold"],
             align="center"
         )
 
@@ -260,6 +267,9 @@ class NonVATCreditNoteRenderer(BaseRenderer):
             ):
                 structured.append(item)
 
+        f_sub = FONTS.get("adjustment_sub_heading", {"size": 9, "bold": True})
+        f_desc = FONTS.get("adjustment_desc", {"size": 9, "bold": False})
+
         current_heading = "ADJUSTMENTS"
         for item in structured:
 
@@ -277,23 +287,23 @@ class NonVATCreditNoteRenderer(BaseRenderer):
             if y <= tbl["y_min"]:
                 self.new_page()
                 y = tbl["y_start"]
-                self.text(tbl["desc_x"], y, current_heading, bold=True)
+                self.text(tbl["desc_x"], y, current_heading, size=f_sub["size"], bold=f_sub["bold"])
                 if current_heading == "ADJUSTMENTS":
                     currency = data.get("acc_currency_code", "Rs").strip()
                     currency_str = "(Rs.)" if currency.upper() == "RS" else f"({currency})"
-                    self.text(tbl["amount_x"], y + 15, currency_str, size=tbl["font_size"], bold=True, align="right")
+                    self.text(tbl["amount_x"], y + 15, currency_str, size=f_sub["size"], bold=f_sub["bold"], align="right")
                 y -= tbl["line_h"]
 
             # Draw the heading/item description
             if level == 1:
-                self.text(tbl["desc_x"], y, desc, bold=True)
+                self.text(tbl["desc_x"], y, desc, size=f_sub["size"], bold=f_sub["bold"])
                 if desc == "ADJUSTMENTS":
                     currency = data.get("acc_currency_code", "Rs").strip()
                     currency_str = "(Rs.)" if currency.upper() == "RS" else f"({currency})"
-                    self.text(tbl["amount_x"], y + 15, currency_str, size=tbl["font_size"], bold=True, align="right")
+                    self.text(tbl["amount_x"], y + 15, currency_str, size=f_sub["size"], bold=f_sub["bold"], align="right")
             else:
                 x = tbl["desc_x"] + tbl["indent"]
-                self.text(x, y, desc, size=tbl["font_size"])
+                self.text(x, y, desc, size=f_desc["size"])
 
             if amount is not None:
 
@@ -301,7 +311,7 @@ class NonVATCreditNoteRenderer(BaseRenderer):
                     tbl["amount_x"],
                     y,
                     amount,
-                    size=tbl["font_size"],
+                    size=f_desc["size"],
                     bold=(level == 1),
                     align="right"
                 )
@@ -330,7 +340,8 @@ class NonVATCreditNoteRenderer(BaseRenderer):
         self.canvas.setStrokeColorRGB(0, 0, 0)
         self.canvas.line(desc_x, y + 11, amount_x, y + 11)
 
-        self.text(desc_x, y, "Charge of the period", size=9, bold=True)
-        self.number(amount_x, y, data.get("charge_for_period", 0), size=9, bold=True, align="right")
+        f_tot = FONTS.get("total_row", {"size": 9, "bold": True})
+        self.text(desc_x, y, "Charge of the period", size=f_tot["size"], bold=f_tot["bold"])
+        self.number(amount_x, y, data.get("charge_for_period", 0), size=f_tot["size"], bold=f_tot["bold"], align="right")
 
         self.canvas.line(desc_x, y - 5, amount_x, y - 5)
