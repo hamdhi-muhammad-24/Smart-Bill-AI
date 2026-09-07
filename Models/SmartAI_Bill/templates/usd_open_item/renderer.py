@@ -97,7 +97,7 @@ def _cells_with_fit(canvas, positions, amount_x, values, last_cell_text="",
     width is the gap to the next column's start, so long values shrink to
     fit instead of overflowing. Last left cell's boundary accounts for the
     right-aligned last_cell_text's own rendered width, not raw amount_x."""
-    font = "Helvetica-Bold" if bold else "Helvetica"
+    font = "Calibri-Bold" if bold else "Calibri"
     last_width = (canvas.stringWidth(str(last_cell_text), font, size)
                   if last_cell_text else 0.0)
     last_boundary = amount_x - last_width - pad
@@ -581,7 +581,7 @@ class USDOpenItemRenderer(BaseRenderer):
                 continue
             fitted_size = size
             if max_width is not None:
-                font = "Helvetica-Bold" if bold else "Helvetica"
+                font = "Calibri-Bold" if bold else "Calibri"
                 while fitted_size > 3.2:
                     if self.canvas.stringWidth(str(text_val), font, fitted_size) <= max_width:
                         break

@@ -16,12 +16,12 @@ PAGE_HEIGHT = 850.08
 PAGE_BOTTOM_OFFSET = 7.83  # template's MediaBox starts at y=7.83, not 0
 
 # --- Fonts ---
-FONT_BODY = "Times-Roman"
-FONT_BOLD = "Times-Bold"
-FONT_ITALIC = "Times-Italic"
+FONT_BODY = "Calibri"
+FONT_BOLD = "Calibri-Bold"
+FONT_ITALIC = "Calibri"
 SIZE_BODY = 12
 SIZE_FOOTER = 9
-FONT_PAGE_NUMBER = "Helvetica-Bold"
+FONT_PAGE_NUMBER = "Calibri-Bold"
 
 # --- Layout coordinates ---
 # All extracted directly from the ground-truth reference PDF

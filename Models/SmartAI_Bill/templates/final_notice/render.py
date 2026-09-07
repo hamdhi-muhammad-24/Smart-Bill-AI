@@ -6,13 +6,24 @@ Entry point used by generate.py:
 """
 
 import io
+import os
 from typing import List
 
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from . import config as C
 from .parser import Customer, load_customers
+
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    _calibri_reg = os.path.join(_FONTS_DIR, "calibri.ttf")
+    _calibri_bold = os.path.join(_FONTS_DIR, "calibrib.ttf")
+    if os.path.exists(_calibri_reg) and os.path.exists(_calibri_bold):
+        pdfmetrics.registerFont(TTFont("Calibri", _calibri_reg))
+        pdfmetrics.registerFont(TTFont("Calibri-Bold", _calibri_bold))
 
 
 def _y(top: float) -> float:

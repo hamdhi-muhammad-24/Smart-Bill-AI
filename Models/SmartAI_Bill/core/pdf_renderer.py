@@ -7,11 +7,22 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import black
 from reportlab.lib.utils import ImageReader
 
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
 from core.text_utils import wrap_text, format_number
 from core.tables import draw_table_with_overflow
 from core.qr_generator import generate_slt_qr, generate_static_payonline_qr
 from core.barcode_generator import generate_barcode, generate_slip_barcode
 from core.gmf_reader import is_red_notice
+
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates", "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    _calibri_reg = os.path.join(_FONTS_DIR, "calibri.ttf")
+    _calibri_bold = os.path.join(_FONTS_DIR, "calibrib.ttf")
+    if os.path.exists(_calibri_reg) and os.path.exists(_calibri_bold):
+        pdfmetrics.registerFont(TTFont("Calibri", _calibri_reg))
+        pdfmetrics.registerFont(TTFont("Calibri-Bold", _calibri_bold))
 
 
 _TEMPLATE_BYTES_CACHE: dict[str, bytes] = {}
@@ -27,7 +38,7 @@ def _get_template_bytes(pdf_path: str) -> bytes | None:
 
 class BaseRenderer:
     PAGE_W, PAGE_H = A4
-    FONT_NAME = "Helvetica"
+    FONT_NAME = "Calibri"
     HANGING_INDENT = 5
 
     def __init__(self, template_pdf_path):
@@ -75,7 +86,7 @@ class BaseRenderer:
         if value is None or value == "":
             return
         c = self.canvas
-        font = "Helvetica-Bold" if bold else "Helvetica"
+        font = "Calibri-Bold" if bold else "Calibri"
         c.setFont(font, size)
         c.setFillColor(black)
         text = str(value)

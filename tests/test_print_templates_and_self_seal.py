@@ -396,3 +396,142 @@ def test_append_self_seal_only_for_allowed_print():
         res_again = append_self_seal_if_needed(bill_path, "nonvat_home", seal_path, doc_data=data, is_print=True)
         assert res_again is False
         assert len(PdfReader(bill_path).pages) == 2
+
+
+def test_batch_processor_multipage_nonvat_home_uses_email_template():
+    """Multi-page NonVAT Home print invoice must use email template (NonVATHomeRenderer), not print template."""
+    import fitz
+    gmf_path = os.path.join(
+        os.path.dirname(__file__), "..", "local_gmf_uploads", "Test_GMFs",
+        "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4"
+    )
+    if not os.path.exists(gmf_path):
+        pytest.skip("Test GMF not found")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        out_dir = os.path.join(tmp_dir, "out")
+        results = process_single_file((gmf_path, out_dir, 1, False))
+        assert results and results[0].success
+        output_pdf = results[0].output_pdf
+        assert output_pdf and os.path.exists(output_pdf)
+
+        doc = fitz.open(output_pdf)
+        # Must have exactly 2 pages of bill content, no self-seal appended
+        assert len(doc) == 2
+        p1_text = doc[0].get_text()
+        p2_text = doc[1].get_text()
+        doc.close()
+
+        # Rendered by NonVATHomeRenderer (email template)
+        assert "Details of Payments Received" in p1_text
+        assert "Detailed Usage Charges for P_Domestic Voice Usage" in p1_text
+        assert "Detailed Usage Charges for Additional Channels" in p2_text
+
+
+def test_batch_processor_single_page_nonvat_home_uses_print_template():
+    """Single-page NonVAT Home print invoice must use print template (NonVATPrintRenderer)."""
+    import fitz
+    gmf_path = os.path.join(
+        os.path.dirname(__file__), "..", "local_gmf_uploads", "Test_GMFs",
+        "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4"
+    )
+    if not os.path.exists(gmf_path):
+        pytest.skip("Test GMF not found")
+
+    with open(gmf_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # Slicing before usage sections creates a single-page bill
+    single_content = "".join(lines[:700]) + "\nDOCEND_1 |\n"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        single_gmf = os.path.join(tmp_dir, "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4")
+        with open(single_gmf, "w", encoding="utf-8") as f:
+            f.write(single_content)
+
+        out_dir = os.path.join(tmp_dir, "out")
+        results = process_single_file((single_gmf, out_dir, 1, False))
+        assert results and results[0].success
+        output_pdf = results[0].output_pdf
+        assert output_pdf and os.path.exists(output_pdf)
+
+        doc = fitz.open(output_pdf)
+        p1_text = doc[0].get_text()
+        doc.close()
+
+        # NonVATPrintRenderer includes the payment slip section
+        assert "0007398361" in p1_text
+
+
+def test_batch_processor_multipage_nonvat_enterprise_uses_email_template():
+    """Multi-page NonVAT Enterprise print invoice must use email template (NonVATEnterpriseRenderer)."""
+    import fitz
+    gmf_path = os.path.join(
+        os.path.dirname(__file__), "..", "local_gmf_uploads", "Test_GMFs",
+        "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4"
+    )
+    if not os.path.exists(gmf_path):
+        pytest.skip("Test GMF not found")
+
+    with open(gmf_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    text_ent = text.replace("Individual-Residential", "Enterprise")
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        ent_gmf = os.path.join(tmp_dir, "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4")
+        with open(ent_gmf, "w", encoding="utf-8") as f:
+            f.write(text_ent)
+
+        out_dir = os.path.join(tmp_dir, "out")
+        results = process_single_file((ent_gmf, out_dir, 1, False))
+        assert results and results[0].success
+        output_pdf = results[0].output_pdf
+        assert output_pdf and os.path.exists(output_pdf)
+
+        doc = fitz.open(output_pdf)
+        assert len(doc) == 2
+        p1_text = doc[0].get_text()
+        p2_text = doc[1].get_text()
+        doc.close()
+
+        # Uses NonVATEnterpriseRenderer (has (Rs.) currency label above charges)
+        assert "(Rs.)" in p1_text
+        assert "Detailed Usage Charges for Additional Channels" in p2_text
+
+
+def test_batch_processor_single_page_nonvat_enterprise_uses_print_template():
+    """Single-page NonVAT Enterprise print invoice must use print template (NonVATPrintRenderer)."""
+    import fitz
+    gmf_path = os.path.join(
+        os.path.dirname(__file__), "..", "local_gmf_uploads", "Test_GMFs",
+        "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4"
+    )
+    if not os.path.exists(gmf_path):
+        pytest.skip("Test GMF not found")
+
+    with open(gmf_path, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    text_ent = text.replace("Individual-Residential", "Enterprise")
+    lines = text_ent.splitlines(keepends=True)
+    single_ent = "".join(lines[:700]) + "\nDOCEND_1 |\n"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        ent_gmf = os.path.join(tmp_dir, "520205_1-1-01-1-LKR-101-1-BILL-NONRED_1.4")
+        with open(ent_gmf, "w", encoding="utf-8") as f:
+            f.write(single_ent)
+
+        out_dir = os.path.join(tmp_dir, "out")
+        results = process_single_file((ent_gmf, out_dir, 1, False))
+        assert results and results[0].success
+        output_pdf = results[0].output_pdf
+        assert output_pdf and os.path.exists(output_pdf)
+
+        doc = fitz.open(output_pdf)
+        p1_text = doc[0].get_text()
+        doc.close()
+
+        # NonVATPrintRenderer includes the payment slip section
+        assert "0007398361" in p1_text
+

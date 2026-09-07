@@ -129,17 +129,18 @@ def parse_cancel_payment(value, rest_parts):
     }
 
 
-# BPR14: telephone from no-sub-ref block only
-# (used by nonvat_home + nonvat_enterprise)
+# BPR14: telephone number finder
 class PhoneNumberFromNoSubRefBlock:
     """
     Finds the invoice telephone number:
-      - Must be inside BSTARTSLTNOSUBSCRIPTIONREF block
+      - By default (allow_sub_ref=False), must be inside BSTARTSLTNOSUBSCRIPTIONREF block
+      - If allow_sub_ref=True, accepts 10-digit labels from any block (including subscription ref groups)
       - Must be a 10-digit SLTPRODUCTLABEL
       - Must have at least one real charge line confirmed
     """
 
-    def __init__(self):
+    def __init__(self, allow_sub_ref=False):
+        self.allow_sub_ref = allow_sub_ref
         self._in_block  = False
         self._pending   = None
         self.result     = ''
@@ -155,7 +156,7 @@ class PhoneNumberFromNoSubRefBlock:
     def candidate(self, label):
         if self.result:
             return
-        if self._in_block and label.isdigit() and len(label) == 10:
+        if (self._in_block or self.allow_sub_ref) and label.isdigit() and len(label) == 10:
             self._pending = label
         else:
             self._pending = None

@@ -83,8 +83,8 @@ SENDER_LINES = [
 # --------------------------------------------------------------------------
 # 5. FONTS
 # --------------------------------------------------------------------------
-FONT_REG  = "Helvetica"
-FONT_BOLD = "Helvetica-Bold"
+FONT_REG  = "Calibri"
+FONT_BOLD = "Calibri-Bold"
 
 # --------------------------------------------------------------------------
 # 6. COORDINATES  (x = from left, top = from top; both in points)

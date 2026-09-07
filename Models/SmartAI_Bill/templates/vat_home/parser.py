@@ -89,7 +89,7 @@ def parse_vat_home(file_path: str) -> dict:
 
     raw_address   = {}
     top_discounts = TopLevelDiscountCollector()
-    phone_finder  = PhoneNumberFromNoSubRefBlock()
+    phone_finder  = PhoneNumberFromNoSubRefBlock(allow_sub_ref=True)
 
     # Flat list, in GMF-native encounter order (NOT grouped by family/type -
     # see module docstring update): [{"label": str, "grand_total": 0,

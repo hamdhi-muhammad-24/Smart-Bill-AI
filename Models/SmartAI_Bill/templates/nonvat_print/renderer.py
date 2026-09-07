@@ -18,6 +18,7 @@ PRINT_RED_PDF = os.path.join(TEMPLATES_DIR, "Print_RED.pdf")
 
 
 class NonVATPrintRenderer(BaseRenderer):
+    FONT_NAME = "Calibri"
 
     def __init__(self):
         super().__init__(PRINT_NONRED_PDF)
@@ -236,7 +237,7 @@ class NonVATPrintRenderer(BaseRenderer):
         c.line(x, y + 11, ax, y + 11)
         c.line(x, y - 5, ax, y - 5)
 
-        c.setFont("Helvetica-Bold", f["size"])
+        c.setFont("Calibri-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
         c.drawRightString(ax, y, f"{data.get('total_charges', 0):,.2f}")
 
@@ -287,7 +288,7 @@ class NonVATPrintRenderer(BaseRenderer):
         def draw_text(text, bold=False, size=7.5, x=None):  # Reduced size from 8.5
             c = self.canvas
             cd = col_def()
-            c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+            c.setFont("Calibri-Bold" if bold else "Calibri", size)
             c.setFillColor(black)
             c.drawString(x if x is not None else cd["x_start"], state["y"], str(text))
             record(state["y"])
@@ -295,7 +296,7 @@ class NonVATPrintRenderer(BaseRenderer):
         def draw_amount(value, bold=False, size=7.5, fmt="{:,.2f}"):  # Reduced size from 8.5
             c = self.canvas
             cd = col_def()
-            c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+            c.setFont("Calibri-Bold" if bold else "Calibri", size)
             c.drawRightString(cd["x_end"], state["y"], fmt.format(value))
             record(state["y"])
 
@@ -360,11 +361,11 @@ class NonVATPrintRenderer(BaseRenderer):
             else:
                 x, y = COORDS["page_indicator_p2"]
             
-            c.setFont("Helvetica", f["size"])
+            c.setFont("Calibri", f["size"])
             c.drawRightString(x, y, f"{idx + 1}  of  {total_pages}")
             
             # Invoice number on page 2 and beyond
             if idx > 0:
                 ix, iy = COORDS["page_invoice_no_p2"]
-                c.setFont("Helvetica-Bold", inv_f["size"])
+                c.setFont("Calibri-Bold", inv_f["size"])
                 c.drawString(ix, iy, f'Invoice No.{data.get("invoice_number", "")}')

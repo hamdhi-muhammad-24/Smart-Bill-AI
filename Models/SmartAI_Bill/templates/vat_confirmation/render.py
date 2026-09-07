@@ -14,10 +14,20 @@ import datetime
 
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import simpleSplit
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from pypdf import PdfReader, PdfWriter
 
 import config
 from parser import load_recipients
+
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    _calibri_reg = os.path.join(_FONTS_DIR, "calibri.ttf")
+    _calibri_bold = os.path.join(_FONTS_DIR, "calibrib.ttf")
+    if os.path.exists(_calibri_reg) and os.path.exists(_calibri_bold):
+        pdfmetrics.registerFont(TTFont("Calibri", _calibri_reg))
+        pdfmetrics.registerFont(TTFont("Calibri-Bold", _calibri_bold))
 
 
 def safe_filename(text):
