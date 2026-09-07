@@ -21,7 +21,7 @@ def build_html(data):
 <meta charset="utf-8">
 <style>
   body {{
-    font-family: 'Book Antiqua', 'Palatino Linotype', Georgia, serif;
+    font-family: 'Calibri', sans-serif;
     font-size: 9pt;
     color: #000;
     line-height: 1.25;
@@ -36,7 +36,7 @@ def build_html(data):
   .attorney {{ text-align: left; white-space: nowrap; margin-left: 40pt; flex-shrink: 0; }}
   .refno {{ text-align: center; margin: 4pt 0 14pt; }}
   .title {{
-    font-family: 'Courier New', Courier, monospace;
+    font-family: 'Calibri', sans-serif;
     font-size: 10pt;
     text-align: center;
     font-weight: bold;

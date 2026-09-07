@@ -70,7 +70,7 @@ def parse_vat_enterprise(file_path: str) -> dict:
 
     raw_address   = {}
     top_discounts = TopLevelDiscountCollector()
-    phone_finder  = PhoneNumberFromNoSubRefBlock()
+    phone_finder  = PhoneNumberFromNoSubRefBlock(allow_sub_ref=True)
 
     try:
         with open(file_path, 'r', encoding='utf-8', errors='replace') as f:

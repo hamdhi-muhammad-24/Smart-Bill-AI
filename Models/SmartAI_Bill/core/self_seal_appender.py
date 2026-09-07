@@ -23,7 +23,18 @@ import logging
 import os
 from typing import Optional
 
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
 logger = logging.getLogger(__name__)
+
+_FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates", "fonts")
+if "Calibri" not in pdfmetrics.getRegisteredFontNames():
+    _calibri_reg = os.path.join(_FONTS_DIR, "calibri.ttf")
+    _calibri_bold = os.path.join(_FONTS_DIR, "calibrib.ttf")
+    if os.path.exists(_calibri_reg) and os.path.exists(_calibri_bold):
+        pdfmetrics.registerFont(TTFont("Calibri", _calibri_reg))
+        pdfmetrics.registerFont(TTFont("Calibri-Bold", _calibri_bold))
 
 # Templates whose output PDFs are eligible for the Self-Seal envelope.
 # ONLY NonVAT Home and NonVAT Enterprise print invoices receive the Self-Seal page.
@@ -174,7 +185,7 @@ def create_self_seal_address_overlay(doc_data: Optional[dict] = None):
     box_y_rl = 205
     c.translate(box_x, box_y_rl)
     c.rotate(180)
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Calibri-Bold", 9)
     c.setFillColor(black)
 
     cur_y = 0
@@ -182,9 +193,9 @@ def create_self_seal_address_overlay(doc_data: Optional[dict] = None):
     for idx, line_text in enumerate(lines):
         if line_text:
             if idx == 0:
-                c.setFont("Helvetica-Bold", 9)
+                c.setFont("Calibri-Bold", 9)
             else:
-                c.setFont("Helvetica-Bold", 8.5)
+                c.setFont("Calibri-Bold", 8.5)
             c.drawString(0, cur_y, str(line_text))
             cur_y -= line_height
 

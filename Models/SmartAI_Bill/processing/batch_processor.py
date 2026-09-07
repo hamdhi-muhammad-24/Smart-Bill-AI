@@ -166,11 +166,22 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
             data["template_id"] = template_id
 
         if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):
-            renderer = NonVATPrintRenderer()
+            # Print templates are only used when BOTH conditions (print AND single-page) are true.
+            # If a bill is multi-page, it must use the template used in email bills (RendererClass).
+            email_renderer = RendererClass()
+            email_renderer.render(data)
+            if email_renderer.page_count() == 1:
+                print_renderer = NonVATPrintRenderer()
+                print_renderer.render(data)
+                if print_renderer.page_count() == 1:
+                    renderer = print_renderer
+                else:
+                    renderer = email_renderer
+            else:
+                renderer = email_renderer
         else:
             renderer = RendererClass()
-
-        renderer.render(data)
+            renderer.render(data)
 
         os.makedirs(temp_pdf_dir, exist_ok=True)
 
@@ -180,7 +191,7 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
                 output_path = os.path.join(temp_pdf_dir, fname)
                 with open(output_path, "wb") as f:
                     f.write(pdf_bytes)
-                if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):
+                if isinstance(renderer, NonVATPrintRenderer):
                     approved_self_seal = get_approved_self_seal_pdf()
                     if approved_self_seal:
                         append_self_seal_if_needed(
@@ -217,7 +228,7 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
             result.output_pdf = output_path
             renderer.save(output_path)
 
-            if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):
+            if isinstance(renderer, NonVATPrintRenderer):
                 approved_self_seal = get_approved_self_seal_pdf()
                 if approved_self_seal:
                     append_self_seal_if_needed(

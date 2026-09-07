@@ -692,7 +692,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         except (ValueError, TypeError):
             formatted = f"{0:,.{decimals}f}"
         c = self.canvas
-        c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+        c.setFont("Calibri-Bold" if bold else "Calibri", size)
         c.drawRightString(x_right, y, formatted)
 
     def _draw_one_usage_section(self, section):
@@ -733,13 +733,13 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                 if section.get("phone"):
                     hdr += f' {section["phone"]}'
                 section_hdr_lines = self._usage_wrap_lines(
-                    hdr, avail_w, "Helvetica-Bold", font_section_hdr,
+                    hdr, avail_w, "Calibri-Bold", font_section_hdr,
                     max_lines=2)
 
             sub_label_line = None
             if print_header and sub.get("label"):
                 sub_label_line = self._usage_clip(
-                    sub["label"], avail_w, "Helvetica-Bold", font_row)
+                    sub["label"], avail_w, "Calibri-Bold", font_row)
 
             header_lines = (len(section_hdr_lines)
                             + (1 if sub_label_line else 0)
@@ -783,7 +783,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                         max_w = ((col_x[i + 1] - x - pad) if i + 1 < len(col_x)
                                  else (amount_x - pad - x))
                         self.text(x, self._y,
-                                  self._usage_clip(h, max_w, "Helvetica-Bold",
+                                  self._usage_clip(h, max_w, "Calibri-Bold",
                                                    font_header),
                                   size=font_header, bold=True)
                 self._y -= line_h
@@ -810,7 +810,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                     max_w = ((col_x[i + 1] - col_x[i] - pad) if i + 1 < len(col_x)
                              else (amount_x - pad - col_x[i]))
                     cell_lines.append(
-                        self._usage_wrap_cell(disp[i], max_w, "Helvetica",
+                        self._usage_wrap_cell(disp[i], max_w, "Calibri",
                                               font_row, max_lines=3))
                 row_height = max((len(lines) for lines in cell_lines),
                                  default=1) * line_h
@@ -825,7 +825,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                     max_w = ((col_x[i + 1] - col_x[i] - pad) if i + 1 < len(col_x)
                              else (amount_x - pad - col_x[i]))
                     cell_lines.append(
-                        self._usage_wrap_cell(disp[i], max_w, "Helvetica",
+                        self._usage_wrap_cell(disp[i], max_w, "Calibri",
                                               font_row, max_lines=3))
                 row_height = max((len(lines) for lines in cell_lines),
                                  default=1) * line_h
@@ -854,7 +854,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                 self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
             label = self._usage_clip(f'Total for {sub.get("label", "")}',
                                      amount_x - pad - col_x[0],
-                                     "Helvetica-Bold", font_subtotal)
+                                     "Calibri-Bold", font_subtotal)
             self.text(col_x[0], self._y, label,
                       size=font_subtotal, bold=True)
             self._usage_draw_amount(amount_x, self._y, sub_total,
@@ -868,7 +868,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             self._usage_col_x(), self._usage_amount_x(), self._usage_box_right())
         gt_label = self._usage_clip(
             f'Total Usage Charges for {section.get("label", "")}',
-            amount_x - pad - col_x[0], "Helvetica-Bold", font_grand_total)
+            amount_x - pad - col_x[0], "Calibri-Bold", font_grand_total)
         self.text(col_x[0], self._y, gt_label,
                   size=font_grand_total, bold=True)
         self._usage_draw_amount(amount_x, self._y, gt,
