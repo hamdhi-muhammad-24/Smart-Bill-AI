@@ -46,7 +46,7 @@ def test_vat_enterprise_cycle3_scenario(db_session):
     Cycle 3 file has 1,070 total records:
     - 1,060 were vat_home and were already processed previously (processed_records_count = 1060).
     - 10 are vat_enterprise which were just approved.
-    Generation Hub must show: 10 Remaining (0 / 10 Done).
+    Generation Hub must show: 10 Remaining (1060 / 1070 Done).
     """
     admin_user = UserOut(id=1, email="admin@slt.lk", role="ADMIN", is_active=True, created_at=datetime.now())
     today_dt = datetime.now()
@@ -70,8 +70,8 @@ def test_vat_enterprise_cycle3_scenario(db_session):
     assert len(batches) == 1
     b = batches[0]
     assert b["cycle_number"] == 3
-    assert b["total_records"] == 10
-    assert b["processed_records"] == 0
+    assert b["total_records"] == 1070
+    assert b["processed_records"] == 1060
     assert b["remaining_records"] == 10
 
     # When 10 are generated:
@@ -89,8 +89,8 @@ def test_vat_enterprise_cycle1_scenario(db_session):
     Cycle 1 has 53 total records:
     - 31 were already processed previously (processed_records_count = 31).
     - 22 are vat_enterprise which were just approved.
-    Generation Hub must show: 22 Remaining (0 / 22 Done).
-    When 10 are generated, it must show: 12 Remaining (10 / 22 Done).
+    Generation Hub must show: 22 Remaining (31 / 53 Done).
+    When 10 are generated, it must show: 12 Remaining (41 / 53 Done).
     When remaining 12 are generated, card must clear.
     """
     admin_user = UserOut(id=1, email="admin@slt.lk", role="ADMIN", is_active=True, created_at=datetime.now())
@@ -111,13 +111,13 @@ def test_vat_enterprise_cycle1_scenario(db_session):
     db_session.add(u)
     db_session.commit()
 
-    # Step 0: Initial state -> 22 Remaining (0 / 22 Done)
+    # Step 0: Initial state -> 22 Remaining (31 / 53 Done)
     batches = get_pending_batches(db=db_session, _=admin_user)
     assert len(batches) == 1
     b = batches[0]
     assert b["cycle_number"] == 1
-    assert b["total_records"] == 22
-    assert b["processed_records"] == 0
+    assert b["total_records"] == 53
+    assert b["processed_records"] == 31
     assert b["remaining_records"] == 22
 
     # Step 1: User generates 10 -> processed becomes 41 (10 of vat_enterprise)
@@ -127,8 +127,8 @@ def test_vat_enterprise_cycle1_scenario(db_session):
     batches = get_pending_batches(db=db_session, _=admin_user)
     assert len(batches) == 1
     b = batches[0]
-    assert b["total_records"] == 22
-    assert b["processed_records"] == 10
+    assert b["total_records"] == 53
+    assert b["processed_records"] == 41
     assert b["remaining_records"] == 12
 
     # Step 2: User generates remaining 12 -> completes

@@ -14,26 +14,34 @@ import {
 import { PageHeader } from '../../components/ui-kit/PageHeader'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { cn, formatCycleDisplayName } from '@/lib/utils'
+import { cn, formatCycleDisplayName, formatTemplateDisplayName } from '@/lib/utils'
 import { Progress } from '@/components/ui/progress'
 import { useState } from 'react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 
-function formatRunTitle(batchName: string): { title: string; subtitle?: string } {
+function formatRunTitle(batchName: string, templateBreakdown?: Record<string, number> | null): { title: string; subtitle?: string } {
   if (!batchName) return { title: 'Batch Run' }
   if (batchName.startsWith('Auto Gen ')) {
     const parts = batchName.replace('Auto Gen ', '').split(' ')
     const fileName = parts[0]
     const timeStr = parts.slice(1).join(' ')
     return {
-      title: `Auto: ${fileName.replace(/_/g, ' ')}`,
+      title: `Auto: ${formatTemplateDisplayName(fileName)}`,
       subtitle: timeStr ? `Generated at ${timeStr}` : undefined
     }
   }
   if (batchName.startsWith('Batch ')) {
+    const timeStr = batchName.replace('Batch ', '')
+    const tKeys = Object.keys(templateBreakdown || {}).filter(k => (templateBreakdown?.[k] || 0) > 0)
+    if (tKeys.length === 1) {
+      return {
+        title: formatTemplateDisplayName(tKeys[0]),
+        subtitle: `Manual Batch • ${timeStr}`
+      }
+    }
     return {
       title: 'Manual Batch Run',
-      subtitle: batchName.replace('Batch ', '')
+      subtitle: timeStr
     }
   }
   return { title: batchName }
@@ -125,14 +133,15 @@ function RunCard({
       ? 100 
       : Math.min(99, Math.round((processedCount / totalCount) * 100))
 
-  const { title, subtitle } = formatRunTitle(run.batch_name)
+  const { title, subtitle } = formatRunTitle(run.batch_name, run.template_breakdown)
   const cycleLabel = formatCycleDisplayName(run.cycle_number || run.batch_name)
   const speed = calculateSpeed(run.succeeded || 0, run.started_at, run.finished_at)
+  const templateEntries = Object.entries(run.template_breakdown || {}).filter(([_, count]) => count > 0)
 
   return (
     <div 
       className={cn(
-        "flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-xs relative overflow-hidden transition-all duration-200 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 shrink-0", 
+        "flex flex-col gap-2.5 rounded-xl border bg-card p-3 shadow-xs relative overflow-hidden transition-all duration-200 hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700 shrink-0", 
         isComplete && "border-l-4 border-l-emerald-500",
         isFailed && "border-l-4 border-l-red-500",
         isPartial && "border-l-4 border-l-amber-500",
@@ -141,51 +150,52 @@ function RunCard({
       )}
       onClick={() => onClick && onClick(run.id)}
     >
-      <div className="flex items-start justify-between gap-2 border-b border-border/40 pb-3">
-        <div className="flex items-start gap-2.5 min-w-0">
+      {/* Header: Title, Cycle, Status & Delete */}
+      <div className="flex items-start justify-between gap-2 border-b border-border/40 pb-2">
+        <div className="flex items-start gap-2 min-w-0">
           <div className={cn(
-            "p-2 rounded-lg shrink-0 mt-0.5",
+            "p-1.5 rounded-lg shrink-0 mt-0.5",
             isRunning ? "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300" :
             isComplete ? "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300" :
             isFailed ? "bg-red-100 dark:bg-red-950/50 text-red-700 dark:text-red-300" :
             "bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300"
           )}>
-            <Zap className={cn("size-4 shrink-0", isRunning && "animate-pulse")} />
+            <Zap className={cn("size-3.5 shrink-0", isRunning && "animate-pulse")} />
           </div>
           <div className="flex flex-col min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <span className="font-bold text-sm text-foreground truncate">{title}</span>
               {cycleLabel && (
-                <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-muted text-muted-foreground whitespace-nowrap">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground whitespace-nowrap">
                   {cycleLabel}
                 </span>
               )}
             </div>
             {subtitle && (
-              <span className="text-xs text-muted-foreground mt-0.5 truncate">{subtitle}</span>
+              <span className="text-[11px] text-muted-foreground truncate">{subtitle}</span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className="flex items-center gap-1 shrink-0">
           {isRunning && (
-            <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/40 px-2.5 py-0.5 rounded-full">
-              <Loader2 size={12} className="animate-spin" /> In Progress
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950/40 px-2 py-0.5 rounded-full">
+              <Loader2 size={11} className="animate-spin" /> In Progress
             </span>
           )}
           {isComplete && (
-            <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/40 px-2.5 py-0.5 rounded-full">
-              <CheckCircle2 size={12} /> Completed
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/40 px-2 py-0.5 rounded-full">
+              <CheckCircle2 size={11} /> Completed
             </span>
           )}
           {isFailed && (
-            <span className="inline-flex items-center gap-1 text-xs font-bold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-950/40 px-2.5 py-0.5 rounded-full">
-              <XCircle size={12} /> Failed
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-950/40 px-2 py-0.5 rounded-full">
+              <XCircle size={11} /> Failed
             </span>
           )}
           {isPartial && (
-            <span className="inline-flex items-center gap-1 text-xs font-bold text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-950/40 px-2.5 py-0.5 rounded-full">
-              <AlertTriangle size={12} /> Partial
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-950/40 px-2 py-0.5 rounded-full">
+              <AlertTriangle size={11} /> Partial
             </span>
           )}
           
@@ -193,26 +203,27 @@ function RunCard({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive rounded-full"
+              className="h-6 w-6 text-muted-foreground hover:text-destructive rounded-full"
               onClick={(e) => {
                 e.stopPropagation()
                 onDelete(run.id)
               }}
               title="Delete run record"
             >
-              <Trash2 size={13} />
+              <Trash2 size={12} />
             </Button>
           )}
         </div>
       </div>
       
-      <div className="flex flex-col gap-2 pt-1">
+      {/* Progress & Counts */}
+      <div className="flex flex-col gap-1.5">
         <div className="flex justify-between items-center text-xs font-semibold">
-          <span className="text-muted-foreground">
+          <span className="text-muted-foreground text-[11px]">
             {processedCount} / {totalCount} account{totalCount !== 1 ? 's' : ''} processed
           </span>
           <span className={cn(
-            "font-extrabold",
+            "font-extrabold text-xs",
             isComplete ? "text-emerald-600 dark:text-emerald-400" :
             isFailed ? "text-red-600 dark:text-red-400" :
             "text-foreground"
@@ -220,63 +231,91 @@ function RunCard({
             {progress}%
           </span>
         </div>
-        <Progress value={progress} className="h-2 rounded-full" />
+        <Progress value={progress} className="h-1.5 rounded-full" />
         
-        <div className="flex justify-between items-center text-xs pt-1">
-          <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-            <CheckCircle2 size={12} /> {run.succeeded || 0} Succeeded
+        <div className="flex justify-between items-center text-xs">
+          <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 text-[11px]">
+            <CheckCircle2 size={11} /> {run.succeeded || 0} Succeeded
           </span>
           {run.failed > 0 && (
-            <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1">
-              <XCircle size={12} /> {run.failed} Failed
+            <span className="text-red-600 dark:text-red-400 font-bold flex items-center gap-1 text-[11px]">
+              <XCircle size={11} /> {run.failed} Failed
             </span>
           )}
         </div>
 
-        {/* Live Timing & Metrics Summary Grid */}
-        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border/40 text-xs">
-          {/* Start Time */}
-          <div className="rounded-lg bg-muted/40 p-2 border border-border/40 flex flex-col justify-between">
-            <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[11px]">
-              <Clock size={12} className="text-blue-500 shrink-0" />
-              <span>Start Time</span>
+        {/* Template Breakdown Badges */}
+        {templateEntries.length > 0 && (
+          <div className="flex flex-col gap-1 pt-1.5 border-t border-border/40">
+            <div className="flex items-center justify-between text-[10.5px] font-semibold text-muted-foreground">
+              <span className="flex items-center gap-1 font-bold text-foreground">
+                <FileText size={11} className="text-indigo-500 shrink-0" />
+                <span>Templates Processed</span>
+              </span>
+              <span className="text-[10px] bg-muted px-1.5 py-0.2 rounded font-medium">
+                {templateEntries.length} {templateEntries.length === 1 ? 'type' : 'types'}
+              </span>
             </div>
-            <div className="font-mono font-bold text-foreground text-xs mt-1 truncate" title={formatDateTime(run.started_at)}>
+            <div className="flex flex-wrap items-center gap-1">
+              {templateEntries.map(([tId, count]) => (
+                <div
+                  key={tId}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 border border-indigo-200/60 dark:border-indigo-800/40"
+                >
+                  <span className="truncate max-w-[190px]">{formatTemplateDisplayName(tId)}</span>
+                  <span className="inline-flex items-center justify-center px-1.5 py-0.2 rounded-full bg-indigo-200/70 dark:bg-indigo-900/80 font-mono text-[10px] font-extrabold text-indigo-950 dark:text-indigo-100">
+                    {count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Live Timing & Metrics Summary Grid */}
+        <div className="grid grid-cols-3 gap-1.5 pt-1.5 border-t border-border/40 text-xs">
+          {/* Start Time */}
+          <div className="rounded-md bg-muted/40 p-1.5 border border-border/40 flex flex-col justify-between">
+            <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[10px]">
+              <Clock size={10} className="text-blue-500 shrink-0" />
+              <span>Start</span>
+            </div>
+            <div className="font-mono font-bold text-foreground text-[11px] mt-0.5 truncate" title={formatDateTime(run.started_at)}>
               {formatTimeOnly(run.started_at)}
             </div>
           </div>
 
           {/* End Time */}
-          <div className="rounded-lg bg-muted/40 p-2 border border-border/40 flex flex-col justify-between">
-            <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[11px]">
-              <Clock size={12} className={run.finished_at ? "text-emerald-500 shrink-0" : "text-amber-500 shrink-0"} />
-              <span>End Time</span>
+          <div className="rounded-md bg-muted/40 p-1.5 border border-border/40 flex flex-col justify-between">
+            <div className="flex items-center gap-1 text-muted-foreground font-semibold text-[10px]">
+              <Clock size={10} className={run.finished_at ? "text-emerald-500 shrink-0" : "text-amber-500 shrink-0"} />
+              <span>End</span>
             </div>
-            <div className="font-mono font-bold text-foreground text-xs mt-1 truncate" title={run.finished_at ? formatDateTime(run.finished_at) : 'In progress'}>
+            <div className="font-mono font-bold text-foreground text-[11px] mt-0.5 truncate" title={run.finished_at ? formatDateTime(run.finished_at) : 'In progress'}>
               {run.finished_at ? (
                 formatTimeOnly(run.finished_at)
               ) : (
-                <span className="text-amber-600 dark:text-amber-400 italic text-[11px] flex items-center gap-1 font-sans font-medium">
-                  <Loader2 size={10} className="animate-spin shrink-0" /> In progress
+                <span className="text-amber-600 dark:text-amber-400 italic text-[10px] flex items-center gap-1 font-sans">
+                  <Loader2 size={9} className="animate-spin shrink-0" /> In progress
                 </span>
               )}
             </div>
           </div>
 
           {/* Total Time / Duration & Speed */}
-          <div className="rounded-lg bg-indigo-50/50 dark:bg-indigo-950/20 p-2 border border-indigo-200/40 dark:border-indigo-800/30 flex flex-col justify-between">
-            <div className="flex items-center justify-between text-indigo-700 dark:text-indigo-300 font-semibold text-[11px]">
+          <div className="rounded-md bg-indigo-50/50 dark:bg-indigo-950/20 p-1.5 border border-indigo-200/40 dark:border-indigo-800/30 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-indigo-700 dark:text-indigo-300 font-semibold text-[10px]">
               <div className="flex items-center gap-1">
-                <Timer size={12} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
-                <span>Total Time</span>
+                <Timer size={10} className="text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <span>Duration</span>
               </div>
               {speed && isComplete && (
-                <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/60 px-1 py-0.2 rounded font-mono font-bold text-indigo-800 dark:text-indigo-200">
+                <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/60 px-1 py-0.2 rounded font-mono font-bold text-indigo-800 dark:text-indigo-200">
                   {speed}
                 </span>
               )}
             </div>
-            <div className="font-mono font-extrabold text-indigo-900 dark:text-indigo-200 text-xs mt-1">
+            <div className="font-mono font-extrabold text-indigo-900 dark:text-indigo-200 text-[11px] mt-0.5">
               {formatDuration(run.started_at, run.finished_at)}
             </div>
           </div>
@@ -286,30 +325,30 @@ function RunCard({
           <Button
             variant="outline"
             size="sm"
-            className="mt-2 w-full h-8 text-xs font-bold bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 border-red-200"
+            className="mt-1 w-full h-7 text-[11px] font-bold bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 border-red-200"
             onClick={(e) => {
               e.stopPropagation()
               onRetry(run.id)
             }}
             disabled={isRunning}
           >
-            {isRunning ? <Loader2 size={12} className="animate-spin mr-1.5" /> : <Play size={12} className="mr-1.5" />}
+            {isRunning ? <Loader2 size={11} className="animate-spin mr-1" /> : <Play size={11} className="mr-1" />}
             Retry Failed Invoices
           </Button>
         )}
         
-        <div className="flex justify-end gap-2 mt-1 pt-2 border-t border-border/30">
+        <div className="flex justify-end gap-2 mt-0.5 pt-1.5 border-t border-border/30">
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 text-xs font-semibold hover:bg-muted"
+            className="h-6.5 text-[11px] font-semibold hover:bg-muted"
             onClick={(e) => {
               e.stopPropagation()
               onClick && onClick(run.id)
             }}
           >
-            <Eye size={12} className="mr-1.5" />
+            <Eye size={11} className="mr-1" />
             View Output Files
           </Button>
         </div>
@@ -712,6 +751,24 @@ export default function GenerationHub() {
                       {calculateSpeed(run.succeeded || 0, run.started_at, run.finished_at) || '—'}
                     </span>
                   </div>
+                  {run.template_breakdown && Object.keys(run.template_breakdown).length > 0 && (
+                    <div className="flex flex-col col-span-2 border-t pt-2.5">
+                      <span className="text-xs text-muted-foreground font-bold flex items-center gap-1 mb-1">
+                        <FileText size={12} className="text-indigo-500" /> Template Breakdown
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {Object.entries(run.template_breakdown).filter(([_, c]) => c > 0).map(([tId, count]) => (
+                          <span
+                            key={tId}
+                            className="inline-flex items-center gap-1.5 text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/40 text-indigo-800 dark:text-indigo-200 border border-indigo-200/60 dark:border-indigo-800/40"
+                          >
+                            <span>{formatTemplateDisplayName(tId)}:</span>
+                            <span className="font-mono font-bold text-indigo-950 dark:text-indigo-100">{count}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   {run.output_path && (
                     <div className="flex flex-col col-span-2 border-t pt-2.5">
                       <span className="text-xs text-muted-foreground font-bold">Output Location</span>

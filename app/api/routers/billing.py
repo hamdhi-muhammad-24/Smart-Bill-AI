@@ -108,6 +108,7 @@ class BillingRunOut(BaseModel):
     started_at: datetime
     finished_at: Optional[datetime]
     output_path: Optional[str]
+    template_breakdown: Optional[dict[str, int]] = None
     failures: List[BillingRunFailureOut] = []
 
     class Config:
@@ -317,19 +318,23 @@ def get_stats(db: Session = Depends(get_db), _: UserOut = Depends(require_admin1
 def _resolve_upload_file_path(upload: GmfUpload) -> Optional[Path]:
     """Find the existing file on disk across possible storage locations."""
     if upload.file_path and os.path.exists(upload.file_path):
-        return Path(upload.file_path)
+        resolved = Path(upload.file_path).resolve()
+        incoming_dir = settings.queue_incoming_dir.resolve()
+        if incoming_dir not in resolved.parents:
+            return Path(upload.file_path)
+
     fn = upload.filename
     possible_paths = [
         settings.queue_pending_dir / fn,
-        settings.queue_incoming_dir / fn,
         settings.gmf_drive_path / "Staged" / fn,
         settings.gmf_drive_path / (upload.folder_type or "") / fn,
         settings.gmf_drive_path / "Processed" / (upload.folder_type or "unknown") / fn,
+        settings.queue_incoming_dir / fn,
     ]
     for p in possible_paths:
         if p.exists():
             return p
-    return None
+    return Path(upload.file_path) if (upload.file_path and os.path.exists(upload.file_path)) else None
 
 def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set) -> tuple:
     """
@@ -337,8 +342,8 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
     - approved_total_records: total customer records in this upload matching approved templates.
     - approved_remaining_records: records still pending generation for approved templates.
     - is_fully_approved: True if all detected templates in the upload are approved.
-    - active_batch_total: Target total records for the current active approved templates workload.
-    - active_batch_processed: Records processed so far for the current active approved templates workload.
+    - active_batch_total: Total approved records in this upload (fixed).
+    - active_batch_processed: Records processed so far for approved templates (increments).
     """
     f_type = upload.folder_type or ""
     processed = upload.processed_records_count or 0
@@ -358,8 +363,8 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
         tot = upload.total_records_count or 1
         app_tot = tot if is_app else 0
         app_rem = max(0, app_tot - processed)
-        active_batch_tot = tot if is_app else 0
-        active_batch_proc = max(0, active_batch_tot - app_rem) if is_app else 0
+        active_batch_tot = app_tot
+        active_batch_proc = min(app_tot, processed)
         return app_tot, app_rem, is_app, active_batch_tot, active_batch_proc
 
     # Case 2: Multi-Document GMF file with breakdown JSON
@@ -368,31 +373,11 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
             bd = json.loads(upload.template_breakdown)
             if isinstance(bd, dict) and bd:
                 tot_in_bd = sum(bd.values())
-                
-                # Separate templates completed in past generation runs from the currently active approved workload
-                cum_processed = processed
-                past_completed_count = 0
-                active_tot = 0
-                
-                for tid, cnt in bd.items():
-                    if tid in approved_templates:
-                        if cum_processed >= cnt:
-                            past_completed_count += cnt
-                            cum_processed -= cnt
-                        else:
-                            active_tot += cnt
-                
-                app_tot = past_completed_count + active_tot
+                app_tot = sum(cnt for tid, cnt in bd.items() if tid in approved_templates)
                 is_fully = (app_tot == tot_in_bd) and (tot_in_bd > 0)
                 app_rem = max(0, app_tot - processed)
-                
-                if active_tot > 0:
-                    active_batch_tot = active_tot
-                    active_batch_proc = max(0, active_batch_tot - app_rem)
-                else:
-                    active_batch_tot = 0
-                    active_batch_proc = 0
-                    
+                active_batch_tot = app_tot
+                active_batch_proc = min(app_tot, processed)
                 return app_tot, app_rem, is_fully, active_batch_tot, active_batch_proc
         except Exception:
             pass
@@ -404,8 +389,8 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
         is_app = t_id in approved_templates
         app_tot = tot if is_app else 0
         app_rem = max(0, app_tot - processed)
-        active_batch_tot = tot if is_app else 0
-        active_batch_proc = max(0, active_batch_tot - app_rem) if is_app else 0
+        active_batch_tot = app_tot
+        active_batch_proc = min(app_tot, processed)
         return app_tot, app_rem, is_app, active_batch_tot, active_batch_proc
 
     # Case 4: Fallback for comma-separated template list without breakdown JSON
@@ -428,7 +413,7 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
 
     app_rem = max(0, app_tot - processed)
     active_batch_tot = app_tot
-    active_batch_proc = max(0, active_batch_tot - app_rem)
+    active_batch_proc = min(app_tot, processed)
     return app_tot, app_rem, is_fully, active_batch_tot, active_batch_proc
 
 
@@ -492,15 +477,15 @@ def get_pending_batches(
 
             app_tot, app_rem, _, active_tot, active_proc = _calculate_upload_approved_counts(upload, approved_templates)
 
-            if app_rem > 0:
-                group_tot += active_tot
-                group_proc += active_proc
-                group_rem += app_rem
-                if (
-                    upload.status in (GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED)
-                    and not is_active_generating
-                ):
-                    group_pending_ids.append(upload.id)
+            group_tot += active_tot
+            group_proc += active_proc
+            group_rem += app_rem
+            if (
+                app_rem > 0
+                and upload.status in (GmfUploadStatus.APPROVED, GmfUploadStatus.PARTIALLY_PROCESSED)
+                and not is_active_generating
+            ):
+                group_pending_ids.append(upload.id)
 
         # Only include in "Ready for Generation" if there are remaining records AND pending uploads to run
         if group_rem > 0 and group_pending_ids:
@@ -979,10 +964,16 @@ def generate_batch(
     new_path = settings.queue_incoming_dir / filename
     
     try:
-        if os.path.exists(new_path):
-            os.remove(new_path)
-        shutil.move(upload.file_path, str(new_path))
-        upload.file_path = str(new_path)
+        src_path = Path(upload.file_path).resolve()
+        dst_path = new_path.resolve()
+        if src_path != dst_path:
+            if dst_path.exists():
+                try:
+                    dst_path.unlink()
+                except OSError:
+                    pass
+            shutil.move(str(src_path), str(dst_path))
+        upload.file_path = str(dst_path)
         db.commit()
     except Exception as e:
         # Rollback db updates if move fails
@@ -1009,7 +1000,7 @@ def generate_batch_endpoint(
     if not upload_ids:
         raise HTTPException(status_code=400, detail="No uploads provided")
 
-    uploads = db.query(GmfUpload).filter(GmfUpload.id.in_(upload_ids)).all()
+    uploads = db.query(GmfUpload).filter(GmfUpload.id.in_(upload_ids)).order_by(GmfUpload.id.asc()).all()
     if not uploads:
         raise HTTPException(status_code=404, detail="Uploads not found")
 
@@ -1129,10 +1120,15 @@ def generate_batch_endpoint(
 
             # 2. Copy data file to queue
             new_path = settings.queue_incoming_dir / filename
-            if os.path.exists(new_path):
-                os.remove(new_path)
-            if str(Path(upload.file_path)) != str(new_path):
-                shutil.copy2(upload.file_path, str(new_path))
+            src_path = Path(upload.file_path).resolve()
+            dst_path = new_path.resolve()
+            if src_path != dst_path:
+                if dst_path.exists():
+                    try:
+                        dst_path.unlink()
+                    except OSError:
+                        pass
+                shutil.copy2(str(src_path), str(dst_path))
 
             success_count += 1
         except Exception as e:
@@ -1260,10 +1256,109 @@ def retry_failed_run(
 # Billing Runs (history + live status)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _resolve_run_template_breakdown(run: BillingRun, db: Optional[Session] = None) -> Optional[dict[str, int]]:
+    """Get or derive template breakdown dictionary for a billing run."""
+    succ = run.succeeded or 0
+    if run.template_breakdown:
+        try:
+            parsed = json.loads(run.template_breakdown) if isinstance(run.template_breakdown, str) else run.template_breakdown
+            if parsed and isinstance(parsed, dict) and any(v > 0 for v in parsed.values()):
+                # If single-template run has undercounted sum compared to run.succeeded, correct it
+                if len(parsed) == 1 and succ > sum(parsed.values()):
+                    only_k = list(parsed.keys())[0]
+                    parsed[only_k] = succ
+                return parsed
+        except Exception:
+            pass
+
+    # Fallback derivation for older/completed runs:
+    derived = {}
+    succ = run.succeeded or 0
+    batch_name = run.batch_name or ""
+    
+    # 1. Check if batch_name is Auto Gen <filename>
+    if batch_name.startswith("Auto Gen "):
+        fn = batch_name.replace("Auto Gen ", "").split(" ")[0].lower()
+        if "summary" in fn:
+            derived["summary_statement"] = succ
+        elif "final" in fn:
+            derived["final_notice"] = succ
+        elif "lod" in fn:
+            derived["lod"] = succ
+        elif "vat_confirm" in fn or ("vat" in fn and "confirm" in fn):
+            derived["vat_confirmation"] = succ
+        elif "letter" in fn or "migration" in fn:
+            derived["customer_letter"] = succ
+        elif "usd" in fn:
+            derived["usd_open_item"] = succ
+        elif succ > 0:
+            derived[fn] = succ
+
+    # 2. Check output_path folder
+    if not derived and run.output_path:
+        folder = Path(run.output_path).name.lower()
+        if folder == "final_notice":
+            derived["final_notice"] = succ
+        elif folder == "lod":
+            derived["lod"] = succ
+        elif folder == "vat_confirmation":
+            derived["vat_confirmation"] = succ
+        elif folder in ("customer_letter", "customer_letter_logo_v1print", "customer_migration_letter"):
+            derived["customer_letter"] = succ
+        elif folder == "summary_statement":
+            derived["summary_statement"] = succ
+        elif folder == "usd_open_item":
+            derived["usd_open_item"] = succ
+
+    # 3. Check associated GmfUpload records
+    if not derived and db and succ > 0:
+        uploads = db.query(GmfUpload).filter(GmfUpload.billing_run_id == run.id).all()
+        for u in uploads:
+            if u.template_breakdown:
+                try:
+                    tb = json.loads(u.template_breakdown) if isinstance(u.template_breakdown, str) else u.template_breakdown
+                    if isinstance(tb, dict):
+                        for k, v in tb.items():
+                            derived[k] = derived.get(k, 0) + int(v)
+                except Exception:
+                    pass
+            elif u.template_detected:
+                derived[u.template_detected] = derived.get(u.template_detected, 0) + (u.processed_records_count or succ)
+
+    return derived if derived else None
+
+
+def _format_billing_run_out(run: BillingRun, db: Optional[Session] = None) -> BillingRunOut:
+    tb = _resolve_run_template_breakdown(run, db)
+    failures_out = [
+        BillingRunFailureOut(
+            id=f.id,
+            account_number=f.account_number,
+            error_message=f.error_message,
+            created_at=f.created_at
+        ) for f in (run.failures or [])
+    ]
+    return BillingRunOut(
+        id=run.id,
+        batch_name=run.batch_name,
+        cycle_number=run.cycle_number,
+        status=run.status.value if hasattr(run.status, "value") else str(run.status),
+        total_accounts=run.total_accounts,
+        succeeded=run.succeeded,
+        failed=run.failed,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        output_path=run.output_path,
+        template_breakdown=tb,
+        failures=failures_out,
+    )
+
+
 @router.get("/runs", response_model=List[BillingRunOut])
 def get_runs(db: Session = Depends(get_db), _: UserOut = Depends(require_admin)):
     """List all billing run history."""
-    return db.query(BillingRun).order_by(BillingRun.started_at.desc()).limit(100).all()
+    runs = db.query(BillingRun).order_by(BillingRun.started_at.desc()).limit(100).all()
+    return [_format_billing_run_out(r, db) for r in runs]
 
 
 @router.get("/runs/{run_id}", response_model=BillingRunOut)
@@ -1272,7 +1367,7 @@ def get_run(run_id: int, db: Session = Depends(get_db), _: UserOut = Depends(req
     run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return run
+    return _format_billing_run_out(run, db)
 
 
 @router.get("/runs/{run_id}/results")

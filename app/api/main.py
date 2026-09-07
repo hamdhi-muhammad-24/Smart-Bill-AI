@@ -65,6 +65,7 @@ def create_app() -> FastAPI:
                 # 2. Tables & Columns
                 for stmt in [
                     "ALTER TABLE gmf_uploads ADD COLUMN IF NOT EXISTS template_breakdown TEXT;",
+                    "ALTER TABLE billing_runs ADD COLUMN IF NOT EXISTS template_breakdown TEXT;",
                     """CREATE TABLE IF NOT EXISTS envelope_templates (
                         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                         envelope_type envelope_type_enum NOT NULL UNIQUE,
@@ -160,7 +161,7 @@ def create_app() -> FastAPI:
             logging.getLogger("uvicorn").warning(f"Database schema initialization: {e}")
 
         import os
-        if os.environ.get("RUN_IN_PROCESS_WORKER", "true").lower() == "true":
+        if os.environ.get("RUN_IN_PROCESS_WORKER", "false").lower() == "true":
             try:
                 from app.billing.worker_queue import start_worker_threads
                 start_worker_threads(4)

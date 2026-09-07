@@ -121,8 +121,8 @@ def _resolve_cycle_folder(upload):
 _BATCH_TRACKER = {}  # str(base_dir) -> [current_batch_num, current_count]
 _BATCH_LOCK = threading.Lock()
 
-def _get_batch_folder(base_dir: Path, max_per_batch: int = 1500) -> Path:
-    """O(1) high-speed batch folder resolver without recursive disk scans."""
+def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
+    """O(1) high-speed batch folder resolver with recursive disk scans for initial count."""
     key = str(base_dir)
     with _BATCH_LOCK:
         if key not in _BATCH_TRACKER:
@@ -133,7 +133,7 @@ def _get_batch_folder(base_dir: Path, max_per_batch: int = 1500) -> Path:
             active_dir = base_dir / f"Batch_{active_num}"
             active_dir.mkdir(parents=True, exist_ok=True)
             try:
-                count = sum(1 for _ in active_dir.glob("*.pdf"))
+                count = sum(1 for _ in active_dir.rglob("*.pdf"))
             except OSError:
                 count = 0
             if count >= max_per_batch:
@@ -153,15 +153,20 @@ def _get_batch_folder(base_dir: Path, max_per_batch: int = 1500) -> Path:
 
 def _read_metadata_file(incoming_dir, filename):
     """Read and parse metadata JSON file if it exists."""
-    meta_file = incoming_dir / f"{filename}.meta.json"
+    candidates = [
+        incoming_dir / f"{filename}.processing.meta.json",
+        incoming_dir / f"{filename}.meta.json",
+    ]
     meta_data = {}
-    if meta_file.exists():
-        try:
-            with open(meta_file, "r", encoding="utf-8") as mf:
-                meta_data = json.load(mf)
-            _robust_file_op(meta_file.unlink)
-        except Exception as e:
-            logger.warning(f"Could not read meta file {meta_file}: {e}")
+    for meta_file in candidates:
+        if meta_file.exists():
+            try:
+                with open(meta_file, "r", encoding="utf-8") as mf:
+                    meta_data = json.load(mf)
+                _robust_file_op(meta_file.unlink)
+                break
+            except Exception as e:
+                logger.warning(f"Could not read meta file {meta_file}: {e}")
     return meta_data
 
 def _lookup_upload_record(filename, meta_upload_id=None, run_id=None):
@@ -184,26 +189,33 @@ def _lookup_upload_record(filename, meta_upload_id=None, run_id=None):
         time.sleep(1)
     return upload
 
-def _update_billing_run(db, run_id, generated_count=0, cycle_base_dir=None):
-    """Update BillingRun with generated count and check completion status."""
+def _update_billing_run(db, run_id, generated_count=0, cycle_base_dir=None, template_counts=None):
+    """Update BillingRun with generated count, live template breakdown, and check completion status."""
     if not run_id:
         return
     
-    if generated_count > 0:
-        db.execute(
-            sql_update(BillingRun)
-            .where(BillingRun.id == run_id)
-            .values(succeeded=BillingRun.succeeded + generated_count)
-        )
-        db.flush()
-    
     run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
-    if run:
-        if cycle_base_dir:
-            run.output_path = str(cycle_base_dir)
-        if run.succeeded + run.failed >= run.total_accounts:
-            run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
-            run.finished_at = datetime.now()
+    if not run:
+        return
+
+    if generated_count > 0:
+        run.succeeded = (run.succeeded or 0) + generated_count
+    
+    if template_counts:
+        try:
+            curr_breakdown = json.loads(run.template_breakdown) if run.template_breakdown else {}
+        except Exception:
+            curr_breakdown = {}
+        for tid, cnt in template_counts.items():
+            curr_breakdown[tid] = curr_breakdown.get(tid, 0) + cnt
+        run.template_breakdown = json.dumps(curr_breakdown)
+
+    if cycle_base_dir:
+        run.output_path = str(cycle_base_dir)
+    if (run.succeeded or 0) + (run.failed or 0) >= run.total_accounts:
+        run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
+        run.finished_at = datetime.now()
+    db.flush()
 
 def _create_billing_run(db, upload, filename, offset, limit):
     """Create a new BillingRun for the upload."""
@@ -376,6 +388,8 @@ def _worker_process(worker_id):
             # Pick a file
             file_path = files[0]
             working_path = incoming_dir / (file_path.name + ".processing")
+            meta_file = incoming_dir / f"{file_path.name}.meta.json"
+            working_meta = incoming_dir / f"{file_path.name}.processing.meta.json"
             
             # Atomic rename to claim the file
             try:
@@ -383,6 +397,12 @@ def _worker_process(worker_id):
             except OSError:
                 time.sleep(0.1)
                 continue
+
+            if meta_file.exists():
+                try:
+                    _robust_file_op(os.rename, meta_file, working_meta, max_retries=3, delay=0.2)
+                except OSError:
+                    pass
 
             filename = file_path.name
             logger.info(f"Worker {worker_id} processing {filename}")
@@ -416,6 +436,17 @@ def _worker_process(worker_id):
             cycle_label = upload.folder_type
             template_id = upload.template_detected
             run_id = upload.billing_run_id or meta_data.get("billing_run_id")
+
+            # Fallback limit from BillingRun if not present in metadata
+            if limit is None and run_id:
+                try:
+                    with SessionLocal() as db_limit:
+                        r_rec = db_limit.query(BillingRun).filter(BillingRun.id == run_id).first()
+                        if r_rec and r_rec.total_accounts and r_rec.total_accounts > 0:
+                            if not upload.total_records_count or r_rec.total_accounts < upload.total_records_count:
+                                limit = r_rec.total_accounts
+                except Exception:
+                    pass
 
             if not template_id:
                 logger.error(f"Cannot process {filename}: template unknown")
@@ -452,22 +483,15 @@ def _worker_process(worker_id):
                         db.commit()
                 continue
                 
-            # Resolve cycle folder name
-            folder_name = _resolve_cycle_folder(upload)
-            cycle_label = folder_name
-
-            # Get active and approved templates
-            active_templates = _get_active_templates()
-            meta_approved = meta_data.get("approved_templates") if isinstance(meta_data, dict) else None
-            if meta_approved:
-                approved_templates = set(meta_approved)
-            else:
-                approved_templates = _get_approved_templates()
-
-            # Setup output directory
             today_str = datetime.now().strftime("%Y-%m-%d")
+            folder_name = _resolve_cycle_folder(upload)
             cycle_base_dir = settings.output_dir / today_str / folder_name
             cycle_base_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Read approved templates passed via metadata JSON if available
+            approved_templates = None
+            if "approved_templates" in meta_data:
+                approved_templates = set(meta_data["approved_templates"])
 
             # Create BillingRun if needed
             if not run_id:
@@ -532,11 +556,21 @@ def _worker_process(worker_id):
                             )
                     # ───────────────────────────────────────────────────────────
                     
-                    # Copy generated files to output folder
-                    pdf_files = list(Path(temp_pdf_dir).glob("*.pdf"))
+                    # Copy generated files to output folder in strict generation order
+                    ordered_pdf_names = []
+                    for r in chunk_results:
+                        if hasattr(r, "generated_pdf_files") and r.generated_pdf_files:
+                            ordered_pdf_names.extend(r.generated_pdf_files)
+                        elif getattr(r, "output_pdf", None):
+                            ordered_pdf_names.append(os.path.basename(r.output_pdf))
+                    
+                    if ordered_pdf_names:
+                        pdf_files = [Path(temp_pdf_dir) / name for name in ordered_pdf_names if (Path(temp_pdf_dir) / name).exists()]
+                    else:
+                        pdf_files = sorted(Path(temp_pdf_dir).glob("*.pdf"), key=lambda p: os.path.getmtime(p))
                     
                     for file_path in pdf_files:
-                        batch_dir = _get_batch_folder(cycle_base_dir, BATCH_FOLDER_SIZE)
+                        batch_dir = _get_batch_folder(cycle_base_dir, 10)
                         if is_cycle_folder:
                             target_dir = batch_dir / category_folder_name / red_folder_name
                         else:
@@ -548,6 +582,21 @@ def _worker_process(worker_id):
                     total_generated_count += chunk_gen_count
                     all_results.extend(chunk_results)
                     
+                    # Compute chunk template counts
+                    chunk_template_counts = {}
+                    if len(chunk_results) == 1 and chunk_gen_count > 0:
+                        tid = getattr(chunk_results[0], "template_id", None) or template_id
+                        if tid:
+                            chunk_template_counts[tid] = chunk_gen_count
+                    else:
+                        for r in chunk_results:
+                            if getattr(r, "success", False) and getattr(r, "template_id", None):
+                                tid = r.template_id
+                                cnt = getattr(r, "output_pdf_count", 1) or 1
+                                chunk_template_counts[tid] = chunk_template_counts.get(tid, 0) + cnt
+                    if not chunk_template_counts and chunk_gen_count > 0 and template_id:
+                        chunk_template_counts[template_id] = chunk_gen_count
+
                     # Update billing run incrementally so live view works!
                     run_id_to_update = run_id
                     if not run_id_to_update:
@@ -557,18 +606,19 @@ def _worker_process(worker_id):
                             
                     if run_id_to_update:
                         with SessionLocal() as db_update:
-                            _update_billing_run(db_update, run_id_to_update, chunk_gen_count, cycle_base_dir)
+                            _update_billing_run(db_update, run_id_to_update, chunk_gen_count, cycle_base_dir, chunk_template_counts)
                             db_update.commit()
                             
                     if current_limit is not None:
-                        current_offset += current_limit
+                        advance = chunk_gen_count if chunk_gen_count > 0 else current_limit
+                        current_offset += advance
                         if records_remaining != float('inf'):
-                            records_remaining -= current_limit
+                            records_remaining -= advance
                     else:
-                        break
+                        advance = chunk_gen_count if chunk_gen_count > 0 else chunk_size
+                        current_offset += advance
                         
-                        # Stop if we didn't generate any PDFs in this chunk (end of data or error)
-                    if chunk_gen_count == 0:
+                    if chunk_gen_count == 0 or (records_remaining != float('inf') and records_remaining <= 0):
                         break
             
             is_eof = (limit is None) or (records_remaining > 0 and chunk_gen_count == 0)

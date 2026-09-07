@@ -235,6 +235,7 @@ export interface BillingRunOut {
   started_at: string
   finished_at: string | null
   output_path: string | null
+  template_breakdown?: Record<string, number> | null
 }
 
 export interface ScheduleOut {

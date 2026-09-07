@@ -33,6 +33,8 @@ class ProcessingResult:
         self.duration = duration
         self.attempt = attempt
         self.doc_index = doc_index
+        self.generated_pdf_files = []
+        self.output_pdf_count = 1
         # Populated for summary_statement template only.
         # Format: {"customer_ref": "CRxxxxxxxxx", "account_nos": ["...", ...], "pdf_name": "..."}
         self.summary_meta = None
@@ -140,8 +142,10 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
                     if list_key in data and isinstance(data[list_key], list) and len(data[list_key]) > 10:
                         data[list_key] = data[list_key][:10]
         else:
+            called_with_offset = False
             try:
                 data = parser_func(doc_path, limit=limit, offset=offset)
+                called_with_offset = True
             except TypeError:
                 try:
                     data = parser_func(doc_path, limit=limit)
@@ -154,9 +158,9 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
                 lim = int(limit)
                 off = int(offset or 0)
                 if isinstance(data, list) and len(data) > lim:
-                    data = data[off : (off + lim)]
+                    data = data[:lim] if called_with_offset else data[off : (off + lim)]
                 elif isinstance(data, dict) and "records" in data and isinstance(data["records"], list) and len(data["records"]) > lim:
-                    data["records"] = data["records"][off : (off + lim)]
+                    data["records"] = data["records"][:lim] if called_with_offset else data["records"][off : (off + lim)]
 
         file_info = parse_filename(source_filename)
         bill_handling = file_info.get("bill_handling", "")
@@ -176,6 +180,7 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
 
         if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
             last_path = None
+            gen_files = []
             for fname, pdf_bytes, _ in renderer.generated_pdfs:
                 output_path = os.path.join(temp_pdf_dir, fname)
                 with open(output_path, "wb") as f:
@@ -191,7 +196,9 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
                             is_print=True,
                         )
                 last_path = output_path
+                gen_files.append(fname)
             result.output_pdf = last_path
+            result.generated_pdf_files = gen_files
             gen_count = len(renderer.generated_pdfs)
             result.output_pdf_count = max(1, gen_count)
             result.success = True
@@ -215,6 +222,8 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
                 output_path = os.path.join(temp_pdf_dir, f"{base}_dup{doc_index}{ext}")
 
             result.output_pdf = output_path
+            result.generated_pdf_files = [os.path.basename(output_path)]
+            result.output_pdf_count = 1
             renderer.save(output_path)
 
             if is_print_invoice and template_id in ("nonvat_home", "nonvat_enterprise"):

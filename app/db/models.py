@@ -162,8 +162,9 @@ class BillingRun(Base):
     failed         = Column(Integer, nullable=False, default=0)
     started_at     = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     finished_at    = Column(DateTime(timezone=True))
-    output_path    = Column(Text)  # Base path to Output/<date>/<cycle>/ folder
-    zip_path       = Column(Text)  # Legacy, kept for backwards compat
+    output_path        = Column(Text)  # Base path to Output/<date>/<cycle>/ folder
+    zip_path           = Column(Text)  # Legacy, kept for backwards compat
+    template_breakdown = Column(Text, nullable=True)  # JSON text: {"template_code": count, ...}
     
     failures = relationship("BillingRunFailure", backref="run", cascade="all, delete-orphan")
 
