@@ -65,6 +65,7 @@ def create_app() -> FastAPI:
                 # 2. Tables & Columns
                 for stmt in [
                     "ALTER TABLE gmf_uploads ADD COLUMN IF NOT EXISTS template_breakdown TEXT;",
+                    "ALTER TABLE gmf_uploads ADD COLUMN IF NOT EXISTS processed_breakdown TEXT;",
                     "ALTER TABLE billing_runs ADD COLUMN IF NOT EXISTS template_breakdown TEXT;",
                     """CREATE TABLE IF NOT EXISTS envelope_templates (
                         id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

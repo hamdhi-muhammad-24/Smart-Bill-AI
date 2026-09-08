@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import { cn, formatCycleDisplayName, formatTemplateDisplayName } from '@/lib/utils'
 import { Progress } from '@/components/ui/progress'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 
 function formatRunTitle(batchName: string, templateBreakdown?: Record<string, number> | null): { title: string; subtitle?: string } {
@@ -395,20 +395,25 @@ export default function GenerationHub() {
     queryFn: () => getRuns(),
     refetchInterval: (query) => {
       const data = query.state.data
-      const isActive = data?.some((r: any) => r.status === 'RUNNING' || r.status === 'PENDING')
-      return isActive ? 3000 : 8000
+      const isActive = data?.some((r: any) => r.status === 'RUNNING' || r.status === 'PENDING' || r.status === 'QUEUED')
+      return isActive ? 1000 : 4000
     },
     placeholderData: (prev) => prev,
   })
 
-  const hasActiveRun = runs?.some(r => r.status === 'RUNNING' || r.status === 'PENDING')
+  const hasActiveRun = runs?.some(r => r.status === 'RUNNING' || r.status === 'PENDING' || r.status === 'QUEUED')
 
   const { data: pendingBatches, isLoading: loadingBatches } = useQuery({
     queryKey: ['billing-pending-batches'],
     queryFn: () => getPendingBatches(),
-    refetchInterval: hasActiveRun ? 3000 : 8000,
+    refetchInterval: hasActiveRun ? 1000 : 4000,
     placeholderData: (prev) => prev,
   })
+
+  // Instantly invalidate and refetch pending batches whenever runs update (e.g. invoice succeeded, chunk written, run finished)
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: ['billing-pending-batches'] })
+  }, [runs, queryClient])
 
   const batchMutation = useMutation({
     mutationFn: ({ uploadIds, recordLimit }: { uploadIds: number[]; recordLimit?: number | null }) => 

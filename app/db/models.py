@@ -112,7 +112,7 @@ class InvoiceTemplate(Base):
         Index("idx_invoice_templates_base", "base_template_id"),
     )
 
-    id                = Column(BigInteger, Identity(always=True), primary_key=True)
+    id                = Column(BigInteger().with_variant(Integer, "sqlite"), Identity(always=True), primary_key=True, autoincrement=True)
     name              = Column(Text, nullable=False)
     description       = Column(Text)
     template_code     = Column(Text, nullable=False, unique=True)
@@ -151,7 +151,7 @@ class Invoice(Base):
 class BillingRun(Base):
     __tablename__ = "billing_runs"
 
-    id             = Column(BigInteger, Identity(always=True), primary_key=True)
+    id             = Column(BigInteger().with_variant(Integer, "sqlite"), Identity(always=True), primary_key=True, autoincrement=True)
     batch_name     = Column(Text, nullable=False)
     cycle_number   = Column(Integer, nullable=True)  # 1-4 or None for test
     period_start   = Column(Date, nullable=False)
@@ -255,12 +255,13 @@ class GmfUpload(Base):
     processed_records_count = Column(Integer, nullable=False, default=0)
     total_records_count     = Column(Integer, nullable=False, default=0)
     template_breakdown      = Column(Text, nullable=True)
+    processed_breakdown     = Column(Text, nullable=True)  # JSON text: {"template_code": count, ...}
 
 
 class NotificationEvent(Base):
     __tablename__ = "notification_events"
 
-    id         = Column(BigInteger, Identity(always=True), primary_key=True)
+    id         = Column(BigInteger().with_variant(Integer, "sqlite"), Identity(always=True), primary_key=True, autoincrement=True)
     event_type = Column(Enum(NotificationEventType, name="notification_event_type"), nullable=False)
     title      = Column(Text, nullable=False)
     message    = Column(Text, nullable=False)

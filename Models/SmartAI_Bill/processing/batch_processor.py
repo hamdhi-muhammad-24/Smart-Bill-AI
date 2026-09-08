@@ -56,6 +56,9 @@ def process_single_file(args):
 
     results = []
     source_filename = os.path.basename(file_path)
+    if source_filename.lower().endswith(".processing"):
+        source_filename = source_filename[:-11]
+    source_filename = re.sub(r'\.worker_\d+_\d+', '', source_filename)
 
     try:
         documents = split_gmf_documents(file_path, offset=offset, limit=limit, original_filename=source_filename, approved_templates=approved_templates)
@@ -68,8 +71,11 @@ def process_single_file(args):
             ))
             return results
 
+        total_pdfs_written = 0
         with tempfile.TemporaryDirectory(prefix="gmf_split_") as split_dir:
             for doc_index, doc_path in enumerate(documents, start=1):
+                if limit is not None and total_pdfs_written >= limit:
+                    break
                 result = _process_one_document(
                     doc_path=doc_path,
                     doc_index=doc_index,
@@ -83,7 +89,23 @@ def process_single_file(args):
                     offset=offset,
                     limit=limit,
                 )
+                if result.success:
+                    cnt = getattr(result, "output_pdf_count", 1) or 1
+                    total_pdfs_written += cnt
                 results.append(result)
+
+        # Enforce that temp_pdf_dir never contains more than limit PDFs (batch runs only, never previews)
+        if not is_preview and limit is not None and temp_pdf_dir and os.path.exists(temp_pdf_dir):
+            created_pdfs = sorted(
+                [f for f in os.listdir(temp_pdf_dir) if f.lower().endswith(".pdf")],
+                key=lambda f: os.path.getmtime(os.path.join(temp_pdf_dir, f))
+            )
+            if len(created_pdfs) > limit:
+                for surplus in created_pdfs[limit:]:
+                    try:
+                        os.remove(os.path.join(temp_pdf_dir, surplus))
+                    except OSError:
+                        pass
 
     except Exception as e:
         results.append(ProcessingResult(
@@ -190,6 +212,8 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
         os.makedirs(temp_pdf_dir, exist_ok=True)
 
         if hasattr(renderer, "generated_pdfs") and renderer.generated_pdfs:
+            if limit is not None and len(renderer.generated_pdfs) > limit:
+                renderer.generated_pdfs = renderer.generated_pdfs[:limit]
             last_path = None
             gen_files = []
             for fname, pdf_bytes, _ in renderer.generated_pdfs:

@@ -257,6 +257,11 @@ function GmfSummaryDrawer({ upload, onClose }: { upload: GmfUploadOut | null; on
                               {item.processed_count.toLocaleString()} processed
                             </span>
                           )}
+                          {typeof item.remaining_count === 'number' && item.remaining_count > 0 && typeof item.processed_count === 'number' && item.processed_count > 0 && (
+                            <span className="font-semibold text-amber-600 dark:text-amber-400">
+                              {item.remaining_count.toLocaleString()} remaining
+                            </span>
+                          )}
                           <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 font-bold">
                             {item.count.toLocaleString()} customers
                           </span>

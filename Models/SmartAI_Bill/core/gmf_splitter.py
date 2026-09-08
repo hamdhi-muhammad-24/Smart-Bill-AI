@@ -1,4 +1,5 @@
 import os
+import re
 import openpyxl
 import csv
 import tempfile
@@ -11,6 +12,7 @@ def count_documents(file_path: str) -> int:
         return 0
 
     clean_path = file_path[:-11] if file_path.lower().endswith(".processing") else file_path
+    clean_path = re.sub(r'\.worker_\d+_\d+', '', clean_path)
     ext = os.path.splitext(clean_path)[1].lower()
 
     if ext in (".xlsx", ".xls"):
@@ -60,6 +62,7 @@ def count_documents_with_breakdown(file_path: str) -> tuple[int, dict[str, int]]
         return 0, {}
 
     clean_path = file_path[:-11] if file_path.lower().endswith(".processing") else file_path
+    clean_path = re.sub(r'\.worker_\d+_\d+', '', clean_path)
     ext = os.path.splitext(clean_path)[1].lower()
 
     if ext in (".xlsx", ".xls", ".csv"):
@@ -75,7 +78,7 @@ def count_documents_with_breakdown(file_path: str) -> tuple[int, dict[str, int]]
     total_docs = 0
     in_docstart = False
     current_header: GMFHeader | None = None
-    source_filename = os.path.basename(file_path)
+    source_filename = os.path.basename(clean_path)
 
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -146,6 +149,7 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
         return []
 
     clean_path = file_path[:-11] if file_path.lower().endswith(".processing") else file_path
+    clean_path = re.sub(r'\.worker_\d+_\d+', '', clean_path)
     ext = os.path.splitext(clean_path)[1].lower()
 
     if ext in (".xlsx", ".xls", ".csv"):
@@ -183,7 +187,7 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
         return [file_path]
 
     # Filter for approved templates in multi-document bulk files
-    if approved_templates is not None and len(doc_blocks) > 1:
+    if approved_templates is not None and doc_blocks:
         from core.template_identifier import identify_template_from_header
         from core.gmf_reader import GMFHeader
         filtered_blocks = []
@@ -233,6 +237,7 @@ def split_gmf_documents(file_path: str, offset: int = 0, limit: int = None, orig
     base_name = original_filename or os.path.basename(file_path)
     if base_name.lower().endswith(".processing"):
         base_name = base_name[:-11]
+    base_name = re.sub(r'\.worker_\d+_\d+', '', base_name)
     
     # Prefix is the original filename stripped of extension, to preserve it for downstream checks.
     # GMF files carry no real extension - a trailing ".7" (etc.) is part of

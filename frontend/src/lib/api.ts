@@ -201,6 +201,8 @@ export interface TemplateBreakdownItem {
   template_id: string
   template_name: string
   count: number
+  processed_count?: number
+  remaining_count?: number
   is_approved: boolean
   status: string
 }

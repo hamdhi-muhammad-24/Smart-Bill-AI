@@ -375,9 +375,21 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
                 tot_in_bd = sum(bd.values())
                 app_tot = sum(cnt for tid, cnt in bd.items() if tid in approved_templates)
                 is_fully = (app_tot == tot_in_bd) and (tot_in_bd > 0)
-                app_rem = max(0, app_tot - processed)
+                
+                pb = {}
+                if getattr(upload, "processed_breakdown", None):
+                    try:
+                        pb = json.loads(upload.processed_breakdown) if isinstance(upload.processed_breakdown, str) else upload.processed_breakdown
+                    except Exception:
+                        pb = {}
+                if isinstance(pb, dict) and pb:
+                    app_proc = sum(min(cnt, pb.get(tid, 0)) for tid, cnt in bd.items() if tid in approved_templates)
+                else:
+                    app_proc = min(app_tot, processed)
+
+                app_rem = max(0, app_tot - app_proc)
                 active_batch_tot = app_tot
-                active_batch_proc = min(app_tot, processed)
+                active_batch_proc = app_proc
                 return app_tot, app_rem, is_fully, active_batch_tot, active_batch_proc
         except Exception:
             pass
@@ -388,9 +400,10 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
     if t_id and "," not in t_id:
         is_app = t_id in approved_templates
         app_tot = tot if is_app else 0
-        app_rem = max(0, app_tot - processed)
+        app_proc = min(app_tot, processed)
+        app_rem = max(0, app_tot - app_proc)
         active_batch_tot = app_tot
-        active_batch_proc = min(app_tot, processed)
+        active_batch_proc = app_proc
         return app_tot, app_rem, is_app, active_batch_tot, active_batch_proc
 
     # Case 4: Fallback for comma-separated template list without breakdown JSON
@@ -411,9 +424,10 @@ def _calculate_upload_approved_counts(upload: GmfUpload, approved_templates: set
     else:
         app_tot = 0
 
-    app_rem = max(0, app_tot - processed)
+    app_proc = min(app_tot, processed)
+    app_rem = max(0, app_tot - app_proc)
     active_batch_tot = app_tot
-    active_batch_proc = min(app_tot, processed)
+    active_batch_proc = app_proc
     return app_tot, app_rem, is_fully, active_batch_tot, active_batch_proc
 
 
@@ -422,11 +436,8 @@ def get_pending_batches(
     db: Session = Depends(get_db),
     _: UserOut = Depends(require_admin),
 ):
-    # Check active billing mode. In Auto Mode, Ready for Generation should NOT list files.
-    setting = db.query(SystemSetting).filter(SystemSetting.key == "billing_mode").first()
-    billing_mode = setting.value if setting else "auto"
-    if billing_mode == "auto":
-        return []
+    # Ready for Generation batches are displayed for both Auto and Manual modes.
+    # Get all active approved templates
 
     # Get all active approved templates
     app_tmpls = db.query(InvoiceTemplate).filter(
@@ -440,12 +451,18 @@ def get_pending_batches(
 
     # Fetch all uploads in relevant states to accurately maintain batch total counts
     all_cycle_uploads = db.query(GmfUpload).filter(
-        GmfUpload.status.in_([
-            GmfUploadStatus.APPROVED,
-            GmfUploadStatus.PARTIALLY_PROCESSED,
-            GmfUploadStatus.COMPLETED,
-            GmfUploadStatus.GENERATING,
-        ]),
+        or_(
+            GmfUpload.status.in_([
+                GmfUploadStatus.APPROVED,
+                GmfUploadStatus.PARTIALLY_PROCESSED,
+                GmfUploadStatus.COMPLETED,
+                GmfUploadStatus.GENERATING,
+            ]),
+            and_(
+                GmfUpload.status == GmfUploadStatus.FAILED,
+                GmfUpload.processed_records_count > 0,
+            ),
+        ),
         GmfUpload.folder_type != "Test_GMFs",
     ).order_by(GmfUpload.detected_at.asc()).all()
 
@@ -574,25 +591,37 @@ def preview_invoice(
     preview_dir = settings.output_dir / "previews"
     preview_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pass limit=1 and offset=0 so the splitter immediately stops after the first document
-    args = (upload.file_path, str(preview_dir), 1, True, None, 0, 1)
-    results = process_single_file(args)
+    with tempfile.TemporaryDirectory(prefix="preview_gen_") as temp_gen_dir:
+        # Pass limit=1 and offset=0 so the splitter immediately stops after the first document
+        args = (upload.file_path, temp_gen_dir, 1, True, None, 0, 1)
+        results = process_single_file(args)
 
-    if isinstance(results, list):
-        if not results or not results[0].success:
-            err = results[0].error if results else "Invoice engine failed"
+        if isinstance(results, list):
+            if not results or not results[0].success:
+                err = results[0].error if results else "Invoice engine failed"
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Invoice engine failed: {err}"
+                )
+            result = results[0]
+        else:
+            result = results
+            if not result.success:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Invoice engine failed: {result.error}"
+                )
+
+        if not result.output_pdf or not os.path.exists(result.output_pdf):
             raise HTTPException(
                 status_code=500,
-                detail=f"Invoice engine failed: {err}"
+                detail="Invoice engine did not produce a preview PDF"
             )
-        result = results[0]
-    else:
-        result = results
-        if not result.success:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Invoice engine failed: {result.error}"
-            )
+
+        # Copy generated preview PDF into persistent previews directory
+        dest_pdf = preview_dir / os.path.basename(result.output_pdf)
+        shutil.copy2(result.output_pdf, str(dest_pdf))
+        result.output_pdf = str(dest_pdf)
 
 
     # Collect detected templates across document blocks
@@ -737,6 +766,16 @@ def get_upload_summary(
             return "Final Notice"
         return tid.replace("_", " ").title()
 
+    # Parse per-template processed counts if available
+    proc_bd = {}
+    if getattr(upload, "processed_breakdown", None):
+        try:
+            raw_pb = json.loads(upload.processed_breakdown) if isinstance(upload.processed_breakdown, str) else upload.processed_breakdown
+            if isinstance(raw_pb, dict):
+                proc_bd = raw_pb
+        except Exception:
+            proc_bd = {}
+
     # 1. Use stored template_breakdown JSON if available
     if upload.template_breakdown:
         try:
@@ -749,10 +788,12 @@ def get_upload_summary(
                     is_rej = t_id in rejected_templates
                     status_str = "APPROVED" if is_app else ("REJECTED" if is_rej else "PENDING_APPROVAL")
                     
-                    # Estimate processed count for this specific template if file is in progress
                     if is_app:
-                        t_proc = min(count, acc_processed)
-                        acc_processed = max(0, acc_processed - t_proc)
+                        if proc_bd:
+                            t_proc = min(count, proc_bd.get(t_id, 0))
+                        else:
+                            t_proc = min(count, acc_processed)
+                            acc_processed = max(0, acc_processed - t_proc)
                     else:
                         t_proc = 0
 
@@ -761,6 +802,7 @@ def get_upload_summary(
                         "template_name": _fmt_tname(t_id),
                         "count": count,
                         "processed_count": t_proc,
+                        "remaining_count": max(0, count - t_proc),
                         "is_approved": is_app,
                         "status": status_str,
                     })
@@ -796,8 +838,11 @@ def get_upload_summary(
                         is_rej = t_id in rejected_templates
                         status_str = "APPROVED" if is_app else ("REJECTED" if is_rej else "PENDING_APPROVAL")
                         if is_app:
-                            t_proc = min(count, acc_processed)
-                            acc_processed = max(0, acc_processed - t_proc)
+                            if proc_bd:
+                                t_proc = min(count, proc_bd.get(t_id, 0))
+                            else:
+                                t_proc = min(count, acc_processed)
+                                acc_processed = max(0, acc_processed - t_proc)
                         else:
                             t_proc = 0
                         breakdown.append({
@@ -805,6 +850,7 @@ def get_upload_summary(
                             "template_name": _fmt_tname(t_id),
                             "count": count,
                             "processed_count": t_proc,
+                            "remaining_count": max(0, count - t_proc),
                             "is_approved": is_app,
                             "status": status_str,
                         })
@@ -824,8 +870,11 @@ def get_upload_summary(
             status_str = "APPROVED" if is_app else ("REJECTED" if is_rej else "PENDING_APPROVAL")
             cnt = total_docs if len(parts) == 1 else max(1, total_docs // len(parts))
             if is_app:
-                t_proc = min(cnt, acc_processed)
-                acc_processed = max(0, acc_processed - t_proc)
+                if proc_bd:
+                    t_proc = min(cnt, proc_bd.get(t_id, 0))
+                else:
+                    t_proc = min(cnt, acc_processed)
+                    acc_processed = max(0, acc_processed - t_proc)
             else:
                 t_proc = 0
             breakdown.append({
@@ -833,6 +882,7 @@ def get_upload_summary(
                 "template_name": _fmt_tname(t_id),
                 "count": cnt,
                 "processed_count": t_proc,
+                "remaining_count": max(0, cnt - t_proc),
                 "is_approved": is_app,
                 "status": status_str,
             })
@@ -1063,7 +1113,10 @@ def generate_batch_endpoint(
             detail="The selected batch is already actively generating or has no valid pending records. Please wait for the current run to finish."
         )
 
-    total_accounts = max(1, allocated_total)
+    if req.limit is not None:
+        total_accounts = max(1, min(req.limit, allocated_total))
+    else:
+        total_accounts = max(1, allocated_total)
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     first_up = valid_uploads_with_limits[0][0] if valid_uploads_with_limits else None
@@ -1106,8 +1159,9 @@ def generate_batch_endpoint(
     for upload, file_limit in valid_uploads_with_limits:
         filename = Path(upload.file_path).name
         try:
-            # 1. Write sidecar JSON metadata FIRST before placing the data file in the queue
+            # 1. Write sidecar JSON metadata atomically BEFORE placing the data file in the queue
             meta_path = settings.queue_incoming_dir / f"{filename}.meta.json"
+            meta_tmp = settings.queue_incoming_dir / f"{filename}.meta.json.tmp"
             meta_data = {
                 "upload_id": upload.id,
                 "offset": upload.processed_records_count or 0,
@@ -1115,20 +1169,23 @@ def generate_batch_endpoint(
                 "billing_run_id": run_id,
                 "approved_templates": list(approved_templates),
             }
-            with open(meta_path, "w", encoding="utf-8") as meta_f:
+            with open(meta_tmp, "w", encoding="utf-8") as meta_f:
                 json.dump(meta_data, meta_f)
+            os.replace(str(meta_tmp), str(meta_path))
 
-            # 2. Copy data file to queue
+            # 2. Copy data file to queue atomically using .uploading.tmp
             new_path = settings.queue_incoming_dir / filename
             src_path = Path(upload.file_path).resolve()
             dst_path = new_path.resolve()
             if src_path != dst_path:
-                if dst_path.exists():
+                tmp_path = settings.queue_incoming_dir / f"{filename}.uploading.tmp"
+                if tmp_path.exists():
                     try:
-                        dst_path.unlink()
+                        tmp_path.unlink()
                     except OSError:
                         pass
-                shutil.copy2(str(src_path), str(dst_path))
+                shutil.copy2(str(src_path), str(tmp_path))
+                os.replace(str(tmp_path), str(dst_path))
 
             success_count += 1
         except Exception as e:

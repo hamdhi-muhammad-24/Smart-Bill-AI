@@ -7,6 +7,8 @@ import sys
 import json
 import inspect
 import threading
+from contextlib import contextmanager
+from typing import Optional
 from pathlib import Path
 from datetime import datetime
 
@@ -118,45 +120,95 @@ def _resolve_cycle_folder(upload):
             return TEMPLATE_FOLDER_MAP[t_id]
         return f_type.replace(" ", "_") if f_type else "Cycle_1"
 
-_BATCH_TRACKER = {}  # str(base_dir) -> [current_batch_num, current_count]
-_BATCH_LOCK = threading.Lock()
+@contextmanager
+def _cross_process_dir_lock(base_dir: Path):
+    """Cross-process file lock using msvcrt on Windows or fcntl on Unix."""
+    base_dir.mkdir(parents=True, exist_ok=True)
+    lock_file_path = base_dir / ".batch_alloc.lock"
+    f = open(lock_file_path, "a+b")
+    acquired = False
+    start_time = time.time()
+    try:
+        while not acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except (OSError, PermissionError):
+                if time.time() - start_time > 30.0:
+                    break
+                time.sleep(0.01)
+        yield
+    finally:
+        if acquired:
+            try:
+                if os.name == "nt":
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        try:
+            f.close()
+        except OSError:
+            pass
 
 def _get_batch_folder(base_dir: Path, max_per_batch: int = 10) -> Path:
-    """O(1) high-speed batch folder resolver with recursive disk scans for initial count."""
-    key = str(base_dir)
-    with _BATCH_LOCK:
-        if key not in _BATCH_TRACKER:
-            b_num = 1
-            while (base_dir / f"Batch_{b_num}").exists():
-                b_num += 1
-            active_num = max(1, b_num - 1)
-            active_dir = base_dir / f"Batch_{active_num}"
-            active_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                count = sum(1 for _ in active_dir.rglob("*.pdf"))
-            except OSError:
-                count = 0
-            if count >= max_per_batch:
-                active_num += 1
-                count = 0
-                (base_dir / f"Batch_{active_num}").mkdir(parents=True, exist_ok=True)
-            _BATCH_TRACKER[key] = [active_num, count]
+    """Finds or creates active Batch_N folder ensuring strictly <= max_per_batch files."""
+    with _cross_process_dir_lock(base_dir):
+        batch_num = 1
+        while True:
+            batch_dir = base_dir / f"Batch_{batch_num}"
+            if not batch_dir.exists():
+                batch_dir.mkdir(parents=True, exist_ok=True)
+                return batch_dir
+            pdf_count = sum(1 for _ in batch_dir.rglob("*.pdf"))
+            if pdf_count < max_per_batch:
+                return batch_dir
+            batch_num += 1
 
-        tracker = _BATCH_TRACKER[key]
-        if tracker[1] >= max_per_batch:
-            tracker[0] += 1
-            tracker[1] = 0
-            (base_dir / f"Batch_{tracker[0]}").mkdir(parents=True, exist_ok=True)
+def _copy_pdf_to_batch(src_pdf: Path, cycle_base_dir: Path, sub_rel_path: Optional[Path] = None, max_per_batch: int = 10) -> Path:
+    """
+    Atomically copy src_pdf into an active batch folder (Batch_1, Batch_2, ...)
+    under cycle_base_dir, strictly enforcing max_per_batch (10) PDFs per batch folder
+    across all concurrent worker processes.
+    """
+    with _cross_process_dir_lock(cycle_base_dir):
+        batch_num = 1
+        while True:
+            batch_dir = cycle_base_dir / f"Batch_{batch_num}"
+            if not batch_dir.exists():
+                batch_dir.mkdir(parents=True, exist_ok=True)
+                break
+            pdf_count = sum(1 for _ in batch_dir.rglob("*.pdf"))
+            if pdf_count < max_per_batch:
+                break
+            batch_num += 1
 
-        tracker[1] += 1
-        return base_dir / f"Batch_{tracker[0]}"
+        batch_dir = cycle_base_dir / f"Batch_{batch_num}"
+        target_dir = (batch_dir / sub_rel_path) if sub_rel_path else batch_dir
+        target_dir.mkdir(parents=True, exist_ok=True)
+        dest_file = target_dir / src_pdf.name
+        shutil.copy2(str(src_pdf), str(dest_file))
+        return dest_file
 
-def _read_metadata_file(incoming_dir, filename):
+def _read_metadata_file(incoming_dir, filename, working_meta=None):
     """Read and parse metadata JSON file if it exists."""
-    candidates = [
+    candidates = []
+    if working_meta and Path(working_meta).exists():
+        candidates.append(Path(working_meta))
+    candidates.extend([
         incoming_dir / f"{filename}.processing.meta.json",
         incoming_dir / f"{filename}.meta.json",
-    ]
+    ])
     meta_data = {}
     for meta_file in candidates:
         if meta_file.exists():
@@ -193,17 +245,27 @@ def _update_billing_run(db, run_id, generated_count=0, cycle_base_dir=None, temp
     """Update BillingRun with generated count, live template breakdown, and check completion status."""
     if not run_id:
         return
-    
-    run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
+
+    # Select with row lock to safely update succeeded, template_breakdown, and check completion
+    try:
+        run = db.query(BillingRun).filter(BillingRun.id == run_id).with_for_update().first()
+    except Exception:
+        run = db.query(BillingRun).filter(BillingRun.id == run_id).first()
+        
     if not run:
         return
 
     if generated_count > 0:
-        run.succeeded = (run.succeeded or 0) + generated_count
-    
+        if run.total_accounts is not None and run.total_accounts > 0:
+            run.succeeded = min(run.total_accounts, (run.succeeded or 0) + generated_count)
+        else:
+            run.succeeded = (run.succeeded or 0) + generated_count
+
     if template_counts:
         try:
             curr_breakdown = json.loads(run.template_breakdown) if run.template_breakdown else {}
+            if not isinstance(curr_breakdown, dict):
+                curr_breakdown = {}
         except Exception:
             curr_breakdown = {}
         for tid, cnt in template_counts.items():
@@ -212,8 +274,12 @@ def _update_billing_run(db, run_id, generated_count=0, cycle_base_dir=None, temp
 
     if cycle_base_dir:
         run.output_path = str(cycle_base_dir)
-    if (run.succeeded or 0) + (run.failed or 0) >= run.total_accounts:
-        run.status = RunStatus.DONE if run.failed == 0 else RunStatus.PARTIAL
+
+    total = run.total_accounts or 0
+    succeeded = run.succeeded or 0
+    failed = run.failed or 0
+    if total > 0 and (succeeded + failed) >= total:
+        run.status = RunStatus.DONE if failed == 0 else RunStatus.PARTIAL
         run.finished_at = datetime.now()
     db.flush()
 
@@ -379,6 +445,7 @@ def _worker_process(worker_id):
                 and not f.name.startswith(".")
                 and not f.name.endswith(".processing")
                 and not f.name.endswith(".meta.json")
+                and not f.name.endswith(".tmp")
             ]
             
             if not files:
@@ -387,9 +454,11 @@ def _worker_process(worker_id):
                 
             # Pick a file
             file_path = files[0]
-            working_path = incoming_dir / (file_path.name + ".processing")
-            meta_file = incoming_dir / f"{file_path.name}.meta.json"
-            working_meta = incoming_dir / f"{file_path.name}.processing.meta.json"
+            filename = file_path.name
+            claim_token = f"worker_{worker_id}_{int(time.time()*1000)}"
+            working_path = incoming_dir / f"{file_path.stem}.{claim_token}{file_path.suffix}.processing"
+            meta_file = incoming_dir / f"{filename}.meta.json"
+            working_meta = incoming_dir / f"{file_path.stem}.{claim_token}{file_path.suffix}.processing.meta.json"
             
             # Atomic rename to claim the file
             try:
@@ -404,11 +473,10 @@ def _worker_process(worker_id):
                 except OSError:
                     pass
 
-            filename = file_path.name
             logger.info(f"Worker {worker_id} processing {filename}")
 
             # Read metadata file
-            meta_data = _read_metadata_file(incoming_dir, filename)
+            meta_data = _read_metadata_file(incoming_dir, filename, working_meta)
             meta_upload_id = meta_data.get("upload_id")
             raw_offset = meta_data.get("offset", 0)
             raw_limit = meta_data.get("limit")
@@ -443,8 +511,8 @@ def _worker_process(worker_id):
                     with SessionLocal() as db_limit:
                         r_rec = db_limit.query(BillingRun).filter(BillingRun.id == run_id).first()
                         if r_rec and r_rec.total_accounts and r_rec.total_accounts > 0:
-                            if not upload.total_records_count or r_rec.total_accounts < upload.total_records_count:
-                                limit = r_rec.total_accounts
+                            rem_in_run = max(0, r_rec.total_accounts - (r_rec.succeeded or 0))
+                            limit = rem_in_run
                 except Exception:
                     pass
 
@@ -488,10 +556,23 @@ def _worker_process(worker_id):
             cycle_base_dir = settings.output_dir / today_str / folder_name
             cycle_base_dir.mkdir(parents=True, exist_ok=True)
             
-            # Read approved templates passed via metadata JSON if available
+            # Read approved templates passed via metadata JSON if available, or fetch active approved from DB
             approved_templates = None
             if "approved_templates" in meta_data:
                 approved_templates = set(meta_data["approved_templates"])
+            if approved_templates is None:
+                try:
+                    with SessionLocal() as db_tmpls:
+                        app_t = db_tmpls.query(InvoiceTemplate).filter(
+                            InvoiceTemplate.approval_status == TemplateApprovalStatus.APPROVED,
+                            InvoiceTemplate.is_active == True
+                        ).all()
+                        approved_templates = {t.template_code for t in app_t}
+                        if "customer_letter_logo_v1print" in approved_templates:
+                            approved_templates.add("customer_migration_letter")
+                            approved_templates.add("customer_letter")
+                except Exception:
+                    pass
 
             # Create BillingRun if needed
             if not run_id:
@@ -521,6 +602,7 @@ def _worker_process(worker_id):
             
             total_generated_count = 0
             all_results = []
+            accumulated_template_counts = {}
             
             import tempfile
             import shutil
@@ -533,9 +615,45 @@ def _worker_process(worker_id):
             red_folder_name = "RED" if is_red else "Non-Red"
             is_cycle_folder = folder_name.lower().startswith("cycle_")
             
+            # Check if run has already reached total_accounts limit
+            if run_id:
+                try:
+                    with SessionLocal() as db_chk:
+                        r_rec = db_chk.query(BillingRun).filter(BillingRun.id == run_id).first()
+                        if r_rec and r_rec.total_accounts is not None and r_rec.total_accounts > 0:
+                            run_rem = max(0, r_rec.total_accounts - (r_rec.succeeded or 0))
+                            if run_rem <= 0:
+                                logger.info(f"BillingRun {run_id} is already full ({r_rec.succeeded}/{r_rec.total_accounts}). Skipping {filename}")
+                                with SessionLocal() as db_rev:
+                                    u_rev = db_rev.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+                                    if u_rev and u_rev.status == GmfUploadStatus.GENERATING:
+                                        u_rev.status = GmfUploadStatus.PARTIALLY_PROCESSED if (u_rev.processed_records_count or 0) > 0 else GmfUploadStatus.APPROVED
+                                        u_rev.billing_run_id = None
+                                        db_rev.commit()
+                                if os.path.exists(working_path):
+                                    _robust_file_op(os.remove, working_path)
+                                continue
+                except Exception as chk_err:
+                    logger.warning(f"Error checking run remaining: {chk_err}")
+
+            chunk_gen_count = 0
             while records_remaining > 0:
+                if run_id:
+                    try:
+                        with SessionLocal() as db_chk:
+                            r_rec = db_chk.query(BillingRun).filter(BillingRun.id == run_id).first()
+                            if r_rec and r_rec.total_accounts is not None and r_rec.total_accounts > 0:
+                                run_rem = max(0, r_rec.total_accounts - (r_rec.succeeded or 0))
+                                if run_rem <= 0:
+                                    break
+                                records_remaining = min(records_remaining, run_rem)
+                    except Exception:
+                        pass
+
                 current_limit = min(chunk_size, records_remaining) if records_remaining != float('inf') else chunk_size
                 if current_limit == float('inf'): current_limit = None
+                if current_limit is not None and current_limit <= 0:
+                    break
                 
                 with tempfile.TemporaryDirectory(prefix="gmf_pdf_gen_") as temp_pdf_dir:
                     args = (str(working_path), temp_pdf_dir, 1, False, approved_templates, current_offset, current_limit)
@@ -569,14 +687,30 @@ def _worker_process(worker_id):
                     else:
                         pdf_files = sorted(Path(temp_pdf_dir).glob("*.pdf"), key=lambda p: os.path.getmtime(p))
                     
+                    # Strictly cap pdf_files so we NEVER copy or succeed more than remaining budget or run capacity!
+                    max_allowed = len(pdf_files)
+                    if records_remaining != float('inf'):
+                        max_allowed = min(max_allowed, max(0, int(records_remaining)))
+
+                    if run_id:
+                        try:
+                            with SessionLocal() as db_chk:
+                                r_rec = db_chk.query(BillingRun).filter(BillingRun.id == run_id).first()
+                                if r_rec and r_rec.total_accounts is not None and r_rec.total_accounts > 0:
+                                    run_rem = max(0, r_rec.total_accounts - (r_rec.succeeded or 0))
+                                    max_allowed = min(max_allowed, run_rem)
+                        except Exception:
+                            pass
+
+                    if max_allowed < len(pdf_files):
+                        pdf_files = pdf_files[:max_allowed]
+
+                    if not pdf_files:
+                        break
+
+                    sub_path = Path(category_folder_name) / red_folder_name if is_cycle_folder else None
                     for file_path in pdf_files:
-                        batch_dir = _get_batch_folder(cycle_base_dir, 10)
-                        if is_cycle_folder:
-                            target_dir = batch_dir / category_folder_name / red_folder_name
-                        else:
-                            target_dir = batch_dir
-                        target_dir.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(file_path, target_dir / file_path.name)
+                        _copy_pdf_to_batch(file_path, cycle_base_dir, sub_path, 10)
                         
                     chunk_gen_count = len(pdf_files)
                     total_generated_count += chunk_gen_count
@@ -597,17 +731,33 @@ def _worker_process(worker_id):
                     if not chunk_template_counts and chunk_gen_count > 0 and template_id:
                         chunk_template_counts[template_id] = chunk_gen_count
 
-                    # Update billing run incrementally so live view works!
-                    run_id_to_update = run_id
-                    if not run_id_to_update:
-                        with SessionLocal() as db_update:
-                            u_rec = db_update.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
-                            if u_rec: run_id_to_update = u_rec.billing_run_id
-                            
-                    if run_id_to_update:
-                        with SessionLocal() as db_update:
-                            _update_billing_run(db_update, run_id_to_update, chunk_gen_count, cycle_base_dir, chunk_template_counts)
-                            db_update.commit()
+                    for tid, cnt in chunk_template_counts.items():
+                        accumulated_template_counts[tid] = accumulated_template_counts.get(tid, 0) + cnt
+
+                    # Update billing run and upload incrementally so live view and ready for generation cards update immediately
+                    with SessionLocal() as db_inc:
+                        run_id_to_update = run_id
+                        if not run_id_to_update:
+                            u_rec = db_inc.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+                            if u_rec:
+                                run_id_to_update = u_rec.billing_run_id
+                        if run_id_to_update:
+                            _update_billing_run(db_inc, run_id_to_update, chunk_gen_count, cycle_base_dir, chunk_template_counts)
+                        
+                        u_rec = db_inc.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
+                        if u_rec and chunk_gen_count > 0:
+                            u_rec.processed_records_count = (u_rec.processed_records_count or 0) + chunk_gen_count
+                            try:
+                                curr_pb = json.loads(u_rec.processed_breakdown) if u_rec.processed_breakdown else {}
+                                if not isinstance(curr_pb, dict):
+                                    curr_pb = {}
+                            except Exception:
+                                curr_pb = {}
+                            for tid, cnt in chunk_template_counts.items():
+                                curr_pb[tid] = curr_pb.get(tid, 0) + cnt
+                            u_rec.processed_breakdown = json.dumps(curr_pb)
+                            u_rec.status = GmfUploadStatus.PARTIALLY_PROCESSED
+                        db_inc.commit()
                             
                     if current_limit is not None:
                         advance = chunk_gen_count if chunk_gen_count > 0 else current_limit
@@ -640,8 +790,22 @@ def _worker_process(worker_id):
                 with SessionLocal() as db:
                     upload = db.query(GmfUpload).filter(GmfUpload.id == upload_id).first()
                     if upload:
-                        upload.processed_records_count = (upload.processed_records_count or 0) + generated_count
+                        upload.processed_records_count = upload.processed_records_count or 0
                         
+                        # Ensure per-template processed_breakdown JSON is accurate
+                        try:
+                            curr_pb = json.loads(upload.processed_breakdown) if upload.processed_breakdown else {}
+                            if not isinstance(curr_pb, dict):
+                                curr_pb = {}
+                        except Exception:
+                            curr_pb = {}
+                        if not curr_pb and upload.processed_records_count > 0 and template_id:
+                            curr_pb[template_id] = upload.processed_records_count
+                        for tid, cnt in accumulated_template_counts.items():
+                            if tid not in curr_pb:
+                                curr_pb[tid] = cnt
+                        upload.processed_breakdown = json.dumps(curr_pb)
+
                         if not upload.total_records_count or upload.total_records_count <= 1:
                             try:
                                 real_total = count_documents(str(working_path))
