@@ -64,7 +64,7 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         self._draw_cancel_payments_fixed(data)
         self._draw_messages_fixed(data)
 
-        self._draw_usage_full_from_page2(data)
+        self._draw_usage_dynamic(data, y)
 
         total_pages = self.page_count()
         self._draw_page_indicators(data, total_pages)
@@ -473,18 +473,16 @@ class ProductLabelGroupingRenderer(BaseRenderer):
             c.setFont("Calibri-Bold", f["size"])
             c.drawString(rx, y, suspended)
 
-    # usage (page 2+)
+    # usage (dynamic placement)
 
-    def _draw_usage_full_from_page2(self, data):
-        """Same logic as nonvat_enterprise — full usage from new page."""
+    def _draw_usage_dynamic(self, data, y_start):
+        """Render usage sections dynamically on Page 1 if space permits,
+        otherwise flow to Page 2+."""
         sections = [s for s in data.get("usage_sections", [])
                     if s["subsections"]]
         if not sections:
             return
 
-        self.new_page()
-        y_state  = {"y": 750}
-        y_min    = 60
         line_h   = 9
         col_x    = [50, 130, 190]
         amount_x = 300
@@ -495,6 +493,21 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         font_subtotal    = 7
         font_grand_total = 8
         font_section_hdr = 9
+        p1_floor = CHARGES_TABLE.get("payments_y_min", 150.0)
+        other_floor = CHARGES_TABLE.get("otherpage_y_min", 60.0)
+
+        # Estimate height of first section to decide if it can start on Page 1
+        first_sec = sections[0]
+        first_sub = first_sec["subsections"][0]
+        first_sec_h = line_h * (1.4 + (1.2 if first_sub.get("label") else 0) + 1.0 + len(first_sub["rows"]) + 1.3 + 2.0)
+
+        if self.page_count() == 1 and (y_start - first_sec_h >= p1_floor):
+            y_state = {"y": y_start - 6}
+            y_min = p1_floor
+        else:
+            self.new_page()
+            y_state = {"y": 750}
+            y_min = other_floor
 
         def get_last_numeric(row):
             for val in reversed(row):
@@ -514,9 +527,11 @@ class ProductLabelGroupingRenderer(BaseRenderer):
 
         def draw_table(sub, rows, print_header, show_section_hdr,
                        sec_label, sec_phone):
+            nonlocal y_min
             if y_state["y"] < y_min:
                 self.new_page()
                 y_state["y"] = 780
+                y_min = other_floor
 
             if show_section_hdr:
                 hdr = f'Detailed Usage Charges for {sec_label}'
@@ -558,6 +573,7 @@ class ProductLabelGroupingRenderer(BaseRenderer):
                 if y_state["y"] < y_min:
                     self.new_page()
                     y_state["y"] = 780
+                    y_min = other_floor
                 disp       = ([f"{row[0]}  {row[1]}"] + row[2:]
                               if combine else list(row))
                 charge_val = get_last_numeric(row)
@@ -571,6 +587,14 @@ class ProductLabelGroupingRenderer(BaseRenderer):
             return sum_rows(rows)
 
         for section in sections:
+            # Check if section fits on current page; if on Page 1 and doesn't fit, start on Page 2
+            sec_rows_count = sum(len(sub["rows"]) for sub in section["subsections"])
+            sec_total_h = line_h * (1.4 + len(section["subsections"]) * (1.2 + 1.0 + 1.3) + sec_rows_count + 2.0)
+            if y_state["y"] - sec_total_h < y_min and self.page_count() == 1:
+                self.new_page()
+                y_state["y"] = 750
+                y_min = other_floor
+
             for sub_idx, sub in enumerate(section["subsections"]):
                 sub_total = sum_rows(sub["rows"])
                 draw_table(sub, sub["rows"],

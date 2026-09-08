@@ -352,8 +352,8 @@ class NonVATHomeRenderer(BaseRenderer):
             return left if state["col"] == "left" else right
 
         def floor_y():
-            return self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if self.page_count() == 1 \
-                else y_min_other
+            p1_min = 220.0 if self.is_red else 150.0
+            return p1_min if self.page_count() == 1 else y_min_other
 
 
         def new_column_top():
@@ -532,29 +532,34 @@ class NonVATHomeRenderer(BaseRenderer):
             preview_rows = first_rows[:row_limit]
             remaining_rows = first_rows[row_limit:]
 
-            hdr = f'Detailed Usage Charges for {first_sec["label"]}'
-            if first_sec.get("phone"):
-                hdr += f' {first_sec["phone"]}'
-            draw_text(hdr, bold=True, size=8)
-            advance(1.4)
+            # Pre-flight check: ensure the preview block (headers + preview rows) fits on Page 1
+            preview_h = line_h * (1.4 + (1.2 if first_sub.get("label") else 0) + 1.5 + len(preview_rows))
+            can_fit_preview = (state["y"] - preview_h >= floor_y()) if self.page_count() - 1 == first_page_idx else True
 
-            if first_sub.get("label"):
-                draw_text(first_sub["label"], bold=True, size=7)
-                advance(1.2)
+            if can_fit_preview:
+                hdr = f'Detailed Usage Charges for {first_sec["label"]}'
+                if first_sec.get("phone"):
+                    hdr += f' {first_sec["phone"]}'
+                draw_text(hdr, bold=True, size=8)
+                advance(1.4)
 
-            draw_cdr_header(first_sub.get("headers", []))
-            advance(1.5)
+                if first_sub.get("label"):
+                    draw_text(first_sub["label"], bold=True, size=7)
+                    advance(1.2)
 
-            for row in preview_rows:
-                draw_row(row)
-                advance()
+                draw_cdr_header(first_sub.get("headers", []))
+                advance(1.5)
 
-            # If there are remaining rows or additional subsections/sections, move to Page 2
-            has_more = bool(remaining_rows or len(first_sec["subsections"]) > 1 or len(sections) > 1)
-            if has_more:
-                self.new_page()
-                state["col"] = "left"
-                state["y"] = y_start_other
+                for row in preview_rows:
+                    draw_row(row)
+                    advance()
+
+                # If there are remaining rows or additional subsections/sections, move to Page 2 (only if still on Page 1)
+                has_more = bool(remaining_rows or len(first_sec["subsections"]) > 1 or len(sections) > 1)
+                if has_more and self.page_count() - 1 == first_page_idx:
+                    self.new_page()
+                    state["col"] = "left"
+                    state["y"] = y_start_other
 
                 # Draw remaining rows of first subsection without repeating header
                 if remaining_rows:
@@ -639,6 +644,49 @@ class NonVATHomeRenderer(BaseRenderer):
                     draw_text(f"Total Usage Charges for {section['label']}", bold=True, size=8)
                     draw_amount(gt, bold=True, size=8, fmt="{:,.3f}")
                     advance(2.5)
+            else:
+                # Preview does not fit on Page 1; advance to Page 2 and render all sections cleanly
+                self.new_page()
+                state["col"] = "left"
+                state["y"] = y_start_other
+                for section in sections:
+                    ensure_space(line_h * 4.5)
+                    hdr = f'Detailed Usage Charges for {section["label"]}'
+                    if section.get("phone"):
+                        hdr += f' {section["phone"]}'
+                    draw_text(hdr, bold=True, size=8)
+                    advance(1.4)
+
+                    for sub in section["subsections"]:
+                        rows = sub.get("rows", [])
+                        if not rows:
+                            continue
+                        sub_label = sub.get("label")
+                        if sub_label:
+                            ensure_space(line_h * 2.7)
+                            draw_text(sub_label, bold=True)
+                            advance(1.2)
+
+                        ensure_space(line_h * 1.5)
+                        draw_cdr_header(sub.get("headers", []))
+                        advance(1.5)
+
+                        for row in rows:
+                            draw_row(row)
+                            advance()
+
+                        sub_total = sum_rows(rows)
+                        ensure_space(line_h * 1.5)
+                        draw_text(f"Total for {sub_label or 'SLT-Mobile'}", bold=True, size=7)
+                        draw_amount(sub_total, bold=True, size=7, fmt="{:,.3f}")
+                        advance(1.5)
+
+                    gt = section.get("grand_total") or sum_rows(
+                        r for s in section["subsections"] for r in s["rows"])
+                    ensure_space(line_h * 2.5)
+                    draw_text(f"Total Usage Charges for {section['label']}", bold=True, size=8)
+                    draw_amount(gt, bold=True, size=8, fmt="{:,.3f}")
+                    advance(2.5)
 
         # ---- 2. Marketing messages / suspended notice ----
         messages = data.get("marketing_messages", [])
@@ -668,7 +716,7 @@ class NonVATHomeRenderer(BaseRenderer):
                 bottom_y = line_extents[idx]["bottom"] - 5
             else:
                 bottom_y = max(
-                    CHARGES_TABLE["page1_y_min"] if idx == 0 else y_min_other,
+                    150.0 if idx == 0 else y_min_other,
                     top_y - 20,
                 )
             if top_y > bottom_y:

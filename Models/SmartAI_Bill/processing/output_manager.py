@@ -207,48 +207,6 @@ def list_batches_for_cycle(date_str, cycle_label):
     return sorted(list(batches), key=lambda x: [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', x)])
 
 
-def list_pdfs_in_batch(date_str, cycle_label, batch_name):
-    """Return list of PDF filenames in a specific batch folder across all output roots."""
-    pdfs = set()
-    for root in get_output_roots():
-        batch_path = os.path.join(root, date_str, cycle_label, batch_name)
-        if os.path.exists(batch_path) and os.path.isdir(batch_path):
-            for dirpath, _, filenames in os.walk(batch_path):
-                for f in filenames:
-                    if f.lower().endswith(".pdf"):
-                        # Get path relative to the batch folder
-                        full_path = os.path.join(dirpath, f)
-                        rel_path = os.path.relpath(full_path, batch_path)
-                        # Replace backslashes with forward slashes for URLs
-                        pdfs.add(rel_path.replace("\\", "/"))
-        
-        # Check direct files if batch_name is Batch_01
-        if batch_name == "Batch_01":
-            cycle_path = os.path.join(root, date_str, cycle_label)
-            if os.path.exists(cycle_path):
-                for f in os.listdir(cycle_path):
-                    if f.lower().endswith(".pdf"):
-                        pdfs.add(f)
-    return sorted(list(pdfs))
-
-
-def get_pdf_path(date_str, cycle_label, batch_name, filename):
-    """Return absolute path to a specific PDF file across all output roots."""
-    basename = os.path.basename(filename)
-    for root in get_output_roots():
-        # Check batch subfolder recursively
-        batch_path = os.path.join(root, date_str, cycle_label, batch_name)
-        if os.path.exists(batch_path):
-            for dirpath, _, filenames in os.walk(batch_path):
-                if basename in filenames:
-                    return os.path.join(dirpath, basename)
-        # Check direct cycle directory
-        p_direct = os.path.join(root, date_str, cycle_label, basename)
-        if os.path.exists(p_direct):
-            return p_direct
-    return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, basename)
-
-
 def normalize_account_number(acc_no: str) -> str:
     """
     Strip all whitespace, underscores, hyphens, and punctuation from an account number,
@@ -287,6 +245,148 @@ def extract_account_from_filename(filename: str) -> str:
     return normalize_account_number(parts[0])
 
 
+def extract_accounts_from_summary_pdf(pdf_path: str) -> list[str]:
+    """
+    Extract account numbers in document order from a summary statement PDF.
+    Account numbers in summary statements follow the format XXX XXX XXXX (or with X/x suffix).
+    """
+    if not pdf_path or not os.path.exists(pdf_path):
+        return []
+    import re
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(pdf_path)
+        text = "\n".join([page.extract_text() or "" for page in reader.pages])
+        raw_matches = re.findall(r'\b\d{3}\s+\d{3}\s+[\dX]{4}\b', text, flags=re.IGNORECASE)
+        ordered = []
+        for m in raw_matches:
+            norm = normalize_account_number(m)
+            if norm and norm not in ordered:
+                ordered.append(norm)
+        return ordered
+    except Exception:
+        return []
+
+
+def list_pdfs_in_batch(date_str, cycle_label, batch_name):
+    """Return list of PDF filenames in a specific batch folder across all output roots."""
+    import json
+    pdfs = set()
+    manifest_account_order = {}
+    summary_pdf_path = None
+    manifest_path_found = None
+
+    for root in get_output_roots():
+        batch_path = os.path.join(root, date_str, cycle_label, batch_name)
+        if os.path.exists(batch_path) and os.path.isdir(batch_path):
+            manifest_p = os.path.join(batch_path, "manifest.json")
+            if os.path.exists(manifest_p):
+                manifest_path_found = manifest_p
+                if not manifest_account_order:
+                    try:
+                        with open(manifest_p, "r", encoding="utf-8") as mf:
+                            mdata = json.load(mf)
+                            acc_list = mdata.get("account_nos", [])
+                            if acc_list:
+                                manifest_account_order = {
+                                    normalize_account_number(a): idx
+                                    for idx, a in enumerate(acc_list)
+                                    if normalize_account_number(a)
+                                }
+                    except Exception:
+                        pass
+
+            for dirpath, _, filenames in os.walk(batch_path):
+                for f in filenames:
+                    if f.lower().endswith(".pdf"):
+                        full_path = os.path.join(dirpath, f)
+                        rel_path = os.path.relpath(full_path, batch_path)
+                        pdfs.add(rel_path.replace("\\", "/"))
+                        if not summary_pdf_path:
+                            u_f = f.upper()
+                            if f.startswith("00_") or "SUMMARY" in u_f:
+                                summary_pdf_path = full_path
+
+        # Check direct files if batch_name is Batch_01
+        if batch_name == "Batch_01":
+            cycle_path = os.path.join(root, date_str, cycle_label)
+            if os.path.exists(cycle_path):
+                for f in os.listdir(cycle_path):
+                    if f.lower().endswith(".pdf"):
+                        pdfs.add(f)
+                        if not summary_pdf_path and (f.startswith("00_") or "SUMMARY" in f.upper()):
+                            summary_pdf_path = os.path.join(cycle_path, f)
+
+    pdf_list = list(pdfs)
+    is_summary = (
+        (cycle_label and cycle_label.lower() == "summary") or
+        bool(manifest_path_found) or
+        any(os.path.basename(p).startswith("00_") or "SUMMARY" in os.path.basename(p).upper() for p in pdf_list)
+    )
+
+    if is_summary:
+        # If manifest was missing, empty, or sorted ascending by legacy code (where doc order differs),
+        # extract accounts in document order directly from the summary PDF.
+        if summary_pdf_path and os.path.exists(summary_pdf_path):
+            needs_pdf_extract = False
+            if not manifest_account_order:
+                needs_pdf_extract = True
+            else:
+                acc_keys = list(manifest_account_order.keys())
+                if len(acc_keys) > 2 and acc_keys == sorted(acc_keys):
+                    needs_pdf_extract = True
+
+            if needs_pdf_extract:
+                pdf_accs = extract_accounts_from_summary_pdf(summary_pdf_path)
+                if pdf_accs:
+                    manifest_account_order = {a: idx for idx, a in enumerate(pdf_accs)}
+                    if manifest_path_found and os.path.exists(manifest_path_found):
+                        try:
+                            with open(manifest_path_found, "r", encoding="utf-8") as mf:
+                                cur_data = json.load(mf)
+                            cur_data["account_nos"] = pdf_accs
+                            with open(manifest_path_found, "w", encoding="utf-8") as mf:
+                                json.dump(cur_data, mf, indent=2)
+                        except Exception:
+                            pass
+
+        def summary_sort_key(p):
+            fname = os.path.basename(p)
+            u = fname.upper()
+            # 1. Summary statement always on top
+            if fname.startswith("00_") or "SUMMARY" in u:
+                return (0, 0, fname)
+
+            # 2. Matching bills according to order in that summary
+            acc = extract_account_from_filename(fname)
+            if acc and acc in manifest_account_order:
+                return (1, manifest_account_order[acc], fname)
+
+            # 3. Fallback: descending order for bills not in manifest (summary bills are naturally descending)
+            return (2, [-ord(c) for c in fname], fname)
+
+        return sorted(pdf_list, key=summary_sort_key)
+
+    return sorted(pdf_list)
+
+
+def get_pdf_path(date_str, cycle_label, batch_name, filename):
+    """Return absolute path to a specific PDF file across all output roots."""
+    basename = os.path.basename(filename)
+    for root in get_output_roots():
+        # Check batch subfolder recursively
+        batch_path = os.path.join(root, date_str, cycle_label, batch_name)
+        if os.path.exists(batch_path):
+            for dirpath, _, filenames in os.walk(batch_path):
+                if basename in filenames:
+                    return os.path.join(dirpath, basename)
+        # Check direct cycle directory
+        p_direct = os.path.join(root, date_str, cycle_label, basename)
+        if os.path.exists(p_direct):
+            return p_direct
+    return os.path.join(get_output_roots()[0], date_str, cycle_label, batch_name, basename)
+
+
 def create_summary_groups(date_base_dir, processing_results=None, log_callback=None):
     """
     Create a summary/ folder under date_base_dir that groups each Summary Statement
@@ -318,7 +418,7 @@ def create_summary_groups(date_base_dir, processing_results=None, log_callback=N
     os.makedirs(summary_root, exist_ok=True)
 
     # 1. Gather all summary metadata (from current processing_results + existing manifests)
-    # Mapping: customer_ref -> {"account_nos": set(...), "pdf_names": set(...)}
+    # Mapping: customer_ref -> {"account_nos": list(...), "pdf_names": list(...)}
     summary_map = {}
 
     # Load existing manifests from disk if present
@@ -331,11 +431,21 @@ def create_summary_groups(date_base_dir, processing_results=None, log_callback=N
                     with open(manifest_p, "r", encoding="utf-8") as mf:
                         mdata = json.load(mf)
                         c_ref = mdata.get("customer_ref", cr_name)
-                        accs = {normalize_account_number(a) for a in mdata.get("account_nos", []) if normalize_account_number(a)}
+                        accs = []
+                        for a in mdata.get("account_nos", []):
+                            na = normalize_account_number(a)
+                            if na and na not in accs:
+                                accs.append(na)
                         pdf_n = mdata.get("pdf_name", "")
+                        pdf_names = []
+                        if pdf_n:
+                            pdf_names.append(pdf_n)
+                        for pn in mdata.get("pdf_names", []):
+                            if pn and pn not in pdf_names:
+                                pdf_names.append(pn)
                         summary_map[c_ref] = {
                             "account_nos": accs,
-                            "pdf_names": {pdf_n} if pdf_n else set(),
+                            "pdf_names": pdf_names,
                         }
                 except Exception:
                     pass
@@ -349,14 +459,22 @@ def create_summary_groups(date_base_dir, processing_results=None, log_callback=N
             c_ref = re.sub(r'[^A-Za-z0-9_-]+', '_', str(meta.get("customer_ref", "") or "")).strip('_')
             if not c_ref:
                 continue
-            accs = {normalize_account_number(a) for a in meta.get("account_nos", []) if normalize_account_number(a)}
+            accs = []
+            for a in meta.get("account_nos", []):
+                na = normalize_account_number(a)
+                if na and na not in accs:
+                    accs.append(na)
             pdf_n = meta.get("pdf_name", "")
 
             if c_ref not in summary_map:
-                summary_map[c_ref] = {"account_nos": set(), "pdf_names": set()}
-            summary_map[c_ref]["account_nos"].update(accs)
-            if pdf_n:
-                summary_map[c_ref]["pdf_names"].add(pdf_n)
+                summary_map[c_ref] = {"account_nos": [], "pdf_names": []}
+            
+            # Incoming results preserve the exact summary order
+            for a in accs:
+                if a not in summary_map[c_ref]["account_nos"]:
+                    summary_map[c_ref]["account_nos"].append(a)
+            if pdf_n and pdf_n not in summary_map[c_ref]["pdf_names"]:
+                summary_map[c_ref]["pdf_names"].append(pdf_n)
 
     if not summary_map:
         return
@@ -370,8 +488,8 @@ def create_summary_groups(date_base_dir, processing_results=None, log_callback=N
             with open(manifest_p, "w", encoding="utf-8") as mf:
                 json.dump({
                     "customer_ref": c_ref,
-                    "account_nos": sorted(list(info["account_nos"])),
-                    "pdf_names": sorted(list(info["pdf_names"])),
+                    "account_nos": info["account_nos"],  # Preserves order in summary statement
+                    "pdf_names": info["pdf_names"],
                 }, mf, indent=2)
         except Exception:
             pass

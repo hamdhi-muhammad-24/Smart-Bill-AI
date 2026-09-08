@@ -15,6 +15,7 @@ from processing.output_manager import (
     normalize_account_number,
     extract_account_from_filename,
     create_summary_groups,
+    list_pdfs_in_batch,
 )
 from processing.batch_processor import ProcessingResult
 
@@ -240,4 +241,54 @@ class TestSummaryGroupingEndToEnd:
             assert os.path.exists(os.path.join(cr2_dir, "00_CR000127527_SUMMARY.pdf"))
             assert os.path.exists(os.path.join(cr2_dir, "0009999999_VAT_ENTERPRISE.pdf"))
             assert not os.path.exists(os.path.join(cr2_dir, "0001372850_VAT_ENTERPRISE.pdf"))
+
+    def test_summary_statement_on_top_and_bills_ordered_by_summary(self):
+        with tempfile.TemporaryDirectory() as date_dir:
+            # Mock cycle and summary directories
+            summary_batch = os.path.join(date_dir, "Summary_Statement", "Batch_1")
+            cycle1_batch = os.path.join(date_dir, "Cycle_1", "Batch_1")
+            os.makedirs(summary_batch)
+            os.makedirs(cycle1_batch)
+
+            sum_pdf = os.path.join(summary_batch, "CR000135499_SUMMARY.pdf")
+            with open(sum_pdf, "wb") as f:
+                f.write(b"%PDF-1.4 mock summary")
+
+            # Bills with account numbers that in standard ascending order would sort:
+            # 0000059747 < 0008150284 < 0053416491 < 00_...
+            # But the summary statement order has 0053416491 first, then 0008150284, then 0000059747!
+            bill1 = os.path.join(cycle1_batch, "0000059747_NONVAT_HOME.pdf")
+            bill2 = os.path.join(cycle1_batch, "0008150284_NONVAT_HOME.pdf")
+            bill3 = os.path.join(cycle1_batch, "0053416491_VAT_ENTERPRISE.pdf")
+
+            for b in [bill1, bill2, bill3]:
+                with open(b, "wb") as f:
+                    f.write(b"%PDF-1.4 mock bill")
+
+            res = ProcessingResult("sum.gmf", "summary_statement", sum_pdf, True)
+            # Prescribed order in summary statement
+            res.summary_meta = {
+                "customer_ref": "CR000135499",
+                "account_nos": ["005 341 6491", "000 815 0284", "000 005 9747"],
+                "pdf_name": "CR000135499_SUMMARY.pdf",
+            }
+
+            create_summary_groups(date_dir, [res])
+
+            cr_dir = os.path.join(date_dir, "summary", "CR000135499")
+            manifest_path = os.path.join(cr_dir, "manifest.json")
+            with open(manifest_path, "r", encoding="utf-8") as mf:
+                mdata = json.load(mf)
+                # Verify manifest preserved encounter order instead of alphabetical sort
+                assert mdata["account_nos"] == ["0053416491", "0008150284", "0000059747"]
+
+            # Query list_pdfs_in_batch
+            # The order must be: summary on top, then bills according to order in that summary
+            ordered_files = list_pdfs_in_batch(date_dir, "summary", "CR000135499")
+            assert ordered_files == [
+                "00_CR000135499_SUMMARY.pdf",
+                "0053416491_VAT_ENTERPRISE.pdf",
+                "0008150284_NONVAT_HOME.pdf",
+                "0000059747_NONVAT_HOME.pdf",
+            ]
 
