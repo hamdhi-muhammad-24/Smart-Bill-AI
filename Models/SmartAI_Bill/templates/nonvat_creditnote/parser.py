@@ -3,6 +3,7 @@ import re
 import os
 import datetime
 from typing import Any
+from core.bill_common import strip_before_underscore
 
 
 def parse_nonvat_creditnote(file_path):
@@ -307,13 +308,7 @@ def parse_nonvat_creditnote(file_path):
             if len(parts) >= 16:
 
 
-                title = parts[2].strip()
-
-                title = title.replace(
-                    "FTTH_",
-                    ""
-                )
-
+                title = strip_before_underscore(parts[2].strip())
 
                 amount = parts[3].strip()
 

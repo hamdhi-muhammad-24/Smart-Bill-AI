@@ -24,6 +24,21 @@ if "Calibri" not in pdfmetrics.getRegisteredFontNames():
     pdfmetrics.registerFont(TTFont("Calibri-Bold", os.path.join(_FONTS_DIR, "calibrib.ttf")))
 
 
+def _sort_taxes(taxes):
+    def _key(t):
+        name = (t.get("name") or "").upper()
+        if "VAT" in name:
+            return 0
+        if "SSCL" in name:
+            return 1
+        if "TELECOMMUNICATION" in name or "TELECOM" in name:
+            return 2
+        if "CESS" in name:
+            return 3
+        return 99
+    return sorted(taxes, key=_key)
+
+
 class InvoiceOfSummaryRenderer(BaseRenderer):
     FONT_NAME = "Calibri"
 
@@ -272,15 +287,14 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             _line("Subtotal Adjustment charges",
                   data['adjustments_subtotal'], bold=True)
 
-        # BPR11/24: gate taxes (Recovery in lieu of SSCL removed)
-        taxes = [t for t in data.get("taxes", [])
-                 if t.get("name") != "Recovery in lieu of SSCL" and "SSCL" not in t.get("name", "").upper()]
-        has_nonzero = any(t['amount'] for t in taxes)
+        # Taxes & Levies: VAT-18%, Recovery in lieu of SSCL, Telecommunication Levy-15%, CESS
+        taxes = _sort_taxes(data.get("taxes", []))
+        has_nonzero = any(t.get('amount') for t in taxes)
         if taxes and is_tax_section_printable(
                 data.get('tax_status'), has_nonzero):
             _line("Taxes & Levies", bold=True)
             for t in taxes:
-                if t['amount']:
+                if t.get('amount'):
                     _line(t["name"], t['amount'], size=fc)
 
     def _draw_total_charges_dynamic(self, data):
@@ -324,7 +338,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         fs    = size if size is not None else CHARGES_TABLE["font_size"]
         x_pos = x if x is not None else CHARGES_TABLE["desc_x"]
         self.text(x_pos, self._y, text, size=fs, bold=bold)
-        if amount is not None:
+        if amount:
             if isinstance(amount, (int, float)) and amount < 0:
                 self.text(CHARGES_TABLE["amount_x"], self._y,
                           f"- {abs(amount):,.2f}",
@@ -419,17 +433,16 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         """
         grx = CHARGES_TABLE["group_ref_x"]
 
-        # BPR11/24: gate taxes (Recovery in lieu of SSCL removed)
-        taxes = [t for t in data.get("taxes", [])
-                 if t.get("name") != "Recovery in lieu of SSCL" and "SSCL" not in t.get("name", "").upper()]
-        has_nonzero = any(t['amount'] for t in taxes)
+        # Taxes & Levies: VAT-18%, Recovery in lieu of SSCL, Telecommunication Levy-15%, CESS
+        taxes = _sort_taxes(data.get("taxes", []))
+        has_nonzero = any(t.get('amount') for t in taxes)
         f_th = FONTS.get("taxes_header", {"size": 9.5, "bold": True})
         f_tl = FONTS.get("taxes_line", {"size": 9, "bold": False})
         if taxes and is_tax_section_printable(
                 data.get('tax_status'), has_nonzero):
             self._write_line("Taxes & Levies", bold=f_th["bold"], size=f_th["size"], x=grx)
             for t in taxes:
-                if t["amount"]:
+                if t.get("amount"):
                     self._write_line(t["name"],
                                      amount=t["amount"],
                                      bold=f_tl["bold"], size=f_tl["size"], x=grx)

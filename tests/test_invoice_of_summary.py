@@ -187,8 +187,8 @@ def test_invoice_of_summary_no_tax_invoice_when_non_vat():
             os.remove(tmp_path)
 
 
-def test_invoice_of_summary_discounts_and_no_sscl():
-    """Verify discounts appear in both summary and detail, and SSCL is removed."""
+def test_invoice_of_summary_discounts_and_taxes_including_sscl():
+    """Verify discounts appear in both summary and detail, and taxes include Recovery in lieu of SSCL in order."""
     gmf_path = os.path.join(
         root_dir, "local_gmf_uploads", "Test_GMFs",
         "521515_1-18-02-1-LKR-101-1-BILL-NONRED_1.1"
@@ -207,10 +207,9 @@ def test_invoice_of_summary_discounts_and_no_sscl():
     assert ceylinco_disc is not None
     assert ceylinco_disc["amount"] == -24093.22
 
-    # 2. Verify Recovery in lieu of SSCL removed from taxes
+    # 2. Verify taxes include VAT-18%, Recovery in lieu of SSCL, Telecommunication Levy-15%, CESS in order
     tax_names = [t["name"] for t in data.get("taxes", [])]
-    assert "Recovery in lieu of SSCL" not in tax_names
-    assert not any("SSCL" in name.upper() for name in tax_names)
+    assert tax_names == ["VAT-18%", "Recovery in lieu of SSCL", "Telecommunication Levy-15%", "CESS"]
 
     # 3. Render and verify PDF text
     renderer = InvoiceOfSummaryRenderer()
@@ -230,9 +229,17 @@ def test_invoice_of_summary_discounts_and_no_sscl():
         assert page1_text.count("Discount Ceylinco") >= 2
         assert "- 24,093.22" in page1_text
 
-        # SSCL must NOT appear anywhere in the rendered invoice
-        assert "Recovery in lieu of SSCL" not in page1_text
-        assert "SSCL" not in page1_text
+        # All 4 taxes must appear under Taxes & Levies in order
+        assert "VAT-18%" in page1_text
+        assert "Recovery in lieu of SSCL" in page1_text
+        assert "Telecommunication Levy-15%" in page1_text
+        assert "CESS" in page1_text
+
+        pos_vat = page1_text.find("VAT-18%")
+        pos_sscl = page1_text.find("Recovery in lieu of SSCL")
+        pos_telecom = page1_text.find("Telecommunication Levy-15%")
+        pos_cess = page1_text.find("CESS")
+        assert pos_vat < pos_sscl < pos_telecom < pos_cess
 
         # Total charges remains intact
         assert "299,231.23" in page1_text

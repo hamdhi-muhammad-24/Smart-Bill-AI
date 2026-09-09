@@ -535,3 +535,128 @@ def test_batch_processor_single_page_nonvat_enterprise_uses_print_template():
         # NonVATPrintRenderer includes the payment slip section
         assert "0007398361" in p1_text
 
+
+def test_nonvat_bills_do_not_display_slt_tin():
+    """Verify that SLT TIN is NOT displayed on nonvat bills for both Home and Enterprise."""
+    import fitz
+    from templates.nonvat_home.renderer import NonVATHomeRenderer
+    from templates.nonvat_enterprise.renderer import NonVATEnterpriseRenderer
+
+    # 1. Test NonVATPrintRenderer for both HOME and ENTERPRISE
+    for badge in ["HOME", "ENTERPRISE"]:
+        data = _sample_nonvat_data(is_red=False)
+        data["badge"] = badge
+        data["template_id"] = f"nonvat_{badge.lower()}"
+        data["slt_vat_reg"] = "294001727 7000"
+        data["customer_vat_reg"] = "987654321"
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+            pdf_path = tmp_pdf.name
+
+        try:
+            renderer = NonVATPrintRenderer()
+            renderer.render(data)
+            renderer.save(pdf_path)
+
+            doc = fitz.open(pdf_path)
+            full_text = "\n".join(page.get_text() for page in doc)
+            doc.close()
+
+            # Must NOT display SLT TIN
+            assert "SLT TIN" not in full_text
+            assert "294001727" not in full_text
+            # Customer TIN can still be displayed if present
+            assert "Customer TIN: 987654321" in full_text
+        finally:
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+
+    # 2. Test NonVATHomeRenderer (email bill)
+    home_data = _sample_nonvat_data(is_red=False)
+    home_data["badge"] = "HOME"
+    home_data["slt_vat_reg"] = "294001727 7000"
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+    try:
+        r_home = NonVATHomeRenderer()
+        r_home.render(home_data)
+        r_home.save(pdf_path)
+        doc = fitz.open(pdf_path)
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        assert "SLT TIN" not in full_text
+        assert "294001727" not in full_text
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+    # 3. Test NonVATEnterpriseRenderer (email bill)
+    ent_data = _sample_nonvat_data(is_red=False)
+    ent_data["badge"] = "ENTERPRISE"
+    ent_data["slt_vat_reg"] = "294001727 7000"
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+    try:
+        r_ent = NonVATEnterpriseRenderer()
+        r_ent.render(ent_data)
+        r_ent.save(pdf_path)
+        doc = fitz.open(pdf_path)
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        assert "SLT TIN" not in full_text
+        assert "294001727" not in full_text
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+
+def test_nonvat_print_renderer_does_not_display_zero_charges():
+    """Verify that 0.00 charge amounts are NOT displayed in nonvat print bills."""
+    import fitz
+
+    data = _sample_nonvat_data(is_red=False)
+    data["badge"] = "HOME"
+    data["template_id"] = "nonvat_home"
+    data["product_labels"] = [
+        {
+            "label": "0312276282",
+            "charges": [
+                {"description": "Megaline Res SLT Phone [Rental]", "amount": 415.00},
+                {"description": "Triple VAS Bundle Charge Free [Rental]", "amount": 0.00},
+                {"description": "SLT PeoTV Service PEO Bronze [Rental]", "amount": 831.33},
+                {"description": "Video on Demand Rental [Rental]", "amount": 0.00},
+            ],
+        }
+    ]
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp_pdf:
+        pdf_path = tmp_pdf.name
+
+    try:
+        renderer = NonVATPrintRenderer()
+        renderer.render(data)
+        renderer.save(pdf_path)
+
+        doc = fitz.open(pdf_path)
+        words = [w[4] for w in doc[0].get_text("words")]
+        full_text = doc[0].get_text()
+        doc.close()
+
+        # Descriptions must be present
+        assert "Megaline Res SLT Phone [Rental]" in full_text
+        assert "Triple VAS Bundle Charge Free [Rental]" in full_text
+        assert "SLT PeoTV Service PEO Bronze [Rental]" in full_text
+        assert "Video on Demand Rental [Rental]" in full_text
+
+        # Non-zero amounts must be present
+        assert "415.00" in words
+        assert "831.33" in words
+
+        # Zero amounts (0.00) must NOT be present
+        assert "0.00" not in words
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+
+
+

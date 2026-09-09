@@ -1,6 +1,7 @@
 import re
 import os
 import datetime
+from core.bill_common import strip_before_underscore
 
 
 def parse_vat_creditnote(file_path: str) -> dict:
@@ -211,8 +212,7 @@ def parse_vat_creditnote(file_path: str) -> dict:
 
             if len(parts) >= 16:
 
-                title = parts[2].strip()
-                title = title.replace("FTTH_", "")
+                title = strip_before_underscore(parts[2].strip())
 
                 amount = parts[3].strip()
 

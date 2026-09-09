@@ -16,10 +16,10 @@ COORDS = {
     "invoice_number":   (140.0, 670.0),
     "billing_period":   (355.0, 670.0),
 
-    # Badge box (HOME / ENTERPRISE) and TIN numbers above it
+    # Badge box (HOME / ENTERPRISE) and Customer TIN above it (SLT TIN not displayed on nonvat bills)
     "badge_text":       (410.0, 723.0),   # centre of the blue badge box
-    "customer_tin":     (355.0, 752.0),   # Customer TIN: above the badge
-    "slt_tin":          (355.0, 742.0),   # SLT TIN: between customer TIN and badge
+    "customer_tin":     (355.0, 742.0),   # Customer TIN: directly above the badge
+    "slt_tin":          (355.0, 742.0),   # SLT TIN: deprecated (not displayed on nonvat bills)
 
     # Summary Section (5 horizontal boxes)
     "balance_bf":             (80.0, 593.0),

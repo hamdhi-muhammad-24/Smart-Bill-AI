@@ -67,14 +67,11 @@ class NonVATPrintRenderer(BaseRenderer):
         if badge:
             self.text(*COORDS["badge_text"], badge, size=fb["size"], bold=fb["bold"], align="center")
 
-        # TIN numbers above the badge box
+        # Customer TIN above the badge box (SLT TIN is not displayed on nonvat bills)
         ft = FONTS["tin"]
         customer_tin = data.get("customer_vat_reg", "")
-        slt_tin      = data.get("slt_vat_reg", "")
         if customer_tin:
             self.text(*COORDS["customer_tin"], f"Customer TIN: {customer_tin}", size=ft["size"], align="left")
-        if slt_tin:
-            self.text(*COORDS["slt_tin"], f"SLT TIN: {slt_tin}", size=ft["size"], align="left")
 
     def _draw_summary_boxes(self, data):
         """Draw summary boxes on page 1"""
@@ -127,7 +124,7 @@ class NonVATPrintRenderer(BaseRenderer):
                     y     = CHARGES_TABLE["otherpage_y_start"]
                     y_min = CHARGES_TABLE["otherpage_y_min"]
                 self.text(desc_x, y, charge.get("description", ""), size=fc["size"])
-                if charge.get("amount") is not None:
+                if charge.get("amount"):
                     self.number(amt_x, y, charge["amount"], size=fc["size"], align="right")
                 y -= line_h
         return y
@@ -156,7 +153,8 @@ class NonVATPrintRenderer(BaseRenderer):
                 y = CHARGES_TABLE["otherpage_y_start"]
                 y_min = CHARGES_TABLE["otherpage_y_min"]
             self.text(desc_x, y, adj.get("description", ""), size=f["size"])
-            self.number(amt_x, y, adj.get("amount", 0), size=f["size"], align="right")
+            if adj.get("amount"):
+                self.number(amt_x, y, adj.get("amount", 0), size=f["size"], align="right")
             y -= line_h
         return y
 
@@ -185,7 +183,8 @@ class NonVATPrintRenderer(BaseRenderer):
                 y = CHARGES_TABLE["otherpage_y_start"]
                 y_min = CHARGES_TABLE["otherpage_y_min"]
             self.text(desc_x, y, d.get("description", ""), size=f["size"])
-            self.number(amt_x, y, d.get("amount", 0), size=f["size"], align="right")
+            if d.get("amount"):
+                self.number(amt_x, y, d.get("amount", 0), size=f["size"], align="right")
             y -= line_h
         return y
 

@@ -543,8 +543,6 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                                        if p.strip()]
                 if len(all_parts) >= 4:
                     tax_name = all_parts[0].strip()
-                    if tax_name == "Recovery in lieu of SSCL" or "SSCL" in tax_name.upper():
-                        continue
                     data['taxes'].append({
                         'name':   tax_name,
                         'amount': to_float(all_parts[3]),
@@ -617,6 +615,20 @@ def parse_invoice_of_summary(file_path: str) -> dict:
     # Fallback to SLTDISCDETAIL discounts if no top-level discount tags present
     if not data['top_level_discounts'] and data['discounts']:
         data['top_level_discounts'] = list(data['discounts'])
+
+    def _tax_sort_key(t):
+        name = (t.get("name") or "").upper()
+        if "VAT" in name:
+            return 0
+        if "SSCL" in name:
+            return 1
+        if "TELECOMMUNICATION" in name or "TELECOM" in name:
+            return 2
+        if "CESS" in name:
+            return 3
+        return 99
+
+    data['taxes'] = sorted(data.get('taxes', []), key=_tax_sort_key)
 
     data['usage_sections'] = list(usage_sections.values())
     return data
