@@ -411,7 +411,7 @@ class SubscriptionRefGroupingRenderer(BaseRenderer):
         """BPR26: suppress if zero. Draws right after Total Charges finishes,
         following the running flowing-y cursor instead of a fixed page
         position."""
-        if not data.get("total_payments") and not data.get("payments"):
+        if not data.get("total_payments"):
             return
         f      = FONTS["payments"]
         amt_x  = COORDS["payments_amount_x"]

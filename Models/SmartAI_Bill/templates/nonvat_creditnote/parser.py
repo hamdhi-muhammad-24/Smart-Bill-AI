@@ -10,7 +10,7 @@ def parse_nonvat_creditnote(file_path):
 
     """
     Parses Non VAT Credit Note raw file.
-    BILLSTYLE = 6
+    BILLTYPE = 5
     """
 
     if not os.path.exists(file_path):
@@ -147,7 +147,13 @@ def parse_nonvat_creditnote(file_path):
     # Address
     # --------------------------------------------------
 
-    data["address_line1"] = extract_field(
+    acc_addr_not_req = extract_field(
+        r"ACC_ADDRESS_NAME_N_REQIURED\s+([^|]+)",
+        content
+    ).strip().upper() == 'Y'
+    data["address_name_not_required"] = acc_addr_not_req
+
+    data["address_line1"] = "" if acc_addr_not_req else extract_field(
         r"\bADDRESSNAME\s+([^|]+)",
         content
     )

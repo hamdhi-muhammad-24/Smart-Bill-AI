@@ -659,7 +659,7 @@ def _draw_total_charges_flow(flow, data):
 
 def _draw_payments_flow(flow, data):
     payments = data.get("payments", [])
-    if not (data.get("total_payments") or payments):
+    if not data.get("total_payments"):
         return
     f_ph = FONTS.get("payments_header", {"size": 7.5, "bold": True})
     f_pl = FONTS.get("payments_line", {"size": 7, "bold": False})

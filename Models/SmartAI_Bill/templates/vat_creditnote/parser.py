@@ -6,7 +6,7 @@ from core.bill_common import strip_before_underscore
 
 def parse_vat_creditnote(file_path: str) -> dict:
     """
-    Parser for VAT Credit Note BILLSTYLE=6.
+    Parser for VAT Credit Note BILLTYPE=5.
     Extracts header, customer details, summary,
     adjustments and taxes.
     """
@@ -117,7 +117,16 @@ def parse_vat_creditnote(file_path: str) -> dict:
     }
 
 
+    acc_addr_not_req = extract_field(
+        r"ACC_ADDRESS_NAME_N_REQIURED\s+([^|]+)",
+        content
+    ).strip().upper() == 'Y'
+    data["address_name_not_required"] = acc_addr_not_req
+
     for field, key in address_mapping.items():
+        if field == "address_line1" and acc_addr_not_req:
+            data[field] = ""
+            continue
         data[field] = extract_field(
             rf"\b{key}\s+([^|]+)",
             content

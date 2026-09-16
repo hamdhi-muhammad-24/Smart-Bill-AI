@@ -6,7 +6,8 @@ from core.bill_common import (
     to_float, strip_before_underscore, apply_label_override,
     reorder_addresses, TopLevelDiscountCollector, parse_cancel_payment,
     MARKETING_MESSAGE_TAGS, ADDRESS_PRINT_ORDER,
-    is_vat_reg_printable,
+    is_vat_reg_printable, PhoneNumberFromNoSubRefBlock,
+    decode_charge_flag,
 )
 
 _ITEM_TAG_RE = re.compile(
@@ -51,6 +52,7 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
         # currency code, e.g. "LKR") - confirmed distinct tags/values in the
         # real GMF, must not be confused.
         "currency_code":         "",
+        "country":               "",
         "payments":              [],
         "cancelled_payments":    [],
         "total_payments":        0,
@@ -68,11 +70,13 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
 
     raw_address   = {}
     top_discounts = TopLevelDiscountCollector()
+    phone_finder  = PhoneNumberFromNoSubRefBlock()
 
     with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
         current_sub_ref          = None
         current_product          = None
         in_no_sub_ref            = False
+        in_promo_group           = False
         usage_sections           = {}
         current_item_id          = None
         current_subsection       = None
@@ -100,10 +104,18 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                 in_no_sub_ref   = True
                 current_sub_ref = None
                 current_product = None
+                phone_finder.enter_block()
                 continue
             if line.startswith('BENDSLTNOSUBSCRIPTIONREF'):
                 in_no_sub_ref   = False
                 current_product = None
+                phone_finder.exit_block()
+                continue
+            if line.startswith('BSTARTGROUPPROMO'):
+                in_promo_group  = True
+                continue
+            if line.startswith('BENDGROUPPROMO'):
+                in_promo_group  = False
                 continue
 
             if '|' not in line:
@@ -183,6 +195,52 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                     last_closed_subsection = None
                 continue
 
+            # promo group
+            if in_promo_group:
+                if key == 'SLTPRODGROUPLABEL':
+                    all_parts = [value] + [p.strip() for p in rest.split('|') if p.strip()]
+                    name = (strip_before_underscore(all_parts[1])
+                            if len(all_parts) > 1 else value)
+                    name = apply_label_override(name)
+                    current_product = {"label": name, "charges": []}
+                    if current_sub_ref is not None:
+                        current_sub_ref['products'].append(current_product)
+                    else:
+                        implicit = {
+                            "ref":                "",
+                            "detail_name":        "",
+                            "products":           [current_product],
+                            "recurring_subtotal": 0,
+                            "oneoff_subtotal":    0,
+                        }
+                        data['subscription_refs'].append(implicit)
+                        current_sub_ref = implicit
+                    phone_finder.candidate(name)
+                    if len(all_parts) >= 4 and all_parts[2].upper() == 'RENTAL':
+                        rental_amt = to_float(all_parts[3])
+                        if rental_amt:
+                            current_product['charges'].append({
+                                'description': f"{name} [Rental]",
+                                'amount': rental_amt,
+                                'kind': 'charge',
+                                'flag': 'P'
+                            })
+                            phone_finder.confirm_charge()
+                    if len(all_parts) >= 6 and all_parts[4].upper() in ('ONEOFF', 'INITIATION'):
+                        init_amt = to_float(all_parts[5])
+                        if init_amt:
+                            current_product['charges'].append({
+                                'description': f"{name} [Initiation]",
+                                'amount': init_amt,
+                                'kind': 'charge',
+                                'flag': 'I'
+                            })
+                            phone_finder.confirm_charge()
+                    continue
+                elif key == 'SLTPROMOSUBLABEL':
+                    phone_finder.candidate(value)
+                    continue
+
             # BPR23
             if top_discounts.handle(key, value):
                 continue
@@ -233,6 +291,9 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                     raw_address[key] = value
             elif key == 'ZIPCODE':
                 data['zip_code'] = value
+            elif key == 'COUNTRY':
+                data['country'] = value
+                raw_address['COUNTRY'] = value
 
             elif key == 'BALFWD':
                 data['balance_bf'] = to_float(value)
@@ -291,10 +352,8 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                     data['subscription_refs'].append(implicit)
                     current_sub_ref = implicit
 
-                # BPR14 telephone: first 10-digit label
-                if (not data['telephone_number'] and
-                        value.isdigit() and len(value) == 10):
-                    data['telephone_number'] = value
+                # BPR14 telephone: candidate from no sub ref block
+                phone_finder.candidate(value)
 
             elif key == 'SLTPRODLABELDET':
                 all_parts = [value] + [p.strip() for p in rest.split('|')
@@ -312,33 +371,19 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                               if len(all_parts) > 9 else '')
                     unit   = (all_parts[10].strip()
                               if len(all_parts) > 10 else '')
-                    if flag == 'P':
-                        desc += " [Rental]"
-                        if start and end and (
-                            start != data['billing_period_start'] or
-                            end   != data['billing_period_end']
-                        ):
-                            desc += f" ({start}-{end})"
-                    elif flag == 'O':
-                        desc += " [One Time]"
-                        if count:
-                            desc += f" [{count}]"
-                        if start:
-                            desc += f" ({start})"
-                    elif flag == 'I':
-                        desc += " [Initiation]"
-                        cu = f"{count} {unit}".strip() if unit else count
-                        if cu:
-                            desc += f" [{cu}]"
-                        if start:
-                            desc += f" ({start}-{end})"
-                    amt = to_float(all_parts[0])
+                    desc  += decode_charge_flag(flag, start=start, end=end, count=count, unit=unit,
+                                                billing_start=data['billing_period_start'],
+                                                billing_end=data['billing_period_end'])
+                    is_rollup = str(all_parts[0]).strip().upper() == 'ROLLUP'
+                    amt = None if is_rollup else to_float(all_parts[0])
                     current_product['charges'].append({
                         'description': desc,
                         'amount': amt,
                         'kind': 'charge',
                         'flag': flag,
                     })
+                    if amt:
+                        phone_finder.confirm_charge()
 
             elif key == 'SLTPRODLABELUSAGEDET':
                 all_parts = [value] + [p.strip() for p in rest.split('|')
@@ -353,6 +398,8 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                         'amount': amt,
                         'kind': 'usage',
                     })
+                    if amt:
+                        phone_finder.confirm_charge()
 
             elif key == 'SLTPRODLABELDISCDET':
                 all_parts = [value] + [p.strip() for p in rest.split('|')
@@ -366,6 +413,8 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                             'amount': -amt,
                             'kind': 'discount',
                         })
+                        if amt:
+                            phone_finder.confirm_charge()
 
             elif key == 'SLTSUBSLVL_RECURR_SUBTOTAL':
                 if current_sub_ref:
@@ -430,7 +479,9 @@ def parse_subscription_ref_grouping(file_path: str) -> dict:
                 data['customer_vat_reg'] = value
 
     # post-parse
-    data['address_lines']       = reorder_addresses(raw_address)
+    data['address_lines']       = reorder_addresses(raw_address, currency_code=data.get('currency_code'), country=data.get('country'))
+    if phone_finder.result:
+        data['telephone_number'] = phone_finder.result
     data['show_vat_lines']      = is_vat_reg_printable(data['customer_vat_reg'])
     data['top_level_discounts'] = top_discounts.discounts
 

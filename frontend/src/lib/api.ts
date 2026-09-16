@@ -428,6 +428,36 @@ export async function fetchPdfBlobUrl(dateStr: string, cycle: string, batch: str
   return URL.createObjectURL(blob)
 }
 
+export async function downloadDateOutputZip(dateStr: string): Promise<void> {
+  const token = getToken()
+  const response = await fetch(`${BASE_URL}/billing/output/${encodeURIComponent(dateStr)}/download`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    }
+  })
+
+  if (!response.ok) {
+    let errorDetail = 'Failed to download ZIP archive'
+    try {
+      const body = await response.json()
+      if (body.detail) errorDetail = body.detail
+    } catch {
+      // ignore JSON parse error
+    }
+    throw new Error(errorDetail)
+  }
+
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${dateStr}.zip`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 1500)
+}
+
 export function getTemplates(): Promise<{ templates: any[] }> {
   return request('/billing/templates')
 }

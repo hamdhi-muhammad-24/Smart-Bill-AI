@@ -1,5 +1,5 @@
 from core.gmf_reader import read_gmf_header, parse_filename
-from core.customer_type_mapper import get_badge, is_vat_registered
+from core.customer_type_mapper import get_badge, is_svat_registered, is_vat_registered
 
 
 # Supported template IDs
@@ -109,9 +109,19 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
         result.is_supported = True
         return result
 
+    if header.billtype is not None and header.billtype not in (1, 6):
+        result.reasons.append(f"Unsupported BILLTYPE: {header.billtype}")
+        result.warnings.append("Manual review needed")
+        return result
+
+    if is_svat_registered(header.raw_tags):
+        result.reasons.append("CUST_SVAT_NUMBER is present")
+        result.warnings.append("SVAT template is not implemented; manual review needed")
+        return result
+
     if header.acc_currency_code and header.acc_currency_code.strip().upper() != "RS":
         # Allow foreign currency only for USD Open Item (BILLSTYLE 21)
-        if header.billstyle != 21:
+        if header.billstyle not in (21, 23):
             result.template_id = UNSUPPORTED_FOREIGN_CURRENCY
             result.reasons.append(
                 f"ACCCURRENCYCODE={header.acc_currency_code} → Foreign currency"
@@ -125,7 +135,7 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
         result.is_supported = True
         return result
 
-    if header.doctype != "BILL":
+    if header.doctype not in ("BILL", "BCR"):
         result.reasons.append(f"Unrecognized DOCTYPE: {header.doctype}")
         result.warnings.append("Manual review needed")
         return result
@@ -144,27 +154,26 @@ def identify_template(gmf_file_path: str) -> IdentificationResult:
         result.reasons.append("BILLSTYLE=20 → Subscription Ref Grouping")
         result.is_supported = True
 
-    elif style == 21:
+    elif style in (21, 23):
         result.template_id = TEMPLATE_USD_OPEN_ITEM
-        result.reasons.append("BILLSTYLE=21 → USD Open Item")
+        result.reasons.append(f"BILLSTYLE={style} → USD Open Item")
         result.is_supported = True
 
-    elif style == 1:
+    elif style in (1, 22):
         # Check explicitly if the customer has a VAT registration
+        badge = get_badge(header.customer_type or "")
         if is_vat:
-            badge = get_badge(header.customer_type or "")
-            if badge == "HOME":
+            if badge == "HOME" or style == 22:
                 result.template_id = TEMPLATE_VAT_HOME
-                result.reasons.append("BILLSTYLE=1, VAT Customer, Home → VAT Home")
+                result.reasons.append(f"BILLSTYLE={style}, VAT Customer, Home → VAT Home")
             else:
                 result.template_id = TEMPLATE_VAT_ENTERPRISE
-                result.reasons.append("BILLSTYLE=1, VAT Customer → VAT Enterprise")
+                result.reasons.append(f"BILLSTYLE={style}, VAT Customer → VAT Enterprise")
         else:
-            badge = get_badge(header.customer_type or "")
-            if badge == "HOME":
+            if badge == "HOME" or style == 22:
                 result.template_id = TEMPLATE_NONVAT_HOME
                 result.reasons.append(
-                    f"BILLSTYLE=1, non-VAT, {header.customer_type} → NonVAT Home"
+                    f"BILLSTYLE={style}, non-VAT, {header.customer_type} → NonVAT Home"
                 )
             else:
                 result.template_id = TEMPLATE_NONVAT_ENTERPRISE

@@ -420,7 +420,7 @@ def _worker_process(worker_id):
     from templates.registry import get_renderer, get_parser
     from core.gmf_splitter import split_gmf_documents, count_documents
     from processing.batch_processor import process_single_file
-    from core.gmf_reader import parse_filename, is_red_notice, categorize_bill_handling_code, get_category_folder
+    from core.gmf_reader import parse_filename, is_red_notice, categorize_bill_handling_code, get_category_folder, read_gmf_header
     from config import BATCH_FOLDER_SIZE
     
     logger.info(f"Worker {worker_id} started")
@@ -610,6 +610,17 @@ def _worker_process(worker_id):
             file_info = parse_filename(filename)
             bill_handling_code = file_info.get("bill_handling", "")
             category_name = categorize_bill_handling_code(bill_handling_code)
+
+            # BPR29: First bill of new billing account routes to Print
+            try:
+                gmf_hdr = read_gmf_header(file_path)
+                if gmf_hdr and gmf_hdr.billseq in (1, "1") and gmf_hdr.customer_type in (
+                    "Individual-Residential", "Individual-Business", "Individual-Micro Biz"
+                ):
+                    category_name = "print"
+            except Exception:
+                pass
+
             category_folder_name = get_category_folder(category_name)
             is_red = is_red_notice(filename)
             red_folder_name = "RED" if is_red else "Non-Red"

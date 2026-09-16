@@ -271,10 +271,10 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             self._y -= lh
 
         # BPR: suppress rental/usage subtotal lines if zero
-        if data['rental_subtotal']:
+        if data.get('rental_subtotal'):
             _line("Subtotal Rental and Other Charges", data['rental_subtotal'])
 
-        if data['usage_subtotal']:
+        if data.get('usage_subtotal'):
             _line("Subtotal Usage charges", data['usage_subtotal'])
 
         discounts = data.get('top_level_discounts') or data.get('discounts') or []
@@ -352,8 +352,6 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
 
     def _draw_charges_in_detail_flowing(self, data):
         """Charges in Detail — starts dynamically after Total Charges, may overflow."""
-        if not data["charge_groups"]:
-            return
         self._y        -= 14
         self._on_page1 = True
 
@@ -369,6 +367,15 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         c.setStrokeColor(black)
         c.line(x, self._y - 3, amt_x, self._y - 3)
         self._y -= CHARGES_TABLE["line_h"] + 6
+
+        if not data["charge_groups"]:
+            # BPR08: When charges are empty, print heading & zero Total Charge
+            f = FONTS["total"]
+            self._write_line("Total Charge for the Period",
+                             amount=0.0,
+                             bold=True, size=f["size"], x=x)
+            self._y -= CHARGES_TABLE["line_h"] * 0.5
+            return
 
         for group in data["charge_groups"]:
             if group["ref"]:
@@ -468,7 +475,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
 
     def _draw_payments_flowing(self, data):
         """BPR26: suppress entirely if total_payments is zero."""
-        if not data.get("total_payments") and not data.get("payments"):
+        if not data.get("total_payments"):
             return
         grx    = CHARGES_TABLE["group_ref_x"]
         f_hdr  = FONTS.get("payments_header", {"size": 7.5, "bold": True})

@@ -54,6 +54,7 @@ from processing.output_manager import (
     list_batches_for_cycle,
     list_pdfs_in_batch,
     get_pdf_path,
+    create_date_output_zip,
 )
 from templates.registry import TEMPLATE_REGISTRY, get_parser
 from app.billing.worker_queue import TEMPLATE_FOLDER_MAP
@@ -1569,6 +1570,52 @@ def delete_all_runs(db: Session = Depends(get_db), _: UserOut = Depends(require_
 def output_dates(_: UserOut = Depends(require_admin)):
     """List all dates that have generated output."""
     return {"dates": list_output_dates()}
+
+
+@router.get("/output/{date_str}/download")
+def download_date_output(
+    date_str: str,
+    background_tasks: BackgroundTasks,
+    _: UserOut = Depends(require_admin),
+):
+    """Download all output files for a date as a ZIP archive, maintaining folder structure."""
+    import re
+
+    if not date_str or not re.match(r'^[A-Za-z0-9_\-]+$', date_str):
+        raise HTTPException(status_code=400, detail="Invalid date format")
+
+    dates = list_output_dates()
+    if date_str not in dates:
+        raise HTTPException(status_code=404, detail=f"No output found for date: {date_str}")
+
+    temp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    temp_zip_path = temp_zip.name
+    temp_zip.close()
+
+    def _cleanup():
+        if os.path.exists(temp_zip_path):
+            try:
+                os.remove(temp_zip_path)
+            except Exception:
+                pass
+
+    try:
+        count = create_date_output_zip(date_str, temp_zip_path)
+        if count == 0:
+            _cleanup()
+            raise HTTPException(status_code=404, detail=f"No output files found to download for date: {date_str}")
+
+        background_tasks.add_task(_cleanup)
+        return FileResponse(
+            temp_zip_path,
+            media_type="application/zip",
+            filename=f"{date_str}.zip",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        _cleanup()
+        raise HTTPException(status_code=500, detail=f"Failed to generate zip archive: {str(e)}")
 
 
 @router.get("/output/{date_str}")

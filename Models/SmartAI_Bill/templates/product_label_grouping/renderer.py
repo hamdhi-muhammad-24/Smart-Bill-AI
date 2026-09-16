@@ -186,7 +186,7 @@ class ProductLabelGroupingRenderer(BaseRenderer):
         slip_name = (
             data.get("business_name")
             if data.get("address_name_not_required")
-            else (data.get("business_name") or data.get("customer_name", ""))
+            else (data.get("customer_name") or data.get("business_name", ""))
         )
         self.text(*COORDS["slip_customer"], slip_name or "", size=f["size"])
         self.text(*COORDS["slip_account"],  data["account_number"],
@@ -380,7 +380,7 @@ class ProductLabelGroupingRenderer(BaseRenderer):
     def _draw_payments_dynamic(self, data, y):
         """BPR26: suppress if zero. Draws right after Total Charges finishes,
         following the running y cursor instead of a fixed page position."""
-        if not data.get("total_payments") and not data.get("payments"):
+        if not data.get("total_payments"):
             return y
 
         line_h = COORDS["payments_line_h"]

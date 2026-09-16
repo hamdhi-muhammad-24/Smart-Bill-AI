@@ -585,4 +585,56 @@ def create_summary_groups(date_base_dir, processing_results=None, log_callback=N
                 status = f"({errs} errors)" if errs else "OK"
                 log_callback(
                     f"  Summary group [{c_ref}]: {moved} file(s) moved -> {os.path.join(summary_root, c_ref)} {status}"
-                )
+                )
+
+
+def create_date_output_zip(date_str: str, target_zip_path: str) -> int:
+    """
+    Create a ZIP file containing all output files for the given date across all output roots,
+    preserving the exact internal folder hierarchy (e.g. Cycle_1/Batch_1/Email/Non-Red/file.pdf).
+
+    Args:
+        date_str: Date string (e.g. '2026-09-15')
+        target_zip_path: Full file path where the resulting .zip file should be saved.
+
+    Returns:
+        The total number of files added to the archive.
+    """
+    import zipfile
+    import re
+
+    if not date_str or not re.match(r'^[A-Za-z0-9_\-]+$', date_str):
+        raise ValueError(f"Invalid date format: {date_str}")
+
+    roots = get_output_roots()
+    file_count = 0
+    added_arcnames = set()
+
+    with zipfile.ZipFile(target_zip_path, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for root in roots:
+            date_dir = os.path.join(root, date_str)
+            if not os.path.exists(date_dir) or not os.path.isdir(date_dir):
+                continue
+
+            for dirpath, _, filenames in os.walk(date_dir):
+                for f in filenames:
+                    # Ignore lock files, temporary files, and hidden files
+                    if f.startswith(".") or f.endswith(".lock") or f.endswith(".tmp"):
+                        continue
+
+                    full_path = os.path.join(dirpath, f)
+                    rel_path = os.path.relpath(full_path, date_dir)
+                    arcname = rel_path.replace("\\", "/")
+
+                    if arcname in added_arcnames:
+                        continue
+
+                    try:
+                        zf.write(full_path, arcname=arcname)
+                        added_arcnames.add(arcname)
+                        file_count += 1
+                    except (PermissionError, OSError):
+                        pass
+
+    return file_count
+

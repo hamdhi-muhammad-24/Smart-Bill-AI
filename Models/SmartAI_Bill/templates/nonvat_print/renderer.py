@@ -304,7 +304,7 @@ class NonVATPrintRenderer(BaseRenderer):
 
         # 1. Details of Payments Received
         payments = data.get("payments", [])
-        if data.get("total_payments") or payments:
+        if data.get("total_payments"):
             ensure_space(line_h * (len(payments) + 2.6))
             draw_text("Details of Payments Received", bold=True, size=8.5)
             advance(1.2)
