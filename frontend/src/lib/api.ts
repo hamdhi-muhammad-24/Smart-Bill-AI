@@ -603,3 +603,130 @@ export function clearAllUploads(folderType?: string): Promise<{ message: string;
   const q = folderType ? `?folder_type=${folderType}` : ''
   return request(`/billing/uploads${q}`, { method: 'DELETE' })
 }
+
+// ── Super Admin API ──────────────────────────────────────────────────────────
+
+export interface GmfTestRunSummary {
+  id: number
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+  triggered_by: string
+  started_at: string
+  finished_at?: string | null
+  total_files_sampled: number
+  total_invoices_tested: number
+  passed_count: number
+  failed_count: number
+  has_report_pdf: boolean
+  error_message?: string | null
+}
+
+export interface GmfTestInvoiceResult {
+  filename: string
+  doc_index: number
+  template_id: string
+  account_number: string
+  invoice_number: string
+  gmf_calculated_total: number
+  gmf_charges_tag: number | null
+  pdf_total_charges: number | null
+  pdf_details_total: number
+  gmf_line_items_count: number
+  pdf_line_items_count: number
+  status: 'PASS' | 'FAIL'
+  mismatch_details: string
+  details_summary?: Array<{ desc: string; amount: number }>
+}
+
+export interface GmfTestRunDetail extends GmfTestRunSummary {
+  results: GmfTestInvoiceResult[]
+}
+
+export interface SuperAdminOverview {
+  total_uploads_in_system: number
+  eligible_invoice_gmfs_count: number
+  latest_run?: GmfTestRunSummary | null
+}
+
+export function getSuperAdminOverview(): Promise<SuperAdminOverview> {
+  return request<SuperAdminOverview>('/super-admin/overview')
+}
+
+export function startGmfTestRun(maxFiles = 100): Promise<GmfTestRunSummary> {
+  return request<GmfTestRunSummary>(`/super-admin/gmf-test/run?max_files=${maxFiles}`, {
+    method: 'POST',
+  })
+}
+
+export function getGmfTestStatus(): Promise<GmfTestRunSummary | null> {
+  return request<GmfTestRunSummary | null>('/super-admin/gmf-test/status')
+}
+
+export function listGmfTestRuns(): Promise<GmfTestRunSummary[]> {
+  return request<GmfTestRunSummary[]>('/super-admin/gmf-test/runs')
+}
+
+export function getGmfTestRunDetails(runId: number): Promise<GmfTestRunDetail> {
+  return request<GmfTestRunDetail>(`/super-admin/gmf-test/runs/${runId}`)
+}
+
+export function getGmfTestReportPdfUrl(runId: number): string {
+  const token = getToken()
+  return `${BASE_URL}/super-admin/gmf-test/runs/${runId}/report-pdf${token ? `?token=${encodeURIComponent(token)}` : ''}`
+}
+
+export async function downloadGmfTestReportPdf(runId: number): Promise<void> {
+  const token = getToken()
+  const res = await fetch(`${BASE_URL}/super-admin/gmf-test/runs/${runId}/report-pdf`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    throw new ApiError(res.status, 'Failed to download PDF report')
+  }
+  const blob = await res.blob()
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `GMF_Validation_Report_Run_${runId}.pdf`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.URL.revokeObjectURL(url)
+}
+
+export function getInvoicePdfUrl(filename: string, docIndex: number = 1): string {
+  const token = getToken()
+  return `${BASE_URL}/super-admin/gmf-test/invoice-pdf?filename=${encodeURIComponent(filename)}&doc_index=${docIndex}${token ? `&token=${encodeURIComponent(token)}` : ''}`
+}
+
+export async function downloadInvoicePdf(filename: string, docIndex: number = 1): Promise<void> {
+  const token = getToken()
+  const url = `${BASE_URL}/super-admin/gmf-test/invoice-pdf?filename=${encodeURIComponent(filename)}&doc_index=${docIndex}`
+  const res = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) {
+    throw new ApiError(res.status, 'Failed to download invoice PDF')
+  }
+  const blob = await res.blob()
+  const blobUrl = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = blobUrl
+  a.download = `${filename}_doc_${docIndex}.pdf`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.URL.revokeObjectURL(blobUrl)
+}
+
+export interface SystemResetResponse {
+  success: boolean
+  message: string
+  deleted_counts: Record<string, number>
+  files_deleted: number
+}
+
+export function resetSystemData(): Promise<SystemResetResponse> {
+  return request<SystemResetResponse>('/super-admin/reset-test-data', {
+    method: 'POST',
+  })
+}
