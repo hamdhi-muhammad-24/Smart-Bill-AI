@@ -277,7 +277,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         if data.get('usage_subtotal'):
             _line("Subtotal Usage charges", data['usage_subtotal'])
 
-        discounts = data.get('top_level_discounts') or data.get('discounts') or []
+        discounts = data.get('discounts') or data.get('top_level_discounts') or []
         if discounts:
             _line("Discounts", bold=True)
             for d in discounts:

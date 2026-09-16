@@ -327,6 +327,10 @@ def parse_vat_enterprise(file_path: str) -> dict:
                 elif key == 'CHARGES':
                     data['charges_period'] = to_float(value)
                     data['total_charges']  = to_float(value)
+                elif key in ('SLT_BCR_SUBTOTAL', 'SLT_SUBS_NOSUBS_GRANDTOTAL'):
+                    if not data['total_charges']:
+                        data['charges_period'] = to_float(value)
+                        data['total_charges']  = to_float(value)
                 elif key == 'NEWBAL':
                     data['total_payable'] = to_float(value)
                 elif key == 'ACCCURRENCYCODE':

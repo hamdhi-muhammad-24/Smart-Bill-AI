@@ -612,8 +612,8 @@ def parse_invoice_of_summary(file_path: str) -> dict:
     from core.customer_type_mapper import get_badge
     data['badge'] = get_badge(data['customer_type'])
 
-    # Fallback to SLTDISCDETAIL discounts if no top-level discount tags present
-    if not data['top_level_discounts'] and data['discounts']:
+    # For invoice_of_summary, SLTDISCDETAIL (data['discounts']) is the complete authoritative list of discounts
+    if data['discounts']:
         data['top_level_discounts'] = list(data['discounts'])
 
     def _tax_sort_key(t):
