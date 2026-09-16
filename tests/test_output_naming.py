@@ -44,4 +44,6 @@ def test_various_templates_preserve_template_underscores():
     assert format_output_name(acc, "lod") == "0007398361_LOD.pdf"
     assert format_output_name(acc, "vat_confirmation") == "0007398361_Vat_confirmation.pdf"
     assert format_output_name(acc, "usd_open_item") == "0007398361_USD_OPEN_Item.pdf"
+    assert format_output_name(acc, "vat_creditnote") == "0007398361_CreditNote_VAT.pdf"
+    assert format_output_name(acc, "nonvat_creditnote") == "0007398361_CreditNote_NONVAT.pdf"
     assert format_output_name("CR001530388", "summary_statement") == "CR001530388_SUMMARY.pdf"

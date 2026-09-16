@@ -197,6 +197,13 @@ def _copy_pdf_to_batch(src_pdf: Path, cycle_base_dir: Path, sub_rel_path: Option
         target_dir = (batch_dir / sub_rel_path) if sub_rel_path else batch_dir
         target_dir.mkdir(parents=True, exist_ok=True)
         dest_file = target_dir / src_pdf.name
+        if dest_file.exists():
+            stem = src_pdf.stem
+            suffix = src_pdf.suffix
+            dup_idx = 2
+            while (target_dir / f"{stem}_dup{dup_idx}{suffix}").exists():
+                dup_idx += 1
+            dest_file = target_dir / f"{stem}_dup{dup_idx}{suffix}"
         shutil.copy2(str(src_pdf), str(dest_file))
         return dest_file
 
@@ -474,6 +481,19 @@ def _worker_process(worker_id):
                     pass
 
             logger.info(f"Worker {worker_id} processing {filename}")
+
+            # Reload config and batch processor modules to pick up changes dynamically
+            import importlib
+            if "config" in sys.modules:
+                try:
+                    importlib.reload(sys.modules["config"])
+                except Exception:
+                    pass
+            if "processing.batch_processor" in sys.modules:
+                try:
+                    importlib.reload(sys.modules["processing.batch_processor"])
+                except Exception:
+                    pass
 
             # Read metadata file
             meta_data = _read_metadata_file(incoming_dir, filename, working_meta)
@@ -977,7 +997,16 @@ if __name__ == "__main__":
     logger.info("Starting background worker queue daemon...")
     procs = start_workers()
     try:
-        for p in procs:
-            p.join()
+        while True:
+            time.sleep(2)
+            for idx, p in enumerate(procs):
+                if not p.is_alive():
+                    logger.warning(f"Process {idx} died, restarting...")
+                    if idx == 0:
+                        new_p = multiprocessing.Process(target=_archiver_process, daemon=True)
+                    else:
+                        new_p = multiprocessing.Process(target=_worker_process, args=(idx - 1,), daemon=True)
+                    new_p.start()
+                    procs[idx] = new_p
     except KeyboardInterrupt:
         logger.info("Stopping workers...")

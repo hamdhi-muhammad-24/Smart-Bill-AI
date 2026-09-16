@@ -245,7 +245,13 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
             if not account_number:
                 account_number = "unknown"
 
-            name_pattern = OUTPUT_PDF_NAMES.get(str(template_id), OUTPUT_PDF_NAME_DEFAULT)
+            import config
+            pdf_names_map = getattr(config, "OUTPUT_PDF_NAMES", OUTPUT_PDF_NAMES)
+            default_pdf_name = getattr(config, "OUTPUT_PDF_NAME_DEFAULT", OUTPUT_PDF_NAME_DEFAULT)
+            name_pattern = pdf_names_map.get(str(template_id), default_pdf_name)
+            if "{account_number}" not in name_pattern:
+                name_pattern = f"{{account_number}}_{name_pattern}"
+
             output_name = name_pattern.format(
                 account_number=account_number,
                 template_id=template_id,
@@ -254,7 +260,10 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
             output_path = os.path.join(temp_pdf_dir, output_name)
             if os.path.exists(output_path):
                 base, ext = os.path.splitext(output_name)
-                output_path = os.path.join(temp_pdf_dir, f"{base}_dup{doc_index}{ext}")
+                dup_i = 2
+                while os.path.exists(os.path.join(temp_pdf_dir, f"{base}_dup{dup_i}{ext}")):
+                    dup_i += 1
+                output_path = os.path.join(temp_pdf_dir, f"{base}_dup{dup_i}{ext}")
 
             result.output_pdf = output_path
             result.generated_pdf_files = [os.path.basename(output_path)]

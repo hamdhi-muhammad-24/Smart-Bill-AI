@@ -66,6 +66,14 @@ Write-Host ""
 
 # ── Step 4: Background Worker Queue (new window) ──────────────────────────────
 Write-Host "[4/4] Starting Async Background Worker Queue ..." -ForegroundColor Yellow
+$staleWorker = Get-CimInstance Win32_Process -Filter "name like 'python%'" | Where-Object { $_.CommandLine -like "*worker_queue*" }
+if ($staleWorker) {
+    foreach ($w in $staleWorker) {
+        Write-Host "      Killing stale worker process (PID $($w.ProcessId))..." -ForegroundColor DarkGray
+        Stop-Process -Id $w.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+}
 $WorkerCmd = if (Test-Path $VenvPython) { "& '$VenvPython' -m app.billing.worker_queue" } else { "uv run python -m app.billing.worker_queue" }
 Start-Process powershell -ArgumentList @(
     "-NoExit",
