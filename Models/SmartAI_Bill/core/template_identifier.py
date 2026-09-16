@@ -24,6 +24,7 @@ class IdentificationResult:
         self.template_id = None
         self.badge = None
         self.is_supported = False
+        self.is_svat = False
         self.reasons = []
         self.warnings = []
         self.header = None
@@ -32,6 +33,9 @@ class IdentificationResult:
     def __repr__(self):
         return (f"<Identification template={self.template_id} "
                 f"badge={self.badge} supported={self.is_supported}>")
+
+
+STANDARD_BILLSTYLES = (1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 22)
 
 
 def identify_template_from_header(header: GMFHeader, original_filename: str = None) -> IdentificationResult:
@@ -78,17 +82,24 @@ def identify_template_from_header(header: GMFHeader, original_filename: str = No
         result.is_supported = True
         return result
 
-    if header.billtype is not None and header.billtype not in (1, 6):
+    # Rule Set Sheet 2 Tag Mapping R7: BILLTYPE 1..8. Supported customer invoice bill types: 1, 4 (Final Bill), 6 (Prepayment/BCR)
+    if header.billtype is not None and header.billtype not in (1, 4, 6):
         result.reasons.append(f"Unsupported BILLTYPE: {header.billtype}")
         result.warnings.append("Manual review needed")
         return result
 
-    if is_svat_registered(header.raw_tags):
+    is_svat = is_svat_registered(header.raw_tags)
+    result.is_svat = is_svat
+
+    # Rule Set BPR12: Billstyle 20 (Subscription Ref Grouping) and Billstyle 19 (Product Label Grouping)
+    # support SVAT customer presentment.
+    # If SVAT is present on standard bill styles without dedicated SVAT template implemented, flag manual review.
+    if is_svat and header.billstyle not in (19, 20):
         result.reasons.append("CUST_SVAT_NUMBER is present")
         result.warnings.append("SVAT template is not implemented; manual review needed")
         return result
 
-    if header.acc_currency_code and header.acc_currency_code.strip().upper() != "RS":
+    if header.acc_currency_code and header.acc_currency_code.strip().upper() not in ("RS", "LKR"):
         if header.billstyle not in (21, 23):
             result.template_id = UNSUPPORTED_FOREIGN_CURRENCY
             result.reasons.append(f"ACCCURRENCYCODE={header.acc_currency_code} → Foreign currency")
@@ -122,7 +133,11 @@ def identify_template_from_header(header: GMFHeader, original_filename: str = No
         result.template_id = TEMPLATE_USD_OPEN_ITEM
         result.reasons.append(f"BILLSTYLE={style} → USD Open Item")
         result.is_supported = True
-    elif style in (1, 22):
+    elif style == 18:
+        result.template_id = TEMPLATE_INVOICE_OF_SUMMARY
+        result.reasons.append("BILLSTYLE=18 → Invoice of Summary")
+        result.is_supported = True
+    elif style in STANDARD_BILLSTYLES:
         badge = get_badge(header.customer_type or "")
         if is_vat:
             if badge == "HOME" or style == 22:
@@ -138,10 +153,6 @@ def identify_template_from_header(header: GMFHeader, original_filename: str = No
             else:
                 result.template_id = TEMPLATE_NONVAT_ENTERPRISE
                 result.reasons.append(f"BILLSTYLE={style}, non-VAT, {header.customer_type} → NonVAT Enterprise")
-        result.is_supported = True
-    elif style == 18:
-        result.template_id = TEMPLATE_INVOICE_OF_SUMMARY
-        result.reasons.append("BILLSTYLE=18 → Invoice of Summary")
         result.is_supported = True
     else:
         result.reasons.append(f"Unrecognized BILLSTYLE: {style}")
@@ -242,18 +253,25 @@ def identify_template(gmf_file_path: str, original_filename: str = None) -> Iden
         result.is_supported = True
         return result
 
-    if header.billtype is not None and header.billtype not in (1, 6):
+    # Rule Set Sheet 2 Tag Mapping R7: BILLTYPE 1..8. Supported customer invoice bill types: 1, 4 (Final Bill), 6 (Prepayment/BCR)
+    if header.billtype is not None and header.billtype not in (1, 4, 6):
         result.reasons.append(f"Unsupported BILLTYPE: {header.billtype}")
         result.warnings.append("Manual review needed")
         return result
 
-    if is_svat_registered(header.raw_tags):
+    is_svat = is_svat_registered(header.raw_tags)
+    result.is_svat = is_svat
+
+    # Rule Set BPR12: Billstyle 20 (Subscription Ref Grouping) and Billstyle 19 (Product Label Grouping)
+    # support SVAT customer presentment.
+    # If SVAT is present on standard bill styles without dedicated SVAT template implemented, flag manual review.
+    if is_svat and header.billstyle not in (19, 20):
         result.reasons.append("CUST_SVAT_NUMBER is present")
         result.warnings.append("SVAT template is not implemented; manual review needed")
         return result
 
-    if header.acc_currency_code and header.acc_currency_code.strip().upper() != "RS":
-        # Allow foreign currency only for USD Open Item (BILLSTYLE 21)
+    if header.acc_currency_code and header.acc_currency_code.strip().upper() not in ("RS", "LKR"):
+        # Allow foreign currency only for USD Open Item (BILLSTYLE 21, 23)
         if header.billstyle not in (21, 23):
             result.template_id = UNSUPPORTED_FOREIGN_CURRENCY
             result.reasons.append(
@@ -292,7 +310,12 @@ def identify_template(gmf_file_path: str, original_filename: str = None) -> Iden
         result.reasons.append(f"BILLSTYLE={style} → USD Open Item")
         result.is_supported = True
 
-    elif style in (1, 22):
+    elif style == 18:
+        result.template_id = TEMPLATE_INVOICE_OF_SUMMARY
+        result.reasons.append("BILLSTYLE=18 → Invoice of Summary")
+        result.is_supported = True
+
+    elif style in STANDARD_BILLSTYLES:
         # Check explicitly if the customer has a VAT registration
         badge = get_badge(header.customer_type or "")
         if is_vat:
@@ -313,11 +336,6 @@ def identify_template(gmf_file_path: str, original_filename: str = None) -> Iden
                 result.reasons.append(
                     f"BILLSTYLE={style}, non-VAT, {header.customer_type} → NonVAT Enterprise"
                 )
-        result.is_supported = True
-
-    elif style == 18:
-        result.template_id = TEMPLATE_INVOICE_OF_SUMMARY
-        result.reasons.append("BILLSTYLE=18 → Invoice of Summary")
         result.is_supported = True
 
     else:

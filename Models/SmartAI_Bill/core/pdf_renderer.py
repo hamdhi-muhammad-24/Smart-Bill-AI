@@ -201,6 +201,9 @@ class BaseRenderer:
             page.merge_page(overlay.pages[0])
             self.writer.add_page(page)
 
+        out_dir = os.path.dirname(os.path.abspath(output_path))
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
         with open(output_path, "wb") as f:
             self.writer.write(f)
 
