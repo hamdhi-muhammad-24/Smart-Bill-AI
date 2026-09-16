@@ -23,6 +23,8 @@ import EnvelopeLayout from './components/EnvelopeLayout'
 import EnvelopeDashboard from './pages/envelope/EnvelopeDashboard'
 import EnvelopeManager from './pages/envelope/EnvelopeManager'
 import SavedArtworkGallery from './pages/envelope/SavedArtworkGallery'
+import SuperAdminLayout from './components/SuperAdminLayout'
+import GmfTestCenter from './pages/super_admin/GmfTestCenter'
 import { ThemeProvider } from './components/ThemeProvider'
 import { useAuth } from './auth/AuthProvider'
 import { Navigate } from 'react-router-dom'
@@ -114,6 +116,13 @@ export default function App() {
         <Route element={<RequireRole role="manager" />}>
           <Route path="/manager" element={<ManagerLayout />}>
             <Route index element={<ManagerDashboard />} />
+          </Route>
+        </Route>
+
+        {/* Super Admin Validation Portal (Hidden) */}
+        <Route element={<RequireRole role="super_admin" />}>
+          <Route path="/super-admin" element={<SuperAdminLayout />}>
+            <Route index element={<GmfTestCenter />} />
           </Route>
         </Route>
 

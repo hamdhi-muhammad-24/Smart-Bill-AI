@@ -33,6 +33,8 @@ export default function Login() {
     if (!isChecking && session) {
       if (session.isNewUser) {
         navigate('/request-access', { replace: true })
+      } else if (session.role === 'super_admin' || session.roles?.includes('SUPER_ADMIN')) {
+        navigate('/super-admin', { replace: true })
       } else {
         navigate('/role-select', { replace: true })
       }
@@ -83,7 +85,19 @@ export default function Login() {
     }
   }
 
-  function handleDevLogin(targetRole: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager') {
+  function handleDevLogin(targetRole: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'super_admin') {
+    if (targetRole === 'super_admin') {
+      const devToken = 'dev-superadmin-token'
+      setToken(devToken)
+      login({
+        role: 'super_admin',
+        roles: ['SUPER_ADMIN'],
+        email: 'testuser018@intranet.slt.com.lk',
+      })
+      navigate('/super-admin')
+      return
+    }
+
     const devToken = `dev-${targetRole}-token`
     setToken(devToken)
     // For dev, grant all roles to admin, otherwise just the target role
@@ -116,7 +130,7 @@ export default function Login() {
               SLT-MOBITEL SECURE GATEWAY
             </div>
             <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl xl:text-6xl leading-[1.15]">
-              AI-Powered <br />
+              Automated <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00b2e3] to-[#00a651]">
                 Invoice Generation
               </span>
@@ -250,6 +264,16 @@ export default function Login() {
                 className="h-11 text-xs font-extrabold rounded-xl border border-border/80 bg-card hover:bg-emerald-500/10 hover:border-emerald-500/40 text-foreground hover:text-emerald-700 dark:hover:text-emerald-400 transition-all flex items-center justify-center shadow-xs cursor-pointer active:scale-95"
               >
                 User Manager
+              </button>
+            </div>
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => handleDevLogin('super_admin')}
+                className="w-full h-10 text-xs font-semibold tracking-wide rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-[#0066b3] dark:text-[#00b2e3] transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer active:scale-98"
+              >
+                <ShieldCheck size={14} className="text-[#0066b3] dark:text-[#00b2e3]" />
+                Super Admin Console (testuser018)
               </button>
             </div>
           </div>

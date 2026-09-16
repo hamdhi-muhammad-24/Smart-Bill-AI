@@ -7,7 +7,7 @@ import { InteractionStatus } from '@azure/msal-browser'
 import { loginRequest, clearStaleMsalInteractions } from './msalConfig'
 
 export interface Session {
-  role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'customer'
+  role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'super_admin' | 'customer'
   roles: string[]           // all granted portal roles (uppercase)
   email: string
   customerId?: number
@@ -28,6 +28,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 /** Maps backend role string → frontend portal route role */
 function mapRole(r: string): Session['role'] {
   const u = r.toUpperCase()
+  if (u === 'SUPER_ADMIN') return 'super_admin'
   if (u === 'ADMIN') return 'admin'
   if (u === 'MANAGER') return 'manager'
   if (u === 'GMF_HANDLER' || u === 'ADMIN1') return 'gmf_handler'
@@ -46,6 +47,14 @@ function buildSessionFromMe(me: {
   if (me.is_new_user) {
     return { role: 'customer', roles: [], email: me.email, isNewUser: true }
   }
+  const isSuper = me.role.toUpperCase() === 'SUPER_ADMIN' ||
+    (me.roles && me.roles.map(r => r.toUpperCase()).includes('SUPER_ADMIN')) ||
+    me.email === 'testuser018@intranet.slt.com.lk'
+
+  if (isSuper) {
+    return { role: 'super_admin', roles: ['SUPER_ADMIN'], email: me.email }
+  }
+
   const mappedRole = mapRole(me.role)
   const allRoles = me.roles ?? [me.role.toUpperCase()]
   if (mappedRole === 'customer' && me.customer_id != null) {
@@ -132,6 +141,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (currentPath === '/login' || currentPath === '/') {
               if (me.is_new_user) {
                 navigate('/request-access', { replace: true })
+              } else if (s.role === 'super_admin' || s.roles.includes('SUPER_ADMIN')) {
+                navigate('/super-admin', { replace: true })
               } else {
                 navigate('/role-select', { replace: true })
               }

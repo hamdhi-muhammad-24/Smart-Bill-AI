@@ -9,6 +9,7 @@ const portalRoles: Record<string, string[]> = {
   gmf_handler: ['GMF_HANDLER', 'ADMIN1'],
   envelope_handler: ['ENVELOPE_HANDLER'],
   manager: ['MANAGER'],
+  super_admin: ['SUPER_ADMIN'],
 }
 
 interface Props {

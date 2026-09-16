@@ -77,6 +77,21 @@ def seed_admin(session: Session) -> None:
         log.info(f"Envelope Handler user {envelope_email} already exists.")
         envelope.role = UserRole.ENVELOPE_HANDLER
         envelope.is_active = True
+
+    super_admin_email = "testuser018@intranet.slt.com.lk"
+    super_admin = session.query(User).filter(User.email == super_admin_email).first()
+    if not super_admin:
+        log.info(f"Creating default Super Admin user: {super_admin_email}")
+        super_admin = User(
+            email=super_admin_email,
+            role=UserRole.SUPER_ADMIN,
+            is_active=True,
+        )
+        session.add(super_admin)
+    else:
+        log.info(f"Super Admin user {super_admin_email} already exists.")
+        super_admin.role = UserRole.SUPER_ADMIN
+        super_admin.is_active = True
         
     session.commit()
 

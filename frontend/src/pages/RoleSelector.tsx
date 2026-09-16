@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
 import { Lock, ShieldCheck, FileStack, Mail, Users, LogOut, ChevronRight, Sparkles, Sun, Moon } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { useTheme } from '../components/ThemeProvider'
@@ -75,6 +75,11 @@ export default function RoleSelector() {
     portalId: string
     portalLabel: string
   } | null>(null)
+
+  // Super admin should never stay on the role selector page — redirect straight to /super-admin
+  if (session?.role === 'super_admin' || session?.roles?.includes('SUPER_ADMIN')) {
+    return <Navigate to="/super-admin" replace />
+  }
 
   function hasAccess(portalId: string): boolean {
     if (!session || !session.roles) return false

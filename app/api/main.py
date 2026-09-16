@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.errors import register_exception_handlers
-from app.api.routers import billing, health, users, envelope
+from app.api.routers import billing, health, users, envelope, super_admin
 from app.auth.router import router as auth_router
 from app.billing_scheduler import start_scheduler
 import logging
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     application.include_router(health.router)
     application.include_router(users.router)
     application.include_router(envelope.router)
+    application.include_router(super_admin.router)
 
     register_exception_handlers(application)
     
@@ -51,10 +52,12 @@ def create_app() -> FastAPI:
                     "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'ENVELOPE_HANDLER';",
                     "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'MANAGER';",
                     "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'CUSTOMER';",
+                    "ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'SUPER_ADMIN';",
                     "DO $enum$ BEGIN CREATE TYPE envelope_type_enum AS ENUM ('LARGE', 'MEDIUM', 'SELF_SEAL'); EXCEPTION WHEN duplicate_object THEN null; END $enum$;",
                     "DO $enum$ BEGIN CREATE TYPE envelope_artwork_status_enum AS ENUM ('ACTIVE', 'DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'REPLACED', 'REMOVED'); EXCEPTION WHEN duplicate_object THEN null; END $enum$;",
                     "ALTER TYPE envelope_artwork_status_enum ADD VALUE IF NOT EXISTS 'DRAFT';",
                     "DO $prs$ BEGIN CREATE TYPE permission_request_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED'); EXCEPTION WHEN duplicate_object THEN null; END $prs$;",
+                    "DO $enum$ BEGIN CREATE TYPE gmf_test_run_status AS ENUM ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED'); EXCEPTION WHEN duplicate_object THEN null; END $enum$;",
                 ]:
                     try:
                         conn.execute(text(stmt))

@@ -27,6 +27,7 @@ class UserRole(enum.Enum):
     ENVELOPE_HANDLER = "ENVELOPE_HANDLER"
     MANAGER = "MANAGER"
     CUSTOMER = "CUSTOMER"
+    SUPER_ADMIN = "SUPER_ADMIN"
 
 class PermissionRequestStatus(enum.Enum):
     PENDING = "PENDING"
@@ -400,3 +401,30 @@ class PermissionRequest(Base):
     created_at   = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+
+# ── Super Admin Validation Test Models ──────────────────────────────────
+
+class GmfTestRunStatus(enum.Enum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class GmfTestRun(Base):
+    """Tracks GMF test validation runs executed from the Super Admin portal."""
+    __tablename__ = "gmf_test_runs"
+
+    id                    = Column(BigInteger().with_variant(Integer, "sqlite"), Identity(always=True), primary_key=True, autoincrement=True)
+    status                = Column(Enum(GmfTestRunStatus, name="gmf_test_run_status"), nullable=False, default=GmfTestRunStatus.PENDING)
+    triggered_by          = Column(Text, nullable=False)
+    started_at            = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at           = Column(DateTime(timezone=True), nullable=True)
+    total_files_sampled   = Column(Integer, nullable=False, default=0)
+    total_invoices_tested = Column(Integer, nullable=False, default=0)
+    passed_count          = Column(Integer, nullable=False, default=0)
+    failed_count          = Column(Integer, nullable=False, default=0)
+    results_json          = Column(Text, nullable=True)
+    report_pdf_path       = Column(Text, nullable=True)
+    error_message         = Column(Text, nullable=True)

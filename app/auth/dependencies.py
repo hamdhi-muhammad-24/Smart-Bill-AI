@@ -99,6 +99,7 @@ def _get_granted_roles(db: Session, user_id: int) -> List[str]:
 
 # The one account that always retains full cross-portal access regardless of grants.
 _SUPERUSER_EMAIL = "testuser016@intranet.slt.com.lk"
+_SUPER_ADMIN_EMAILS = {"testuser018@intranet.slt.com.lk"}
 _ALL_PORTAL_ROLES = {"ADMIN", "GMF_HANDLER", "ENVELOPE_HANDLER", "MANAGER"}
 
 
@@ -106,6 +107,17 @@ def _build_user_out(db: Session, user) -> UserOut:
     """Build a fully-populated UserOut from a DB user row."""
     roles = _get_granted_roles(db, user.id)
     primary = user.role.value if hasattr(user.role, "value") else str(user.role)
+
+    # Super Admin: strictly isolated to Super Admin portal
+    if user.email in _SUPER_ADMIN_EMAILS or primary == "SUPER_ADMIN":
+        return UserOut(
+            id=user.id,
+            email=user.email,
+            role="SUPER_ADMIN",
+            roles=["SUPER_ADMIN"],
+            is_new_user=False,
+        )
+
     # testuser016 always has every portal role regardless of DB grants
     if user.email == _SUPERUSER_EMAIL:
         all_roles = list(_ALL_PORTAL_ROLES | set(roles))
@@ -140,12 +152,17 @@ async def get_current_user(
     db: Session = Depends(get_db),
 ) -> UserOut:
     authorization = request.headers.get("authorization", "")
+    if not authorization and request.query_params.get("token"):
+        q_token = request.query_params.get("token", "").strip()
+        authorization = q_token if q_token.startswith("Bearer ") else f"Bearer {q_token}"
 
     # 1. Dev test token bypass for local development & testing
     if authorization.startswith("Bearer dev-"):
         token = authorization.removeprefix("Bearer dev-").strip().lower()
         target_email = "admin@slt.lk"
-        if "gmf" in token:
+        if "superadmin" in token or "super_admin" in token or "super" in token:
+            target_email = "testuser018@intranet.slt.com.lk"
+        elif "gmf" in token:
             target_email = "gmf@slt.lk"
         elif "manager" in token:
             target_email = "manager@slt.lk"
@@ -158,13 +175,20 @@ async def get_current_user(
 
         # Fallback so dev test tokens always succeed seamlessly
         dev_role = "ADMIN"
-        if "gmf" in token:
+        if "superadmin" in token or "super_admin" in token or "super" in token:
+            dev_role = "SUPER_ADMIN"
+        elif "gmf" in token:
             dev_role = "GMF_HANDLER"
         elif "manager" in token:
             dev_role = "MANAGER"
         elif "envelope" in token:
             dev_role = "ENVELOPE_HANDLER"
-        all_roles = list(_ALL_PORTAL_ROLES) if dev_role == "ADMIN" else [dev_role]
+        if dev_role == "SUPER_ADMIN":
+            all_roles = ["SUPER_ADMIN"]
+        elif dev_role == "ADMIN":
+            all_roles = list(_ALL_PORTAL_ROLES)
+        else:
+            all_roles = [dev_role]
         return UserOut(
             id=999,
             email=target_email,
@@ -291,3 +315,14 @@ def require_envelope_handler_or_admin(
 
 # Alias for backward compatibility
 require_admin1_or_admin = require_gmf_handler_or_admin
+
+
+def require_super_admin(
+    current_user: UserOut = Depends(get_current_user),
+) -> UserOut:
+    if "SUPER_ADMIN" not in current_user.roles and current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super Admin access required",
+        )
+    return current_user
