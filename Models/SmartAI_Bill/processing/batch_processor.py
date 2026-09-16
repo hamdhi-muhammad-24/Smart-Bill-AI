@@ -187,6 +187,20 @@ def _process_one_document(doc_path, doc_index, source_file, source_filename,
         file_info = parse_filename(source_filename)
         bill_handling = file_info.get("bill_handling", "")
         category = categorize_bill_handling_code(bill_handling)
+
+        # BPR29: First bill of a new billing account must be issued as Hard Copy (print)
+        # Conditions: 1. BILLSEQ 1|  2. CUSTOMERTYPE in ('Individual-Residential', 'Individual-Business', 'Individual-Micro Biz')
+        bill_seq = (data.get("billseq") if isinstance(data, dict) else None) or (
+            identification.header.billseq if identification and identification.header else None
+        )
+        cust_type = (data.get("customer_type") if isinstance(data, dict) else None) or (
+            identification.header.customer_type if identification and identification.header else None
+        )
+        if bill_seq in (1, "1") and cust_type in (
+            "Individual-Residential", "Individual-Business", "Individual-Micro Biz"
+        ):
+            category = "print"
+
         is_print_invoice = (category == "print")
         if isinstance(data, dict) and "template_id" not in data:
             data["template_id"] = template_id

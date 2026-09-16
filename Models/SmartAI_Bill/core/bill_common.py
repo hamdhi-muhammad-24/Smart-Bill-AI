@@ -54,9 +54,58 @@ def apply_label_override(label):
     return LABEL_OVERRIDES.get(label, label)
 
 
-# BPR13: reorder address lines to fixed order
-def reorder_addresses(raw_address, keys=ADDRESS_PRINT_ORDER):
-    return [raw_address[k] for k in keys if raw_address.get(k)]
+# BPR13 & BPR10: reorder address lines to fixed order, appending COUNTRY for non-LKR customers
+def reorder_addresses(raw_address, keys=ADDRESS_PRINT_ORDER, currency_code=None, country=None):
+    lines = [raw_address[k] for k in keys if raw_address.get(k)]
+    # BPR10: Country name printing under billing address for non LKR customers.
+    # Logic: If "ACCCURRENCYCODE" is not Rs, then print "COUNTRY"
+    c_val = country or raw_address.get('COUNTRY')
+    curr = (currency_code or raw_address.get('ACCCURRENCYCODE') or '').strip().upper()
+    if curr and curr != 'RS' and c_val:
+        c_clean = str(c_val).strip()
+        if c_clean and c_clean not in lines:
+            lines.append(c_clean)
+    return lines
+
+
+# BPR20 & BPR10: standard charge type flag decoder
+def decode_charge_flag(flag, start=None, end=None, count=None, unit=None,
+                       billing_start=None, billing_end=None):
+    """
+    Decodes charge types:
+      P/S: Rental (date range only if different from bill period)
+      I:   Initiation (only start date)
+      E:   Early Termination Charge (only start date)
+      T:   Termination Charge
+      O:   One time (start date/time and quantity)
+    """
+    f = (flag or '').strip().upper()
+    has_qty = count not in ('', '0', None) or unit not in ('', None)
+    qty_str = f" [{f'{count} {unit}'.strip() if unit else count}]" if has_qty else ""
+
+    if f in ('P', 'S'):
+        desc = " [Rental]" + qty_str
+        if start and end and (start != billing_start or end != billing_end):
+            desc += f" ({start}-{end})"
+        return desc
+    elif f == 'O':
+        desc = " [One Time]" + (f" [{count}]" if has_qty else "")
+        if start:
+            desc += f" ({start})"
+        return desc
+    elif f == 'I':
+        desc = " [Initiation]" + qty_str
+        if start:
+            desc += f" ({start})"
+        return desc
+    elif f == 'E':
+        desc = " [Early Termination Charge]" + qty_str
+        if start:
+            desc += f" ({start})"
+        return desc
+    elif f == 'T':
+        return " [Termination Charge]" + qty_str
+    return ""
 
 
 # BPR05/07: VAT reg printable check

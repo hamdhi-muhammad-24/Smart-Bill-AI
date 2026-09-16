@@ -7,6 +7,7 @@ from core.bill_common import (
     reorder_addresses, TopLevelDiscountCollector, parse_cancel_payment,
     PhoneNumberFromNoSubRefBlock, MARKETING_MESSAGE_TAGS,
     ADDRESS_PRINT_ORDER, is_vat_reg_printable,
+    decode_charge_flag,
 )
 
 _ITEM_TAG_RE = re.compile(
@@ -59,6 +60,8 @@ def parse_nonvat_home(file_path: str) -> dict:
         "show_vat_lines":        False,
         "address_name_not_required": False,
         "usage_sections":        [],
+        "currency_code":         "",
+        "country":               "",
     }
 
     raw_address   = {}
@@ -192,6 +195,22 @@ def parse_nonvat_home(file_path: str) -> dict:
                     }
                     data['product_labels'].append(current_promo_product)
                     phone_finder.candidate(name)
+                    # BPR32: Delimiter #4 (rental) and Delimiter #6 (initiation) subtotals
+                    if len(all_parts) >= 4 and all_parts[2].upper() == 'RENTAL':
+                        rental_amt = to_float(all_parts[3])
+                        if rental_amt:
+                            current_promo_product['charges'].append(
+                                {'description': f"{name} [Rental]", 'amount': rental_amt})
+                            phone_finder.confirm_charge()
+                    if len(all_parts) >= 6 and all_parts[4].upper() in ('ONEOFF', 'INITIATION'):
+                        init_amt = to_float(all_parts[5])
+                        if init_amt:
+                            current_promo_product['charges'].append(
+                                {'description': f"{name} [Initiation]", 'amount': init_amt})
+                            phone_finder.confirm_charge()
+
+                elif key == 'SLTPROMOSUBLABEL':
+                    phone_finder.candidate(value)
 
                 elif key == 'SLTPRODLABELDET' and current_promo_product:
                     all_parts = [value] + rest.split('|')
@@ -201,13 +220,15 @@ def parse_nonvat_home(file_path: str) -> dict:
                         desc   = f"{prefix} {suffix}".strip()
                         flag   = (all_parts[5].strip().upper()
                                   if len(all_parts) > 5 else '')
-                        if flag == 'P':
-                            desc += " [Rental]"
-                        elif flag == 'O':
-                            desc += " [One Time]"
-                        elif flag == 'I':
-                            desc += " [Initiation]"
-                        amt = to_float(all_parts[0])
+                        start  = all_parts[6].strip() if len(all_parts) > 6 else ''
+                        end    = all_parts[7].strip() if len(all_parts) > 7 else ''
+                        count  = all_parts[9].strip() if len(all_parts) > 9 else ''
+                        unit   = all_parts[10].strip() if len(all_parts) > 10 else ''
+                        desc  += decode_charge_flag(flag, start=start, end=end, count=count, unit=unit,
+                                                    billing_start=data['billing_period_start'],
+                                                    billing_end=data['billing_period_end'])
+                        is_rollup = str(all_parts[0]).strip().upper() == 'ROLLUP'
+                        amt = None if is_rollup else to_float(all_parts[0])
                         current_promo_product['charges'].append(
                             {'description': desc, 'amount': amt})
                         if amt:
@@ -278,6 +299,11 @@ def parse_nonvat_home(file_path: str) -> dict:
                     raw_address[key] = value
             elif key == 'ZIPCODE':
                 data['zip_code'] = value
+            elif key == 'COUNTRY':
+                data['country'] = value
+                raw_address['COUNTRY'] = value
+            elif key == 'ACCCURRENCYCODE':
+                data['currency_code'] = value
 
             elif key == 'BALFWD':
                 data['balance_bf'] = to_float(value)
@@ -306,33 +332,13 @@ def parse_nonvat_home(file_path: str) -> dict:
                     flag   = all_parts[5].strip().upper()
                     start  = all_parts[6].strip()
                     end    = all_parts[7].strip()
-                    if flag == 'P':
-                        desc += " [Rental]"
-                        if start and end and (
-                            start != data['billing_period_start'] or
-                            end   != data['billing_period_end']
-                        ):
-                            desc += f" ({start}-{end})"
-                    elif flag == 'O':
-                        count = (all_parts[9].strip()
-                                 if len(all_parts) > 9 else '')
-                        desc += " [One Time]"
-                        if count:
-                            desc += f" [{count}]"
-                        if start:
-                            desc += f" ({start})"
-                    elif flag == 'I':
-                        desc  += " [Initiation]"
-                        count  = (all_parts[9].strip()
-                                  if len(all_parts) > 9 else '')
-                        unit   = (all_parts[10].strip()
-                                  if len(all_parts) > 10 else '')
-                        cu     = f"{count} {unit}".strip() if unit else count
-                        if cu:
-                            desc += f" [{cu}]"
-                        if start:
-                            desc += f" ({start}-{end})"
-                    amt = to_float(all_parts[0])
+                    count  = all_parts[9].strip() if len(all_parts) > 9 else ''
+                    unit   = all_parts[10].strip() if len(all_parts) > 10 else ''
+                    desc  += decode_charge_flag(flag, start=start, end=end, count=count, unit=unit,
+                                                billing_start=data['billing_period_start'],
+                                                billing_end=data['billing_period_end'])
+                    is_rollup = str(all_parts[0]).strip().upper() == 'ROLLUP'
+                    amt = None if is_rollup else to_float(all_parts[0])
                     current_product['charges'].append(
                         {'description': desc, 'amount': amt})
                     if amt:
@@ -413,7 +419,11 @@ def parse_nonvat_home(file_path: str) -> dict:
                 data['customer_vat_reg'] = value
 
     # ── post-parse ──────────────────────────────────────────────────
-    data['address_lines']       = reorder_addresses(raw_address)
+    data['address_lines']       = reorder_addresses(
+        raw_address,
+        currency_code=data.get('currency_code'),
+        country=data.get('country')
+    )
     data['show_vat_lines']      = is_vat_reg_printable(data['customer_vat_reg'])
     data['telephone_number']    = phone_finder.result
     data['top_level_discounts'] = top_discounts.discounts

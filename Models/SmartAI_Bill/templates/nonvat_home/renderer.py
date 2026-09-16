@@ -484,7 +484,7 @@ class NonVATHomeRenderer(BaseRenderer):
         payments = data.get("payments", [])
         f_pay_hdr = FONTS.get("payments_header", {"size": 7.5, "bold": True})
         f_pay_line = FONTS.get("payments_line", {"size": 7, "bold": False})
-        if data.get("total_payments") or payments:
+        if data.get("total_payments"):
             ensure_space(line_h * (len(payments) + 2.6))
             draw_text("Details of Payments Received", bold=f_pay_hdr["bold"], size=f_pay_hdr["size"])
             advance(1.2)
@@ -520,7 +520,7 @@ class NonVATHomeRenderer(BaseRenderer):
         sections = [s for s in data.get("usage_sections", []) if s["subsections"]]
         if sections:
             # On Page 1, payments are in the left column; detailed usage starts in the right column
-            if (data.get("total_payments") or payments or cancelled) and state["col"] == "left" and self.page_count() - 1 == first_page_idx:
+            if (data.get("total_payments") or cancelled) and state["col"] == "left" and self.page_count() - 1 == first_page_idx:
                 state["col"] = "right"
                 state["y"] = new_column_top()
 

@@ -13,6 +13,7 @@ from core.bill_common import (
     MARKETING_MESSAGE_TAGS,
     ADDRESS_PRINT_ORDER,
     is_vat_reg_printable,
+    decode_charge_flag,
 )
 
 _ITEM_TAG_RE = re.compile(
@@ -60,6 +61,7 @@ def parse_product_label_grouping(file_path: str) -> dict:
         # Customer-facing display currency.
         # This is read from ACCCURRENCYCODE, not SLTACCCURRENCYCODE.
         "currency_code": "",
+        "country": "",
 
         "payments": [],
         "cancelled_payments": [],
@@ -308,12 +310,19 @@ def parse_product_label_grouping(file_path: str) -> dict:
                             else ""
                         )
 
-                        if flag == "P":
-                            description += " [Rental]"
-                        elif flag == "O":
-                            description += " [One Time]"
-                        elif flag == "I":
-                            description += " [Initiation]"
+                        start = all_parts[6].strip() if len(all_parts) > 6 else ""
+                        end = all_parts[7].strip() if len(all_parts) > 7 else ""
+                        count = all_parts[9].strip() if len(all_parts) > 9 else ""
+                        unit = all_parts[10].strip() if len(all_parts) > 10 else ""
+                        description += decode_charge_flag(
+                            flag,
+                            start=start,
+                            end=end,
+                            count=count,
+                            unit=unit,
+                            billing_start=data["billing_period_start"],
+                            billing_end=data["billing_period_end"],
+                        )
 
                         amount = to_float(all_parts[0])
 
@@ -437,6 +446,9 @@ def parse_product_label_grouping(file_path: str) -> dict:
 
             elif key == "ZIPCODE":
                 data["zip_code"] = value
+            elif key == "COUNTRY":
+                data["country"] = value
+                raw_address["COUNTRY"] = value
 
             elif key == "BALFWD":
                 data["balance_bf"] = to_float(value)
@@ -501,62 +513,25 @@ def parse_product_label_grouping(file_path: str) -> dict:
                         else ""
                     )
 
-                    if flag == "P":
-                        description += " [Rental]"
-
-                        if (
-                            start
-                            and end
-                            and (
-                                start
-                                != data["billing_period_start"]
-                                or end
-                                != data["billing_period_end"]
-                            )
-                        ):
-                            description += f" ({start}-{end})"
-
-                    elif flag == "O":
-                        count = (
-                            all_parts[9].strip()
-                            if len(all_parts) > 9
-                            else ""
-                        )
-
-                        description += " [One Time]"
-
-                        if count:
-                            description += f" [{count}]"
-
-                        if start:
-                            description += f" ({start})"
-
-                    elif flag == "I":
-                        description += " [Initiation]"
-
-                        count = (
-                            all_parts[9].strip()
-                            if len(all_parts) > 9
-                            else ""
-                        )
-
-                        unit = (
-                            all_parts[10].strip()
-                            if len(all_parts) > 10
-                            else ""
-                        )
-
-                        count_unit = (
-                            f"{count} {unit}".strip()
-                            if unit
-                            else count
-                        )
-
-                        if count_unit:
-                            description += f" [{count_unit}]"
-
-                        if start:
-                            description += f" ({start}-{end})"
+                    count = (
+                        all_parts[9].strip()
+                        if len(all_parts) > 9
+                        else ""
+                    )
+                    unit = (
+                        all_parts[10].strip()
+                        if len(all_parts) > 10
+                        else ""
+                    )
+                    description += decode_charge_flag(
+                        flag,
+                        start=start,
+                        end=end,
+                        count=count,
+                        unit=unit,
+                        billing_start=data["billing_period_start"],
+                        billing_end=data["billing_period_end"],
+                    )
 
                     amount = to_float(all_parts[0])
 
@@ -742,7 +717,11 @@ def parse_product_label_grouping(file_path: str) -> dict:
     # -------------------------------------------------------------
     # Post-processing
     # -------------------------------------------------------------
-    data["address_lines"] = reorder_addresses(raw_address)
+    data["address_lines"] = reorder_addresses(
+        raw_address,
+        currency_code=data.get("currency_code"),
+        country=data.get("country"),
+    )
 
     data["show_vat_lines"] = is_vat_reg_printable(
         data["customer_vat_reg"]
@@ -767,7 +746,7 @@ def parse_product_label_grouping(file_path: str) -> dict:
     for product in data["product_labels"]:
         label = product["label"]
 
-        if label.isdigit() and 10 <= len(label) <= 11:
+        if label.isdigit() and len(label) == 10:
             data["telephone_number"] = label
             break
 

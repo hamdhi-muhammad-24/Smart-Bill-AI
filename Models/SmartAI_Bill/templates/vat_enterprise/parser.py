@@ -8,6 +8,7 @@ from core.bill_common import (
     reorder_addresses, TopLevelDiscountCollector, parse_cancel_payment,
     PhoneNumberFromNoSubRefBlock, MARKETING_MESSAGE_TAGS,
     ADDRESS_PRINT_ORDER, is_vat_reg_printable,
+    decode_charge_flag,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +54,7 @@ def parse_vat_enterprise(file_path: str) -> dict:
         # currency code, e.g. "LKR") - confirmed distinct tags/values in the
         # real GMF, must not be confused.
         "currency_code":         "",
+        "country":               "",
         "payments":              [],
         "cancelled_payments":    [],
         "total_payments":        0,
@@ -210,6 +212,21 @@ def parse_vat_enterprise(file_path: str) -> dict:
                         current_promo_product = {"label": name, "charges": []}
                         data['product_labels'].append(current_promo_product)
                         phone_finder.candidate(name)
+                        # BPR32: Delimiter #4 (rental) and Delimiter #6 (initiation) subtotals
+                        if len(all_parts) >= 4 and all_parts[2].upper() == 'RENTAL':
+                            rental_amt = to_float(all_parts[3])
+                            if rental_amt:
+                                current_promo_product['charges'].append(
+                                    {'description': f"{name} [Rental]", 'amount': rental_amt})
+                                phone_finder.confirm_charge()
+                        if len(all_parts) >= 6 and all_parts[4].upper() in ('ONEOFF', 'INITIATION'):
+                            init_amt = to_float(all_parts[5])
+                            if init_amt:
+                                current_promo_product['charges'].append(
+                                    {'description': f"{name} [Initiation]", 'amount': init_amt})
+                                phone_finder.confirm_charge()
+                    elif key == 'SLTPROMOSUBLABEL':
+                        phone_finder.candidate(value)
                     elif key == 'SLTPRODLABELDET' and current_promo_product:
                         all_parts = [value] + rest.split('|')
                         if len(all_parts) > 6:
@@ -218,13 +235,17 @@ def parse_vat_enterprise(file_path: str) -> dict:
                             desc   = f"{prefix} {suffix}".strip()
                             flag   = (all_parts[5].strip().upper()
                                       if len(all_parts) > 5 else '')
-                            if flag == 'P':
-                                desc += " [Rental]"
-                            elif flag == 'O':
-                                desc += " [One Time]"
-                            elif flag == 'I':
-                                desc += " [Initiation]"
-                            amt = to_float(all_parts[0])
+                            start  = all_parts[6].strip() if len(all_parts) > 6 else ''
+                            end    = all_parts[7].strip() if len(all_parts) > 7 else ''
+                            count  = (all_parts[9].strip()
+                                      if len(all_parts) > 9 else '')
+                            unit   = (all_parts[10].strip()
+                                      if len(all_parts) > 10 else '')
+                            desc  += decode_charge_flag(flag, start=start, end=end, count=count, unit=unit,
+                                                        billing_start=data['billing_period_start'],
+                                                        billing_end=data['billing_period_end'])
+                            is_rollup = str(all_parts[0]).strip().upper() == 'ROLLUP'
+                            amt = None if is_rollup else to_float(all_parts[0])
                             current_promo_product['charges'].append(
                                 {'description': desc, 'amount': amt})
                             if amt:
@@ -294,6 +315,9 @@ def parse_vat_enterprise(file_path: str) -> dict:
                         raw_address[key] = value
                 elif key == 'ZIPCODE':
                     data['zip_code'] = value
+                elif key == 'COUNTRY':
+                    data['country'] = value
+                    raw_address['COUNTRY'] = value
 
                 elif key == 'BALFWD':
                     data['balance_bf'] = to_float(value)
@@ -346,17 +370,9 @@ def parse_vat_enterprise(file_path: str) -> dict:
                         flag   = all_parts[3].strip().upper()
                         start  = all_parts[4].strip()
                         end    = all_parts[5].strip() if len(all_parts) > 5 else ''
-                        if flag in ('P', 'S'):
-                            desc += " [Rental]"
-                            if start and end and (
-                                start != data['billing_period_start'] or
-                                end   != data['billing_period_end']
-                            ):
-                                desc += f" ({start}-{end})"
-                        elif flag == 'O':
-                            desc += " [One Time]"
-                        elif flag == 'I':
-                            desc += " [Initiation]"
+                        desc  += decode_charge_flag(flag, start=start, end=end,
+                                                    billing_start=data['billing_period_start'],
+                                                    billing_end=data['billing_period_end'])
                         current_product['charges'].append(
                             {'description': desc, 'amount': amt})
                         phone_finder.confirm_charge()
@@ -375,37 +391,11 @@ def parse_vat_enterprise(file_path: str) -> dict:
                                   if len(all_parts) > 9 else '')
                         unit   = (all_parts[10].strip()
                                   if len(all_parts) > 10 else '')
-                        # A quantity of "0" with no unit text means "no real
-                        # quantity to show" (same rule as vat_home's parser -
-                        # `count` is a truthy non-empty STRING even when its
-                        # value is "0", so a bare `if count:` never catches
-                        # it). BPR: quantity must print for PARPROD too (was
-                        # previously omitted for flag P/S entirely).
-                        has_qty = count not in ('', '0') or unit not in ('', None)
-                        if flag in ('P', 'S'):  # S = Suspension Override, rendered as Rental
-                            desc += " [Rental]"
-                            if has_qty:
-                                cu = f"{count} {unit}".strip() if unit else count
-                                desc += f" [{cu}]"
-                            if start and end and (
-                                start != data['billing_period_start'] or
-                                end   != data['billing_period_end']
-                            ):
-                                desc += f" ({start}-{end})"
-                        elif flag == 'O':
-                            desc += " [One Time]"
-                            if count:
-                                desc += f" [{count}]"
-                            if start:
-                                desc += f" ({start})"
-                        elif flag == 'I':
-                            desc += " [Initiation]"
-                            cu = f"{count} {unit}".strip() if unit else count
-                            if cu:
-                                desc += f" [{cu}]"
-                            if start:
-                                desc += f" ({start}-{end})"
-                        amt = to_float(all_parts[0])
+                        desc  += decode_charge_flag(flag, start=start, end=end, count=count, unit=unit,
+                                                    billing_start=data['billing_period_start'],
+                                                    billing_end=data['billing_period_end'])
+                        is_rollup = str(all_parts[0]).strip().upper() == 'ROLLUP'
+                        amt = None if is_rollup else to_float(all_parts[0])
                         current_product['charges'].append(
                             {'description': desc, 'amount': amt})
                         if amt:
@@ -487,8 +477,11 @@ def parse_vat_enterprise(file_path: str) -> dict:
         logger.error(f"Error parsing {file_path}: {e}")
         raise
 
-    # ── post-parse ───────────────────────────────────────────────────
-    data['address_lines']       = reorder_addresses(raw_address)
+    data['address_lines']       = reorder_addresses(
+        raw_address,
+        currency_code=data.get('currency_code'),
+        country=data.get('country')
+    )
     data['telephone_number']    = phone_finder.result
     data['top_level_discounts'] = top_discounts.discounts
 

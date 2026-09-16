@@ -37,3 +37,7 @@ def is_vat_registered(customer_vat_ref: str) -> bool:
     if not customer_vat_ref:
         return False
     return not customer_vat_ref.strip().upper().startswith("VATDL")
+
+
+def is_svat_registered(raw_tags: dict) -> bool:
+    return bool((raw_tags or {}).get("CUST_SVAT_NUMBER", "").strip())

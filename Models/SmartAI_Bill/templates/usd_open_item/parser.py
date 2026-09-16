@@ -90,6 +90,10 @@ def _decode_flag(flag):
         return " [One Time]"
     if flag == 'I':
         return " [Initiation]"
+    if flag == 'E':
+        return " [Early Termination Charge]"
+    if flag == 'T':
+        return " [Termination Charge]"
     return ""
 
 

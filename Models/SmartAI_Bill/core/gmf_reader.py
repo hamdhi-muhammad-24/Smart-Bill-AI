@@ -11,16 +11,13 @@ BILL_HANDLING_CATEGORY = {
     '22': 'email',   # Corporate_E-statement by Report
     '23': 'email',   # E-Statement-App Mode
     '24': 'email',   # E-Statement by SMS
-    '10': 'email',   # By Hand - Operator
-    '11': 'email',   # By Hand - Special
-    '25': 'email',   # whatsapp
-    '26': 'email',   # cooparate e bill
-
     #Print only (hard copy delivery)
     '01': 'print',   # Hard Copy
     '05': 'print',   # Prestige - Post (treat as 01)
     '08': 'print',   # By Hand - Data
     '09': 'print',   # By Hand - BCU
+    '10': 'print',   # By Hand - Operator (BPR03)
+    '11': 'print',   # By Hand - Special (BPR03)
     '15': 'print',   # BCU Single side print
 
     #Both print and email/digital
@@ -61,6 +58,7 @@ class GMFHeader:
         self.doctype = None
         self.billstyle = None
         self.billtype = None
+        self.billseq = None
         self.customer_vat_ref = None
         self.customer_type = None
         self.acc_tax_status = None
@@ -127,9 +125,14 @@ def read_gmf_header(file_path: str) -> GMFHeader:
                                 header.billtype = int(value)
                             except ValueError:
                                 header.billtype = value
+                        elif key == 'BILLSEQ':
+                            try:
+                                header.billseq = int(value)
+                            except ValueError:
+                                header.billseq = value
                         elif key == 'CUSTOMERVATREF':
                             header.customer_vat_ref = value if value else None
-                        elif key == 'CUSTOMERTYPE':
+                        elif key in ('CUSTOMERTYPE', 'ACCCUSTOMERTYPE'):
                             header.customer_type = value
                         elif key == 'ACCTAXSTATUS':
                             header.acc_tax_status = value
