@@ -32,12 +32,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ? { Authorization: `Bearer ${token}` }
     : {}
 
+  // Auto-send cached email header to fast-track auth resolution without backend Graph calls
+  const customHeaders = (init?.headers as Record<string, string>) || {}
+  if (!customHeaders['X-User-Email']) {
+    try {
+      const raw = localStorage.getItem('slt-auth')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed?.email) {
+          authHeader['X-User-Email'] = parsed.email
+        }
+      }
+    } catch {}
+  }
+
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...authHeader,
-      ...(init?.headers ?? {}),
+      ...customHeaders,
     },
   })
 
@@ -77,8 +91,12 @@ export interface MeResponse {
 }
 
 
-export function authMe(): Promise<MeResponse> {
-  return request('/auth/me')
+export function authMe(emailHint?: string | unknown): Promise<MeResponse> {
+  const headers: Record<string, string> = {}
+  if (typeof emailHint === 'string' && emailHint) {
+    headers['X-User-Email'] = emailHint
+  }
+  return request('/auth/me', { headers })
 }
 
 // --- User Management Endpoints ---

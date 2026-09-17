@@ -10,7 +10,7 @@ import {
   Sun
 } from 'lucide-react'
 import { useTheme } from '@/components/ThemeProvider'
-import { useAuth } from '../auth/AuthProvider'
+import { useAuth, getDestinationRoute } from '../auth/AuthProvider'
 import { setToken } from '../lib/api'
 import Brand from '../components/Brand'
 import { Button } from '@/components/ui/button'
@@ -31,13 +31,7 @@ export default function Login() {
   // Redirect if already authenticated
   useEffect(() => {
     if (!isChecking && session) {
-      if (session.isNewUser) {
-        navigate('/request-access', { replace: true })
-      } else if (session.role === 'super_admin' || session.roles?.includes('SUPER_ADMIN')) {
-        navigate('/super-admin', { replace: true })
-      } else {
-        navigate('/role-select', { replace: true })
-      }
+      navigate(getDestinationRoute(session), { replace: true })
     }
   }, [isChecking, session, navigate])
 

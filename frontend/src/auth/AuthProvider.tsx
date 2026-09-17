@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { clearToken, setToken, getToken, authMe } from '../lib/api'
 import { useMsal } from '@azure/msal-react'
 import { InteractionStatus } from '@azure/msal-browser'
-import { loginRequest, clearStaleMsalInteractions } from './msalConfig'
+import { clearStaleMsalInteractions } from './msalConfig'
 
 export interface Session {
   role: 'admin' | 'gmf_handler' | 'envelope_handler' | 'manager' | 'super_admin' | 'customer'
@@ -36,6 +36,32 @@ function mapRole(r: string): Session['role'] {
   return 'customer'
 }
 
+export function getDestinationRoute(session: Session): string {
+  if (session.isNewUser) {
+    return '/request-access'
+  }
+  if (session.role === 'super_admin' || session.roles?.includes('SUPER_ADMIN')) {
+    return '/super-admin'
+  }
+  
+  // Normalized active roles
+  const activeRoles = session.roles && session.roles.length > 0
+    ? session.roles.map(r => r.toUpperCase())
+    : [session.role.toUpperCase()]
+
+  // If user only has 1 operational role, take them directly into that workspace
+  if (activeRoles.length === 1) {
+    const single = activeRoles[0]
+    if (single === 'ADMIN') return '/admin'
+    if (single === 'GMF_HANDLER' || single === 'ADMIN1') return '/gmf-handler'
+    if (single === 'ENVELOPE_HANDLER') return '/envelope-handler'
+    if (single === 'MANAGER') return '/manager'
+  }
+
+  // If user has multiple operational workspaces granted (e.g. testuser016)
+  return '/role-select'
+}
+
 function buildSessionFromMe(me: {
   id: number
   email: string
@@ -44,23 +70,25 @@ function buildSessionFromMe(me: {
   is_new_user?: boolean
   customer_id?: number | null
 }): Session {
-  if (me.is_new_user) {
-    return { role: 'customer', roles: [], email: me.email, isNewUser: true }
-  }
+  const cleanEmail = (me.email || '').trim().toLowerCase()
   const isSuper = me.role.toUpperCase() === 'SUPER_ADMIN' ||
     (me.roles && me.roles.map(r => r.toUpperCase()).includes('SUPER_ADMIN')) ||
-    me.email === 'testuser018@intranet.slt.com.lk'
+    cleanEmail === 'testuser018@intranet.slt.com.lk'
 
   if (isSuper) {
-    return { role: 'super_admin', roles: ['SUPER_ADMIN'], email: me.email }
+    return { role: 'super_admin', roles: ['SUPER_ADMIN'], email: cleanEmail }
+  }
+
+  if (me.is_new_user) {
+    return { role: 'customer', roles: [], email: cleanEmail, isNewUser: true }
   }
 
   const mappedRole = mapRole(me.role)
   const allRoles = me.roles ?? [me.role.toUpperCase()]
   if (mappedRole === 'customer' && me.customer_id != null) {
-    return { role: 'customer', roles: allRoles, email: me.email, customerId: me.customer_id }
+    return { role: 'customer', roles: allRoles, email: cleanEmail, customerId: me.customer_id }
   }
-  return { role: mappedRole, roles: allRoles, email: me.email }
+  return { role: mappedRole, roles: allRoles, email: cleanEmail }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -95,29 +123,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isInitializing.current = true
 
       try {
-        let token: string | null = null
-        let account = accounts[0] || instance.getAllAccounts()[0] || null
+        let token: string | null = getToken()
+        let account = instance.getActiveAccount() || accounts[0] || instance.getAllAccounts()[0] || null
 
-        // 1. Check redirect result from MSAL
-        try {
-          const redirectResult = await instance.handleRedirectPromise()
-          if (redirectResult) {
-            token = redirectResult.idToken || redirectResult.accessToken || null
-            if (redirectResult.account) {
-              account = redirectResult.account
-              instance.setActiveAccount(redirectResult.account)
+        // 1. Check redirect result from MSAL if token not already captured
+        if (!token) {
+          try {
+            const redirectResult = await instance.handleRedirectPromise()
+            if (redirectResult) {
+              token = redirectResult.idToken || redirectResult.accessToken || null
+              if (redirectResult.account) {
+                account = redirectResult.account
+                instance.setActiveAccount(redirectResult.account)
+              }
             }
+          } catch (e) {
+            console.warn('handleRedirectPromise exception (non-fatal):', e)
           }
-        } catch (e) {
-          console.warn('handleRedirectPromise exception (non-fatal):', e)
         }
 
-        // 2. If no redirect token, but an MSAL account exists, acquire token silently
+        if (account) {
+          instance.setActiveAccount(account)
+        }
+
+        // 2. If no token, but an MSAL account exists, acquire token silently
         if (!token && account) {
           try {
-            instance.setActiveAccount(account)
             const silentResult = await instance.acquireTokenSilent({
-              ...loginRequest,
+              scopes: ['openid', 'profile', 'email'],
               account,
             })
             token = silentResult.idToken || silentResult.accessToken || null
@@ -126,58 +159,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // 3. If token obtained from MSAL (redirect or silent):
+        // 3. If token obtained from MSAL or existing stored token:
         if (token) {
           setToken(token)
           sessionStorage.removeItem('msal-post-login')
 
           try {
-            const me = await authMe()
+            const emailHint = account?.username || undefined
+            const me = await authMe(emailHint)
             const s = buildSessionFromMe(me)
             setSession(s)
             localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
 
             const currentPath = window.location.pathname
             if (currentPath === '/login' || currentPath === '/') {
-              if (me.is_new_user) {
-                navigate('/request-access', { replace: true })
-              } else if (s.role === 'super_admin' || s.roles.includes('SUPER_ADMIN')) {
-                navigate('/super-admin', { replace: true })
-              } else {
-                navigate('/role-select', { replace: true })
-              }
+              navigate(getDestinationRoute(s), { replace: true })
             }
             return
           } catch (authErr) {
             console.error('authMe error with MSAL token:', authErr)
-          }
-        }
-
-        // 4. Check existing stored token (e.g. dev token or persistent session)
-        const storedToken = getToken()
-        if (storedToken) {
-          if (storedToken.startsWith('dev-')) {
-            try {
-              const me = await authMe()
-              const s = buildSessionFromMe(me)
-              setSession(s)
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-            } catch {
-              const raw = localStorage.getItem(STORAGE_KEY)
-              if (raw) {
-                setSession(JSON.parse(raw))
-              }
+            const raw = localStorage.getItem(STORAGE_KEY)
+            if (raw) {
+              try {
+                const cached = JSON.parse(raw)
+                setSession(cached)
+                const currentPath = window.location.pathname
+                if (currentPath === '/login' || currentPath === '/') {
+                  navigate(getDestinationRoute(cached), { replace: true })
+                }
+                return
+              } catch {}
             }
-            return
-          }
-
-          try {
-            const me = await authMe()
-            const s = buildSessionFromMe(me)
-            setSession(s)
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-            return
-          } catch {
             clearToken()
             localStorage.removeItem(STORAGE_KEY)
             setSession(null)
@@ -185,12 +197,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // 5. No stored token and no active MSAL account
+        // 4. No token and no active MSAL account
         setSession(null)
       } catch (err) {
         console.error('AuthProvider init error:', err)
         const raw = localStorage.getItem(STORAGE_KEY)
-        if (!raw) {
+        if (raw) {
+          try {
+            setSession(JSON.parse(raw))
+          } catch {}
+        } else {
           clearToken()
           localStorage.removeItem(STORAGE_KEY)
           setSession(null)

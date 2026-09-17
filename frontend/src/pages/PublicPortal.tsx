@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Bot,
@@ -16,7 +17,7 @@ import {
   Mail
 } from 'lucide-react'
 import { useTheme } from '@/components/ThemeProvider'
-import { useAuth } from '../auth/AuthProvider'
+import { useAuth, getDestinationRoute } from '../auth/AuthProvider'
 import Brand from '../components/Brand'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -134,13 +135,19 @@ const supportLinks = [
 ]
 
 export default function PublicPortal() {
-  const { session } = useAuth()
+  const { session, isChecking } = useAuth()
   const { resolvedTheme, toggleTheme } = useTheme()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!isChecking && session) {
+      navigate(getDestinationRoute(session), { replace: true })
+    }
+  }, [isChecking, session, navigate])
+
   const signInPath = !session
     ? '/login'
-    : session.isNewUser
-    ? '/request-access'
-    : '/role-select'
+    : getDestinationRoute(session)
 
   function resolveActionPath(action: (typeof actionCards)[number]): string {
     if (action.path === 'signin') return signInPath

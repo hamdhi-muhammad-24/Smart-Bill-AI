@@ -34,10 +34,26 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 
 import { MsalProvider } from '@azure/msal-react'
 import { msalInstance } from './auth/msalConfig'
+import { setToken } from './lib/api'
 
 async function startApp() {
   try {
     await msalInstance.initialize()
+    const redirectResponse = await msalInstance.handleRedirectPromise()
+    if (redirectResponse) {
+      if (redirectResponse.account) {
+        msalInstance.setActiveAccount(redirectResponse.account)
+      }
+      const token = redirectResponse.idToken || redirectResponse.accessToken
+      if (token) {
+        setToken(token)
+      }
+    } else {
+      const accounts = msalInstance.getAllAccounts()
+      if (accounts.length > 0 && !msalInstance.getActiveAccount()) {
+        msalInstance.setActiveAccount(accounts[0])
+      }
+    }
   } catch (err) {
     console.error('MSAL initialization error:', err)
   }
