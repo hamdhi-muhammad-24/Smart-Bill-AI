@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 # Ensure Models/SmartAI_Bill is in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "Models", "SmartAI_Bill")))
 
-from processing.output_manager import create_date_output_zip
+from processing.output_manager import create_date_output_zip, list_output_dates
 from app.api.main import app
 from app.auth.dependencies import get_current_user, require_admin
 from app.auth.schemas import UserOut
@@ -134,3 +134,38 @@ def test_download_date_output_endpoint_success(test_client, tmp_path):
     with zipfile.ZipFile(zip_bytes, "r") as zf:
         assert "Cycle_1/Batch_1/bill.pdf" in zf.namelist()
         assert zf.read("Cycle_1/Batch_1/bill.pdf") == b"%PDF-1.4 sample bill"
+
+
+def test_list_output_dates_excludes_super_admin_reports_and_previews(tmp_path):
+    """Ensure non-date and privileged folders like super_admin_reports and previews are excluded."""
+    output_root = tmp_path / "output"
+    (output_root / "2026-09-17").mkdir(parents=True)
+    (output_root / "2026-09-16").mkdir(parents=True)
+    (output_root / "super_admin_reports").mkdir(parents=True)
+    (output_root / "previews").mkdir(parents=True)
+    (output_root / "arbitrary_folder").mkdir(parents=True)
+
+    with patch("processing.output_manager.get_output_roots", return_value=[str(output_root)]):
+        dates = list_output_dates()
+
+    assert "super_admin_reports" not in dates
+    assert "previews" not in dates
+    assert "arbitrary_folder" not in dates
+    assert dates == ["2026-09-17", "2026-09-16"]
+
+
+def test_super_admin_reports_not_accessible_via_billing_api(test_client, tmp_path):
+    """Ensure super_admin_reports cannot be downloaded or browsed via the standard billing endpoints."""
+    output_root = tmp_path / "output"
+    report_dir = output_root / "super_admin_reports"
+    report_dir.mkdir(parents=True)
+    (report_dir / "report.pdf").write_bytes(b"%PDF-1.4 report")
+
+    with patch("processing.output_manager.get_output_roots", return_value=[str(output_root)]):
+        # Listing cycles for super_admin_reports returns 404
+        res_cycles = test_client.get("/billing/output/super_admin_reports")
+        assert res_cycles.status_code == 404
+
+        # Downloading zip for super_admin_reports returns 404
+        res_download = test_client.get("/billing/output/super_admin_reports/download")
+        assert res_download.status_code == 404
