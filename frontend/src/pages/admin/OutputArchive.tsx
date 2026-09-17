@@ -112,7 +112,7 @@ export default function OutputArchive() {
               {selectedCategory && (<><ChevronRight size={14} className="text-muted-foreground" /><span className="cursor-pointer hover:text-foreground" onClick={() => setSelectedRedLevel(null)}>{selectedCategory}</span></>)}
               {selectedRedLevel && (<><ChevronRight size={14} className="text-muted-foreground" /><span>{selectedRedLevel}</span></>)}
             </div>
-            {selectedDate && (
+            {selectedDate && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -137,33 +137,40 @@ export default function OutputArchive() {
             {/* DATES */}
             {navLevel === 'dates' && (
               loadingDates ? <div className="flex justify-center p-4"><Loader2 className="animate-spin text-muted-foreground" /></div> :
-              datesData?.dates.length === 0 ? <div className="text-center p-4 text-muted-foreground text-sm">No outputs found.</div> :
-              datesData?.dates.map(date => (
-                <div
-                  key={date}
-                  onClick={() => setSelectedDate(date)}
-                  className="flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-muted text-sm group transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Folder size={16} className="text-blue-400 fill-blue-400/20" />
-                    <span className="font-medium">{date}</span>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                    title={`Download ${date} as ZIP`}
-                    onClick={(e) => handleDownloadDateZip(date, e)}
-                    disabled={downloadingDate === date}
+              (() => {
+                const validDates = (datesData?.dates ?? []).filter(
+                  date => /^\d{4}-\d{2}-\d{2}$/.test(date) && date !== 'super_admin_reports' && date !== 'previews'
+                )
+                if (validDates.length === 0) {
+                  return <div className="text-center p-4 text-muted-foreground text-sm">No outputs found.</div>
+                }
+                return validDates.map(date => (
+                  <div
+                    key={date}
+                    onClick={() => setSelectedDate(date)}
+                    className="flex items-center justify-between p-2 rounded-lg cursor-pointer hover:bg-muted text-sm group transition-colors"
                   >
-                    {downloadingDate === date ? (
-                      <Loader2 size={14} className="animate-spin text-primary" />
-                    ) : (
-                      <Download size={14} />
-                    )}
-                  </Button>
-                </div>
-              ))
+                    <div className="flex items-center gap-2">
+                      <Folder size={16} className="text-blue-400 fill-blue-400/20" />
+                      <span className="font-medium">{date}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                      title={`Download ${date} as ZIP`}
+                      onClick={(e) => handleDownloadDateZip(date, e)}
+                      disabled={downloadingDate === date}
+                    >
+                      {downloadingDate === date ? (
+                        <Loader2 size={14} className="animate-spin text-primary" />
+                      ) : (
+                        <Download size={14} />
+                      )}
+                    </Button>
+                  </div>
+                ))
+              })()
             )}
 
             {/* CYCLES */}
