@@ -55,6 +55,7 @@ from processing.output_manager import (
     list_pdfs_in_batch,
     get_pdf_path,
     create_date_output_zip,
+    is_valid_output_date_str,
 )
 from templates.registry import TEMPLATE_REGISTRY, get_parser
 from app.billing.worker_queue import TEMPLATE_FOLDER_MAP
@@ -1579,10 +1580,8 @@ def download_date_output(
     _: UserOut = Depends(require_admin),
 ):
     """Download all output files for a date as a ZIP archive, maintaining folder structure."""
-    import re
-
-    if not date_str or not re.match(r'^[A-Za-z0-9_\-]+$', date_str):
-        raise HTTPException(status_code=400, detail="Invalid date format")
+    if not is_valid_output_date_str(date_str):
+        raise HTTPException(status_code=404, detail=f"Invalid output date or unauthorized archive: {date_str}")
 
     dates = list_output_dates()
     if date_str not in dates:
@@ -1621,6 +1620,8 @@ def download_date_output(
 @router.get("/output/{date_str}")
 def output_cycles(date_str: str, _: UserOut = Depends(require_admin)):
     """List all cycles (Cycle_1, etc.) for a given date."""
+    if not is_valid_output_date_str(date_str):
+        raise HTTPException(status_code=404, detail=f"No output found for date: {date_str}")
     cycles = list_cycles_for_date(date_str)
     if not cycles:
         raise HTTPException(status_code=404, detail=f"No output found for date: {date_str}")
@@ -1630,6 +1631,11 @@ def output_cycles(date_str: str, _: UserOut = Depends(require_admin)):
 @router.get("/output/{date_str}/{cycle}")
 def output_batches(date_str: str, cycle: str, _: UserOut = Depends(require_admin)):
     """List all batches for a given date and cycle."""
+    if not is_valid_output_date_str(date_str):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No batches found for {date_str}/{cycle}"
+        )
     batches = list_batches_for_cycle(date_str, cycle)
     if not batches:
         raise HTTPException(
@@ -1650,6 +1656,8 @@ def output_pdfs(
     _: UserOut = Depends(require_admin)
 ):
     """List all PDF files in a specific batch."""
+    if not is_valid_output_date_str(date_str):
+        raise HTTPException(status_code=404, detail=f"No output found for date: {date_str}")
     pdfs = list_pdfs_in_batch(date_str, cycle, batch)
     return {"date": date_str, "cycle": cycle, "batch": batch, "files": pdfs}
 
@@ -1663,6 +1671,8 @@ def serve_pdf(
     if batch == "COMPLETED_TEMP":
         path = os.path.abspath(os.path.join("./queue/completed_temp", cycle, filename))
     else:
+        if not is_valid_output_date_str(date_str):
+            raise HTTPException(status_code=404, detail="PDF file not found")
         path = get_pdf_path(date_str, cycle, batch, filename)
         
     if not os.path.exists(path):
