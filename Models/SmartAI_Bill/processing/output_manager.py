@@ -6,6 +6,7 @@ Organised folder-based output browser support for both local ./output and Drive 
   G:/My Drive/SLT_GMF_Uploads/Output/<YYYY-MM-DD>/<Cycle_or_Template>/Batch_1/
 """
 import os
+import re
 import shutil
 from datetime import datetime
 from config import BATCH_FOLDER_SIZE, OUTPUT_BASE_DIR
@@ -174,13 +175,26 @@ def get_output_root(date_str=None, cycle_label=None):
     return os.path.join(*parts)
 
 
+DATE_DIR_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+EXCLUDED_OUTPUT_DIRS = frozenset({"previews", "super_admin_reports"})
+
+
+def is_valid_output_date_str(date_str: str) -> bool:
+    """Return True if date_str is a valid YYYY-MM-DD date and not an excluded system folder."""
+    if not date_str or not isinstance(date_str, str):
+        return False
+    if date_str in EXCLUDED_OUTPUT_DIRS or date_str.startswith(".") or date_str.startswith("_"):
+        return False
+    return bool(DATE_DIR_PATTERN.match(date_str))
+
+
 def list_output_dates():
     """Return sorted list of dates that have output across all output root locations, newest first."""
     dates = set()
     for root in get_output_roots():
         if os.path.exists(root):
             for d in os.listdir(root):
-                if d == "previews":
+                if not is_valid_output_date_str(d):
                     continue
                 if os.path.isdir(os.path.join(root, d)):
                     dates.add(d)
@@ -189,23 +203,26 @@ def list_output_dates():
 
 def list_cycles_for_date(date_str):
     """Return list of cycle/template folders for a given date across all output roots."""
+    if not is_valid_output_date_str(date_str):
+        return []
     cycles = set()
     for root in get_output_roots():
         date_path = os.path.join(root, date_str)
-        if os.path.exists(date_path):
+        if os.path.exists(date_path) and os.path.isdir(date_path):
             for d in os.listdir(date_path):
                 if os.path.isdir(os.path.join(date_path, d)):
                     cycles.add(d)
-    import re
     return sorted(list(cycles), key=lambda x: [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', x)])
 
 
 def list_batches_for_cycle(date_str, cycle_label):
     """Return list of batch folders for a given date/cycle across all output roots."""
+    if not is_valid_output_date_str(date_str):
+        return []
     batches = set()
     for root in get_output_roots():
         cycle_path = os.path.join(root, date_str, cycle_label)
-        if os.path.exists(cycle_path):
+        if os.path.exists(cycle_path) and os.path.isdir(cycle_path):
             has_direct_pdfs = False
             for d in os.listdir(cycle_path):
                 full_p = os.path.join(cycle_path, d)
@@ -215,7 +232,6 @@ def list_batches_for_cycle(date_str, cycle_label):
                     has_direct_pdfs = True
             if has_direct_pdfs:
                 batches.add("Batch_01")
-    import re
     return sorted(list(batches), key=lambda x: [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', x)])
 
 
@@ -613,9 +629,8 @@ def create_date_output_zip(date_str: str, target_zip_path: str) -> int:
         The total number of files added to the archive.
     """
     import zipfile
-    import re
 
-    if not date_str or not re.match(r'^[A-Za-z0-9_\-]+$', date_str):
+    if not is_valid_output_date_str(date_str):
         raise ValueError(f"Invalid date format: {date_str}")
 
     roots = get_output_roots()
