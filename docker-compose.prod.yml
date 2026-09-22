@@ -1,6 +1,13 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "20m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16-alpine
+    logging: *default-logging
     environment:
       POSTGRES_DB: slt_ebill
       POSTGRES_USER: postgres
@@ -16,6 +23,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    logging: *default-logging
     environment:
       TZ: Asia/Colombo
     volumes:
@@ -28,6 +36,7 @@ services:
 
   mailpit:
     image: axllent/mailpit:latest
+    logging: *default-logging
     ports:
       - "8025:8025"   # web UI to see sent emails
       - "1025:1025"   # SMTP
@@ -37,6 +46,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    logging: *default-logging
     command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --workers 4
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/slt_ebill
@@ -83,6 +93,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    logging: *default-logging
     command: celery -A app.scheduler.celery_app worker --loglevel=info
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/slt_ebill
@@ -115,6 +126,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    logging: *default-logging
     command: python -m app.billing.worker_queue
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/slt_ebill
@@ -138,6 +150,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    logging: *default-logging
     command: celery -A app.scheduler.celery_app beat --loglevel=info
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/slt_ebill
@@ -164,6 +177,7 @@ services:
         VITE_API_BASE_URL: https://smartbills.sltdigitallab.lk
         VITE_AZURE_CLIENT_ID: 0d42d2c9-48a3-4924-980e-68c613f6737b
         VITE_AZURE_TENANT_ID: 534253fc-dfb6-462f-b5ca-cbe81939f5ee
+    logging: *default-logging
     ports:
       - "8080:80"
     depends_on:

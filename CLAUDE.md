@@ -161,4 +161,7 @@ docker exec -it slt-billing-backend-1 python -m app.db.seed
 # 4. Clean reset of test data on VM (if requested)
 docker exec -it slt-billing-backend-1 python reset_test_data.py -y
 rclone sync /var/slt-billing/output_invoices gdrive:SLT_Output_Invoices
+
+# 5. Routine VM Disk Maintenance / Storage Cleanup
+bash /root/clean_vm.sh
 ```
