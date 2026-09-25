@@ -46,6 +46,8 @@ def parse_invoice_of_summary(file_path: str) -> dict:
         "discounts":             [],
         "top_level_discounts":   [],
         "taxes":                 [],
+        "inv_total_tax":         None,
+        "taxes_total":           0.0,
         "tax_status":            "",
         "total_charges":         0,
         # Customer-facing display currency, e.g. "Rs" - from ACCCURRENCYCODE.
@@ -277,11 +279,10 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                         desc   = f"{prefix} {suffix}".strip()
                         flag   = (all_parts[5].strip().upper()
                                   if len(all_parts) > 5 else '')
+                        is_rollup = str(all_parts[0]).strip().upper() == 'ROLLUP'
                         amt = to_float(all_parts[0])
-
-                        # Skip zero-amount charges (BPR20: [SAPROD 0])
-                        if amt == 0:
-                            continue
+                        # BPR20: If #1 delimiter is zero/ROLLUP, print without charge
+                        charge_amt = None if (is_rollup or amt == 0) else amt
 
                         if flag == 'P':
                             desc += " [Rental]"
@@ -319,7 +320,7 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                                     desc += f" [{start_date}]"
 
                         current_promo_product['charges'].append(
-                            {'description': desc, 'amount': amt})
+                            {'description': desc, 'amount': charge_amt})
 
                 elif key == 'SLTPRODLABELDISCDET' and current_promo_product:
                     all_parts = [value] + [p.strip()
@@ -394,6 +395,8 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                 data['total_payable'] = to_float(value)
             elif key == 'ACCCURRENCYCODE':
                 data['currency_code'] = value
+            elif key == 'INVTOTALTAX':
+                data['inv_total_tax'] = to_float(value)
 
             elif key == 'SLT_RENTAL_SUBTOTAL':
                 data['rental_subtotal'] = to_float(value)
@@ -470,11 +473,10 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                     desc   = f"{prefix} {suffix}".strip()
                     flag   = (all_parts[5].strip().upper()
                               if len(all_parts) > 5 else '')
+                    is_rollup = str(all_parts[0]).strip().upper() == 'ROLLUP'
                     amt = to_float(all_parts[0])
-
-                    # Skip zero-amount charges (BPR20: [SAPROD 0])
-                    if amt == 0:
-                        continue
+                    # BPR20: If #1 delimiter is zero/ROLLUP, print without charge
+                    charge_amt = None if (is_rollup or amt == 0) else amt
 
                     if flag == 'P':
                         desc += " [Rental]"
@@ -510,7 +512,7 @@ def parse_invoice_of_summary(file_path: str) -> dict:
                                 desc += f" [{start_date}]"
 
                     current_product['charges'].append(
-                        {'description': desc, 'amount': amt})
+                        {'description': desc, 'amount': charge_amt})
 
             elif key == 'SLTPRODLABELUSAGEDET':
                 raw       = [p.strip() for p in rest.split('|') if p.strip()]
@@ -629,6 +631,10 @@ def parse_invoice_of_summary(file_path: str) -> dict:
         return 99
 
     data['taxes'] = sorted(data.get('taxes', []), key=_tax_sort_key)
+    if data.get('inv_total_tax') is not None:
+        data['taxes_total'] = data['inv_total_tax']
+    else:
+        data['taxes_total'] = sum(t.get('amount', 0) for t in data.get('taxes', []))
 
     data['usage_sections'] = list(usage_sections.values())
     return data

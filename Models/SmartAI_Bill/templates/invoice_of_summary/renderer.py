@@ -47,11 +47,23 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._y        = CHARGES_TABLE["otherpage_y_start"]
         self._on_page1 = True
 
+    def _record_post_tc_extent(self, y_val):
+        if not getattr(self, "_tracking_post_tc", False):
+            return
+        if not hasattr(self, "_post_tc_extents"):
+            self._post_tc_extents = {}
+        idx = self.page_count() - 1
+        ext = self._post_tc_extents.setdefault(idx, {"top": y_val, "bottom": y_val})
+        ext["top"] = max(ext["top"], y_val)
+        ext["bottom"] = min(ext["bottom"], y_val)
+
     def text(self, x, y, value, size=10, bold=False, align="left"):
         """Override the base Helvetica text() with Calibri, scoped to this
         template only."""
         if value is None or value == "":
             return
+        if getattr(self, "_tracking_post_tc", False):
+            self._record_post_tc_extent(y)
         c = self.canvas
         font = "Calibri-Bold" if bold else "Calibri"
         c.setFont(font, size)
@@ -82,18 +94,30 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._draw_adjustments_flowing(data)
         self._draw_top_level_discounts_flowing(data)
         self._draw_discounts_and_taxes_flowing(data)
+        self._tracking_post_tc = True
+        self._post_tc_extents = {}
         self._draw_payments_flowing(data)
         self._draw_cancel_payments_flowing(data)
         self._draw_messages_flowing(data)
         self._draw_usage_sections(data)
+        self._draw_post_tc_vertical_dividers()
+        self._tracking_post_tc = False
 
         self._stamp_all_page_indicators(data)
 
 
+    def _should_show_vat_lines(self, data):
+        """VAT registration details and Tax Invoice label should only apply
+        where CUSTOMERVATREF has a number. If the number is all 0 or has VATDL,
+        we do not print those details."""
+        if "show_vat_lines" in data and not data["show_vat_lines"]:
+            return False
+        return is_vat_reg_printable(data.get("customer_vat_reg"))
+
     def _draw_header(self, data):
         f = FONTS["header"]
         fa = FONTS.get("account_details", {"size": 9, "bold": False})
-        if data.get("show_vat_lines"):
+        if self._should_show_vat_lines(data):
             self.text(*COORDS["tax_invoice_label"], "Tax Invoice", size=12, bold=True)
         self.text(*COORDS["telephone_number"], data["telephone_number"],
                   size=f["size"], bold=f["bold"])
@@ -108,8 +132,8 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self.text(*COORDS["billing_period"], period, size=fa["size"], bold=fa["bold"])
 
     def _draw_vat_lines(self, data):
-        """BPR05/07: only when show_vat_lines is True (VATDL check)."""
-        if not data.get("show_vat_lines"):
+        """BPR05/07: only when customer VAT ref has a valid number (omitted if all 0s or VATDL)."""
+        if not self._should_show_vat_lines(data):
             return
         f = FONTS.get("vat_reg", FONTS["header"])
         if data.get("slt_vat_reg"):
@@ -246,7 +270,6 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         amt_x = COORDS["summary_amount_x"]
         lh    = COORDS["summary_line_h"]
         f     = FONTS["taxes"]
-        fc    = 7
 
         self._y = COORDS["summary_y_start"]
 
@@ -281,21 +304,30 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         if discounts:
             _line("Discounts", bold=True)
             for d in discounts:
-                _line(d["description"], d["amount"], size=fc)
+                _line(d["description"], d["amount"])
 
         if data.get('adjustments_subtotal'):
             _line("Subtotal Adjustment charges",
                   data['adjustments_subtotal'], bold=True)
 
-        # Taxes & Levies: VAT-18%, Recovery in lieu of SSCL, Telecommunication Levy-15%, CESS
+        # Taxes & Levies:
+        # BPR05 / Sheet 18: VAT Registered -> itemized breakdown separated by TAXCODE
+        # BPR06 / Sheet 19: NON-VAT Registered -> summation of TAXES (single line)
+        total_tax = data.get("inv_total_tax")
+        if total_tax is None:
+            total_tax = data.get("taxes_total") if data.get("taxes_total") is not None else sum(t.get("amount", 0) for t in data.get("taxes", []))
+
         taxes = _sort_taxes(data.get("taxes", []))
-        has_nonzero = any(t.get('amount') for t in taxes)
-        if taxes and is_tax_section_printable(
+        has_nonzero = bool(total_tax) or any(t.get('amount') for t in taxes)
+        if has_nonzero and is_tax_section_printable(
                 data.get('tax_status'), has_nonzero):
             _line("Taxes & Levies", bold=True)
-            for t in taxes:
-                if t.get('amount'):
-                    _line(t["name"], t['amount'], size=fc)
+            if self._should_show_vat_lines(data):
+                for t in taxes:
+                    if t.get('amount'):
+                        _line(t["name"], t['amount'])
+            else:
+                _line("Taxes & Levies", total_tax)
 
     def _draw_total_charges_dynamic(self, data):
         """Total, drawn right after the summary block finishes, following
@@ -314,6 +346,8 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         c.setStrokeColor(black)
         c.line(x, y + 11, ax, y + 11)   # Top horizontal line
         c.line(x, y - 5, ax, y - 5)     # Bottom horizontal line
+        self._tc_bottom_y = y - 5
+        self._tc_page_idx = self.page_count() - 1
 
         c.setFont("Calibri-Bold", f["size"])
         c.drawString(x, y, "Total Charges for the Period")
@@ -338,7 +372,7 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         fs    = size if size is not None else CHARGES_TABLE["font_size"]
         x_pos = x if x is not None else CHARGES_TABLE["desc_x"]
         self.text(x_pos, self._y, text, size=fs, bold=bold)
-        if amount:
+        if amount is not None:
             if isinstance(amount, (int, float)) and amount < 0:
                 self.text(CHARGES_TABLE["amount_x"], self._y,
                           f"- {abs(amount):,.2f}",
@@ -369,12 +403,8 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._y -= CHARGES_TABLE["line_h"] + 6
 
         if not data["charge_groups"]:
-            # BPR08: When charges are empty, print heading & zero Total Charge
-            f = FONTS["total"]
-            self._write_line("Total Charge for the Period",
-                             amount=0.0,
-                             bold=True, size=f["size"], x=x)
-            self._y -= CHARGES_TABLE["line_h"] * 0.5
+            # BPR08: When charges are empty, heading is drawn and
+            # _draw_discounts_and_taxes_flowing draws the framed zero Total Charge.
             return
 
         for group in data["charge_groups"]:
@@ -440,19 +470,29 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         """
         grx = CHARGES_TABLE["group_ref_x"]
 
-        # Taxes & Levies: VAT-18%, Recovery in lieu of SSCL, Telecommunication Levy-15%, CESS
+        # Taxes & Levies:
+        # BPR05 / Sheet 18: VAT Registered -> itemized breakdown separated by TAXCODE
+        # BPR06 / Sheet 19: NON-VAT Registered -> summation of TAXES (single line)
+        total_tax = data.get("inv_total_tax")
+        if total_tax is None:
+            total_tax = data.get("taxes_total") if data.get("taxes_total") is not None else sum(t.get("amount", 0) for t in data.get("taxes", []))
+
         taxes = _sort_taxes(data.get("taxes", []))
-        has_nonzero = any(t.get('amount') for t in taxes)
+        has_nonzero = bool(total_tax) or any(t.get('amount') for t in taxes)
         f_th = FONTS.get("taxes_header", {"size": 9.5, "bold": True})
         f_tl = FONTS.get("taxes_line", {"size": 9, "bold": False})
-        if taxes and is_tax_section_printable(
+        if has_nonzero and is_tax_section_printable(
                 data.get('tax_status'), has_nonzero):
             self._write_line("Taxes & Levies", bold=f_th["bold"], size=f_th["size"], x=grx)
-            for t in taxes:
-                if t.get("amount"):
-                    self._write_line(t["name"],
-                                     amount=t["amount"],
-                                     bold=f_tl["bold"], size=f_tl["size"], x=grx)
+            if self._should_show_vat_lines(data):
+                for t in taxes:
+                    if t.get("amount"):
+                        self._write_line(t["name"],
+                                         amount=t["amount"],
+                                         bold=f_tl["bold"], size=f_tl["size"], x=grx)
+            else:
+                self._write_line("Taxes & Levies", amount=total_tax,
+                                 bold=f_tl["bold"], size=f_tl["size"], x=grx)
 
         # Total Charges framed by top/bottom horizontal lines (not a box)
         self._y -= CHARGES_TABLE["line_h"] * 0.3
@@ -464,6 +504,8 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
             c.setStrokeColor(black)
             c.line(32.5, self._y + 9, 560.5, self._y + 9)    # Top horizontal line
             c.line(32.5, self._y - 5, 560.5, self._y - 5)    # Bottom horizontal line
+            self._tc_bottom_y = self._y - 5
+            self._tc_page_idx = self.page_count() - 1
         except AttributeError:
             pass
 
@@ -485,12 +527,6 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         payments = data.get("payments", [])
         needed = CHARGES_TABLE["line_h"] * (len(payments) + 3)
         self._ensure_space(needed=needed)
-
-        # Remember where this block starts so the usage-table vertical
-        # divider can extend up to start here, instead of at its own
-        # header lower down the page.
-        self._divider_top_y   = self._y
-        self._divider_top_page = self.page_count() - 1
 
         self._write_line("Details of Payments Received",
                          bold=f_hdr["bold"], size=f_hdr["size"], x=grx)
@@ -607,22 +643,13 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         return u["left_box_right"] if self._usage_col == 0 else u["right_box_right"]
 
     def _usage_draw_divider(self):
-        page_idx = self.page_count() - 1
-        if page_idx in self._usage_divider_drawn_pages:
-            return
-        self._usage_divider_drawn_pages.add(page_idx)
-        u = USAGE_TABLE_2COL
-        try:
-            c = self.canvas
-            c.setLineWidth(0.5)
-            c.line(u["vert_line_x"], u["page_bottom"],
-                   u["vert_line_x"], u["page_top"])
-        except AttributeError:
-            pass
+        """Divider suppressed: print vendor format does not use a full-page vertical line."""
+        pass
 
     def _usage_ensure_space(self, needed):
         u = USAGE_TABLE_2COL
-        if self._y - needed < u["page_bottom"]:
+        y_min = self.get_page1_y_min(CHARGES_TABLE["page1_y_min"]) if getattr(self, "_on_page1", False) else u["page_bottom"]
+        if self._y - needed < y_min:
             if self._usage_col == 0:
                 # left column full -> move to right column, same page
                 self._usage_col = 1
@@ -707,6 +734,8 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                            size=7, bold=False):
         """Draw a right-aligned numeric value directly on the canvas with
         a manually built string, formatted independently of self.number()."""
+        if getattr(self, "_tracking_post_tc", False):
+            self._record_post_tc_extent(y)
         try:
             formatted = f"{float(value):,.{decimals}f}"
         except (ValueError, TypeError):
@@ -794,6 +823,8 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
                     )
                 except AttributeError:
                     pass
+                if getattr(self, "_tracking_post_tc", False):
+                    self._record_post_tc_extent(self._y - 2)
                 for i, h in enumerate(disp_h[:len(col_x) + 1]):
                     if i == len(disp_h) - 1:
                         self.text(amount_x, self._y, h, size=font_header,
@@ -894,6 +925,40 @@ class InvoiceOfSummaryRenderer(BaseRenderer):
         self._usage_draw_amount(amount_x, self._y, gt,
                                 decimals=3, size=font_grand_total, bold=True)
         self._y -= line_h * 2
+
+    def _draw_post_tc_vertical_dividers(self):
+        """Draw vertical divider lines at vert_line_x separating the two columns
+        for all content following Total Charges for the Period."""
+        if not getattr(self, "_post_tc_extents", None):
+            return
+
+        vert_x = USAGE_TABLE_2COL["vert_line_x"]
+        first_page_idx = getattr(self, "_tc_page_idx", None)
+        last_page_idx = self.page_count() - 1
+
+        if first_page_idx is None:
+            first_page_idx = min(self._post_tc_extents.keys(), default=0)
+
+        for idx in range(first_page_idx, last_page_idx + 1):
+            if idx not in self._post_tc_extents:
+                continue
+
+            c_idx = self.canvases[idx][1]
+            c_idx.setLineWidth(0.5)
+            c_idx.setStrokeColor(black)
+
+            if idx == first_page_idx and hasattr(self, "_tc_bottom_y"):
+                top_y = self._tc_bottom_y
+            else:
+                top_y = USAGE_TABLE_2COL.get("page_top", 770) + 2
+
+            bottom_y = self._post_tc_extents[idx]["bottom"] - 5
+            min_floor = (self.get_page1_y_min(CHARGES_TABLE["page1_y_min"])
+                         if idx == 0 else USAGE_TABLE_2COL.get("page_bottom", 50))
+            bottom_y = max(bottom_y, min_floor)
+
+            if top_y > bottom_y:
+                c_idx.line(vert_x, top_y, vert_x, bottom_y)
 
 
     def _stamp_all_page_indicators(self, data):

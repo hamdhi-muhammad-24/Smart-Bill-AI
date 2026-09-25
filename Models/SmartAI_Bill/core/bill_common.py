@@ -112,7 +112,16 @@ def decode_charge_flag(flag, start=None, end=None, count=None, unit=None,
 def is_vat_reg_printable(customer_vat_ref):
     if not customer_vat_ref:
         return False
-    return not customer_vat_ref.strip().upper().startswith('VATDL')
+    ref = str(customer_vat_ref).strip()
+    if not ref:
+        return False
+    cleaned = ref.upper().replace(" ", "").replace("-", "")
+    if cleaned.startswith("VATDL") or "VATDL" in cleaned:
+        return False
+    digits = [c for c in ref if c.isdigit()]
+    if not digits or all(c == "0" for c in digits):
+        return False
+    return True
 
 
 # BPR11/24: tax section printable check
